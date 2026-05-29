@@ -1,0 +1,16 @@
+[Unit]
+Description=Security Automation Go - Cloudflare Allowlist Sync
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+EnvironmentFile=/etc/security-automation-go/cf-allowlist-sync.env
+WorkingDirectory=/opt/security-automation-go
+ExecStart=/opt/security-automation-go/bin/cf-allowlist-sync
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

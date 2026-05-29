@@ -1,0 +1,42 @@
+[Unit]
+Description=Cloudflare to CrowdSec Reconciliation Daemon
+After=network.target crowdsec.service
+
+[Service]
+Type=simple
+# Security Hardening
+DynamicUser=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+DeviceAllow=/dev/null rw
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=yes
+RestrictRealtime=yes
+MemoryDenyWriteExecute=yes
+LockPersonality=yes
+
+# Paths
+StateDirectory=cf-sync
+RuntimeDirectory=cf-sync
+WorkingDirectory=/var/lib/cf-sync
+
+# Execution
+Environment=CF_API_TOKEN=
+Environment=CF_ZONE_ID=
+Environment=STATE_DIR=/var/lib/cf-sync
+ExecStart=/usr/local/bin/cf-sync -mode daemon -interval 1m
+
+# Reliability
+Restart=always
+RestartSec=30
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://security-automation-go.local/contracts/cloudflare.schema.json",
+  "title": "Cloudflare Adapter Contract",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "api_token",
+    "zone_id",
+    "dry_run"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "v1"
+    },
+    "api_token": {
+      "type": "string",
+      "minLength": 1
+    },
+    "zone_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "dry_run": {
+      "type": "boolean"
+    },
+    "reconcile_interval_seconds": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "quota_warning_percentages": {
+      "type": "array",
+      "items": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 100
+      }
+    }
+  }
+}

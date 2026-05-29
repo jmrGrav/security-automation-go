@@ -1,0 +1,14 @@
+{
+  "schema_version": "v1",
+  "sync_dir": "/run/crowdsec-lua",
+  "sync_file": "/run/crowdsec-lua/bans.json",
+  "events_file": "/run/crowdsec-lua/events.jsonl",
+  "fail_open": true,
+  "sync_interval_seconds": 5,
+  "heuristic_ttl_seconds": 7200,
+  "burst_window_seconds": 60,
+  "burst_threshold": 120,
+  "deadman_seconds": 120,
+  "max_tarpits": 20,
+  "memory_pressure_percent": 90
+}

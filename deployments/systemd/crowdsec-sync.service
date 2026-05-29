@@ -1,0 +1,18 @@
+[Unit]
+Description=Security Automation Go - CrowdSec Sync
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+EnvironmentFile=/etc/security-automation-go/crowdsec-sync.env
+WorkingDirectory=/opt/security-automation-go
+ExecStart=/opt/security-automation-go/bin/crowdsec-sync
+Restart=on-failure
+RestartSec=5s
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target
