@@ -17,7 +17,11 @@ type Client struct {
 }
 
 func New(token string, httpClient httpclient.Client) *Client {
-	t := transport.New(httpClient, token)
+	return NewWithTransport(token, httpClient, transport.New(httpClient, token))
+}
+
+// NewWithTransport creates a Client reusing an existing transport instance.
+func NewWithTransport(_ string, _ httpclient.Client, t *transport.Transport) *Client {
 	return &Client{
 		Discovery:  discovery.New(t),
 		Normalizer: normalize.New(),
