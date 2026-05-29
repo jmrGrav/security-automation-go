@@ -316,18 +316,36 @@ func (a *CrowdSecSyncApp) recordShadowCycle(ctx context.Context, logger *slog.Lo
 		logger.WarnContext(ctx, "shadow store append failed", "error", err)
 	}
 
-	// Prune records older than 30 days; keep ample data for the 7-day criterion.
+	// Prune records older than 30 days; 7-day criterion needs ≥ 7d of data.
 	_ = a.shadowStore.Prune(time.Now().UTC().Add(-30 * 24 * time.Hour))
 
-	// Regenerate report from last 7 days.
+	// Regenerate all three reports from the last 7 days of cycles.
 	if a.shadowReport != "" {
+		reportDir := filepath.Dir(a.shadowReport)
 		cycles, err := a.shadowStore.ReadSince(time.Now().UTC().Add(-7 * 24 * time.Hour))
 		if err == nil && len(cycles) > 0 {
+			isProtected := func(ip string) bool {
+				return a.shield != nil && a.shield.IsProtected(ip)
+			}
+			// SHADOW_MODE_REPORT.md — per-cycle agreement metrics
 			if err := shadow.WriteReport(a.shadowReport, cycles); err != nil {
 				logger.WarnContext(ctx, "shadow report write failed", "error", err)
-			} else {
-				logger.InfoContext(ctx, "shadow report updated", "path", a.shadowReport)
 			}
+			// SHADOW_DRIFT_ANALYSIS.md — drift classification and remediation list
+			driftPath := filepath.Join(reportDir, "SHADOW_DRIFT_ANALYSIS.md")
+			if err := shadow.WriteDriftAnalysis(driftPath, cycles, isProtected, nil); err != nil {
+				logger.WarnContext(ctx, "drift analysis write failed", "error", err)
+			}
+			// PYTHON_GO_PARITY_REPORT.md — feature gap cross-reference
+			parityPath := filepath.Join(reportDir, "PYTHON_GO_PARITY_REPORT.md")
+			if err := shadow.WriteParityReport(parityPath, cycles, isProtected, nil); err != nil {
+				logger.WarnContext(ctx, "parity report write failed", "error", err)
+			}
+			logger.InfoContext(ctx, "shadow reports updated",
+				"shadow", a.shadowReport,
+				"drift", driftPath,
+				"parity", parityPath,
+			)
 		}
 	}
 	return nil

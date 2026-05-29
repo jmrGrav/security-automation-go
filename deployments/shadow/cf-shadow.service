@@ -1,0 +1,41 @@
+[Unit]
+Description=CrowdSec-CF Shadow Validator — Go observes, Python remains authoritative
+Documentation=https://github.com/jmrGrav/security-automation-go
+After=network-online.target crowdsec.service
+Wants=network-online.target
+# Do NOT start before or alongside the real Python daemon in conflict mode.
+# Both run simultaneously: Python writes to CF, Go only reads and measures.
+
+[Service]
+Type=simple
+User=root
+Group=root
+EnvironmentFile=/etc/security-automation-go/cf-shadow.env
+WorkingDirectory=/opt/security-automation-go
+ExecStart=/opt/security-automation-go/bin/cf-shadow \
+    --config /etc/security-automation-go/cf-shadow.yaml \
+    --report-dir /var/lib/cf-sync/shadow
+
+# Shadow mode is read-only from CF's perspective — no sensitive mutations.
+# Still needs CF_API_TOKEN and CROWDSEC credentials for reads.
+Restart=on-failure
+RestartSec=10s
+RestartPreventExitStatus=2
+
+# Resource limits
+MemoryMax=128M
+CPUQuota=20%
+
+# Observability
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=cf-shadow
+
+# Safety: no new privileges, read-only root filesystem except state dir
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/cf-sync /var/log/crowdsec
+
+[Install]
+WantedBy=multi-user.target
