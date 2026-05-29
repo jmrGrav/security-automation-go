@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"path/filepath"
 	"time"
 
 	"github.com/jm/security-automation-go/internal/abuseipdb"
@@ -19,6 +20,8 @@ import (
 	"github.com/jm/security-automation-go/internal/modsecurity"
 	"github.com/jm/security-automation-go/internal/recidive"
 	"github.com/jm/security-automation-go/internal/scheduler"
+	"github.com/jm/security-automation-go/internal/security/protected"
+	"github.com/jm/security-automation-go/internal/shadow"
 	"github.com/jm/security-automation-go/internal/state"
 )
 
@@ -47,6 +50,14 @@ type CrowdSecSyncApp struct {
 	better      betterstack.IngestClient
 	modsec      modsecurity.Service
 	recidiv     recidive.Service
+
+	// Anti-self-ban shield (P0 safety).
+	shield *protected.Shield
+
+	// Shadow mode: compute plans but do not mutate Cloudflare.
+	shadowMode   bool
+	shadowStore  *shadow.Store
+	shadowReport string // path to SHADOW_MODE_REPORT.md
 }
 
 type AllowlistSyncApp struct {
@@ -74,16 +85,19 @@ func NewCrowdSecSyncApp(logger *slog.Logger, cfg *config.Config) *CrowdSecSyncAp
 	}
 
 	return &CrowdSecSyncApp{
-		logger:      logger,
-		cfg:         cfg,
-		store:       state.NewJSONStore(cfg.StateDir),
-		cf:          cfClient,
-		cs:          csClient,
-		csDecisions: csClient,
-		abuse:       abuse,
-		better:      betterstack.NewClient(httpClient, cfg.BetterStack.SourceToken, cfg.BetterStack.IngestingHost),
-		modsec:      modsecurity.NewService(modsecurity.Config{NginxLogDir: cfg.CrowdSec.NginxLogDir}),
-		recidiv:     recidive.NewService(recidive.Config{StateDir: cfg.StateDir}),
+		logger:       logger,
+		cfg:          cfg,
+		store:        state.NewJSONStore(cfg.StateDir),
+		cf:           cfClient,
+		cs:           csClient,
+		csDecisions:  csClient,
+		abuse:        abuse,
+		better:       betterstack.NewClient(httpClient, cfg.BetterStack.SourceToken, cfg.BetterStack.IngestingHost),
+		modsec:       modsecurity.NewService(modsecurity.Config{NginxLogDir: cfg.CrowdSec.NginxLogDir}),
+		recidiv:      recidive.NewService(recidive.Config{StateDir: cfg.StateDir}),
+		shield:       protected.New(),
+		shadowStore:  shadow.NewStore(cfg.StateDir),
+		shadowReport: filepath.Join(cfg.StateDir, "SHADOW_MODE_REPORT.md"),
 	}
 }
 
@@ -107,6 +121,16 @@ func NewCleanupApp(logger *slog.Logger, cfg *config.Config) *CleanupApp {
 		cf:     cfClient,
 		cs:     csClient,
 	}
+}
+
+// WithShadowMode enables shadow mode: Go computes plans but does not mutate CF.
+// The report path is where SHADOW_MODE_REPORT.md is written after each cycle.
+func (a *CrowdSecSyncApp) WithShadowMode(reportPath string) *CrowdSecSyncApp {
+	a.shadowMode = true
+	if reportPath != "" {
+		a.shadowReport = reportPath
+	}
+	return a
 }
 
 // ── CrowdSecSyncApp ───────────────────────────────────────────────────────────
@@ -159,11 +183,60 @@ func (a *CrowdSecSyncApp) Run(ctx context.Context) error {
 	return nil
 }
 
+// buildSyncPlan computes what Go would add/remove without executing anything.
+// Applies anti-self-ban (P0) filter identical to Python's is_protected().
+// Also applies allowlist filter when cs implements AllowlistManager.
+func (a *CrowdSecSyncApp) buildSyncPlan(
+	ctx context.Context,
+	activeBans []string,
+	cfRules map[string]string, // ip → ruleID
+) shadow.SyncPlan {
+	// Normalize IPs + apply anti-self-ban (P0) + allowlist filter.
+	banSet := make(map[string]bool, len(activeBans))
+	for _, ip := range activeBans {
+		parsed := net.ParseIP(ip)
+		if parsed == nil {
+			continue
+		}
+		norm := parsed.String()
+		if a.shield != nil && a.shield.IsProtected(norm) {
+			continue // P0: never ban protected ranges
+		}
+		banSet[norm] = true
+	}
+
+	cfSet := make(map[string]bool, len(cfRules))
+	for ip := range cfRules {
+		cfSet[ip] = true
+	}
+
+	var toAdd []string
+	for ip := range banSet {
+		if !cfSet[ip] {
+			toAdd = append(toAdd, ip)
+		}
+	}
+	var toDelete []string
+	for ip := range cfSet {
+		if !banSet[ip] {
+			toDelete = append(toDelete, ip)
+		}
+	}
+	return shadow.SyncPlan{
+		ActiveBans: banSet,
+		CFRules:    cfSet,
+		ToAdd:      toAdd,
+		ToDelete:   toDelete,
+	}
+}
+
 // syncCloudflare implements Python's sync_cloudflare():
 //   - Get active bans from CrowdSec (cscli decisions list)
+//   - Apply anti-self-ban filter (P0)
 //   - Get current CF rules tagged "crowdsec-local-ban"
 //   - Compute diff: to_add, to_delete
-//   - Apply mutations with rate-limit courtesy sleep
+//   - In shadow mode: log plan, compare vs CF state, update report — no mutations
+//   - In live mode: apply mutations with 100ms courtesy sleep
 func (a *CrowdSecSyncApp) syncCloudflare(ctx context.Context, logger *slog.Logger) error {
 	zoneID := a.cfg.Cloudflare.ZoneID
 
@@ -172,43 +245,28 @@ func (a *CrowdSecSyncApp) syncCloudflare(ctx context.Context, logger *slog.Logge
 		return fmt.Errorf("syncCloudflare: ListActiveBans: %w", err)
 	}
 
-	// Normalize IPs and build a set. Python: str(ipaddress.ip_address(ip)).
-	banSet := make(map[string]bool, len(activeBans))
-	for _, ip := range activeBans {
-		if parsed := net.ParseIP(ip); parsed != nil {
-			banSet[parsed.String()] = true
-		} else {
-			banSet[ip] = true
-		}
-	}
-
 	cfRules, err := a.cf.ListIPAccessRulesByTag(ctx, zoneID, NOTE_TAG)
 	if err != nil {
 		return fmt.Errorf("syncCloudflare: ListIPAccessRulesByTag: %w", err)
 	}
 
-	toAdd := make([]string, 0)
-	for ip := range banSet {
-		if _, blocked := cfRules[ip]; !blocked {
-			toAdd = append(toAdd, ip)
-		}
-	}
-	toDelete := make(map[string]string) // ip → ruleID
-	for ip, ruleID := range cfRules {
-		if !banSet[ip] {
-			toDelete[ip] = ruleID
-		}
-	}
+	plan := a.buildSyncPlan(ctx, activeBans, cfRules)
 
-	logger.InfoContext(ctx, "cf sync",
-		"active_bans", len(banSet),
-		"cf_rules", len(cfRules),
-		"to_add", len(toAdd),
-		"to_delete", len(toDelete),
+	logger.InfoContext(ctx, "cf sync plan",
+		"shadow_mode", a.shadowMode,
+		"active_bans", len(plan.ActiveBans),
+		"cf_rules", len(plan.CFRules),
+		"to_add", len(plan.ToAdd),
+		"to_delete", len(plan.ToDelete),
 	)
 
+	if a.shadowMode {
+		return a.recordShadowCycle(ctx, logger, plan)
+	}
+
+	// Live mode: apply mutations.
 	added, deleted := 0, 0
-	for _, ip := range toAdd {
+	for _, ip := range plan.ToAdd {
 		if _, err := a.cf.AddIPAccessRule(ctx, zoneID, ip, NOTE_TAG, "ip"); err != nil {
 			logger.WarnContext(ctx, "cf add rule failed", "ip", ip, "error", err)
 			continue
@@ -217,7 +275,8 @@ func (a *CrowdSecSyncApp) syncCloudflare(ctx context.Context, logger *slog.Logge
 		added++
 		time.Sleep(100 * time.Millisecond) // Python: time.sleep(0.1)
 	}
-	for ip, ruleID := range toDelete {
+	for _, ip := range plan.ToDelete {
+		ruleID := cfRules[ip]
 		if err := a.cf.DeleteIPAccessRule(ctx, zoneID, ruleID); err != nil {
 			logger.WarnContext(ctx, "cf delete rule failed", "ip", ip, "error", err)
 			continue
@@ -231,6 +290,54 @@ func (a *CrowdSecSyncApp) syncCloudflare(ctx context.Context, logger *slog.Logge
 		logger.InfoContext(ctx, "cf sync complete", "added", added, "deleted", deleted)
 	}
 	return nil
+}
+
+// recordShadowCycle records one shadow comparison cycle and regenerates the report.
+// Python remains authoritative; Go only observes and measures plan equivalence.
+func (a *CrowdSecSyncApp) recordShadowCycle(ctx context.Context, logger *slog.Logger, plan shadow.SyncPlan) error {
+	cycle := shadow.Compare(plan, time.Now().UTC())
+
+	logger.InfoContext(ctx, "shadow cycle",
+		"agreement_pct", fmt.Sprintf("%.2f%%", cycle.AgreementPct),
+		"in_sync", cycle.InSync,
+		"false_positives", len(cycle.FalsePositives),
+		"false_negatives", len(cycle.FalseNegatives),
+	)
+
+	if !cycle.InSync {
+		logger.WarnContext(ctx, "shadow drift detected",
+			"drift", cycle.DriftExplanation,
+			"to_add", cycle.PlannedAdds[:min(len(cycle.PlannedAdds), 5)],
+			"to_delete", cycle.PlannedDeletes[:min(len(cycle.PlannedDeletes), 5)],
+		)
+	}
+
+	if err := a.shadowStore.Append(cycle); err != nil {
+		logger.WarnContext(ctx, "shadow store append failed", "error", err)
+	}
+
+	// Prune records older than 30 days; keep ample data for the 7-day criterion.
+	_ = a.shadowStore.Prune(time.Now().UTC().Add(-30 * 24 * time.Hour))
+
+	// Regenerate report from last 7 days.
+	if a.shadowReport != "" {
+		cycles, err := a.shadowStore.ReadSince(time.Now().UTC().Add(-7 * 24 * time.Hour))
+		if err == nil && len(cycles) > 0 {
+			if err := shadow.WriteReport(a.shadowReport, cycles); err != nil {
+				logger.WarnContext(ctx, "shadow report write failed", "error", err)
+			} else {
+				logger.InfoContext(ctx, "shadow report updated", "path", a.shadowReport)
+			}
+		}
+	}
+	return nil
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 // ── AllowlistSyncApp ──────────────────────────────────────────────────────────
