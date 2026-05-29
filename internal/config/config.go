@@ -56,9 +56,12 @@ type CloudflareConfig struct {
 }
 
 type CrowdSecConfig struct {
-	APIKey       string `yaml:"api_key"`
-	DecisionsLog string `yaml:"decisions_log"`
-	NginxLogDir  string `yaml:"nginx_log_dir"`
+	APIKey        string        `yaml:"api_key"`
+	DecisionsLog  string        `yaml:"decisions_log"`
+	NginxLogDir   string        `yaml:"nginx_log_dir"`
+	BinPath       string        `yaml:"bin_path"`       // cscli binary path; default "cscli"
+	Timeout       time.Duration `yaml:"timeout"`        // per-command timeout; default 15s
+	AllowlistName string        `yaml:"allowlist_name"` // CrowdSec allowlist name; default "my_allowlist"
 }
 
 type OpenRestyConfig struct {
@@ -140,8 +143,11 @@ func DefaultConfig() *Config {
 			RequestTimeout: 2 * time.Second,
 		},
 		CrowdSec: CrowdSecConfig{
-			DecisionsLog: "/var/log/crowdsec/decisions.log",
-			NginxLogDir:  "/var/log/nginx",
+			DecisionsLog:  "/var/log/crowdsec/decisions.log",
+			NginxLogDir:   "/var/log/nginx",
+			BinPath:       "cscli",
+			Timeout:       15 * time.Second,
+			AllowlistName: "my_allowlist",
 		},
 		OpenResty: OpenRestyConfig{
 			EventsFile: "/run/crowdsec-lua/events.jsonl",
