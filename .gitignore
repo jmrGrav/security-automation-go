@@ -9,6 +9,8 @@
 !*.env.example
 .env.*
 !.env.example
+# Test fixtures use placeholder-only .env files and must be tracked
+!internal/compat/python36/testdata/*.env
 
 # Runtime state / data
 *.db
@@ -16,7 +18,9 @@
 *.sqlite-shm
 *.sqlite-wal
 /var/
-state/
+# Generated runtime state dir at repo root only — anchored so it never
+# matches Go source packages such as internal/state or internal/runtime/state
+/state/
 *.state.json
 
 # Coverage / profiling
