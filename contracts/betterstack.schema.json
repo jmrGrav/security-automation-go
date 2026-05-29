@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://security-automation-go.local/contracts/betterstack.schema.json",
+  "title": "Better Stack Adapter Contract",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "enabled"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "v1"
+    },
+    "enabled": {
+      "type": "boolean"
+    },
+    "token": {
+      "type": "string"
+    },
+    "ingest_url": {
+      "type": "string",
+      "format": "uri"
+    },
+    "source_name": {
+      "type": "string"
+    }
+  }
+}

@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://security-automation-go.local/contracts/crowdsec.schema.json",
+  "title": "CrowdSec Adapter Contract",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "api_key",
+    "decisions_log"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "v1"
+    },
+    "api_key": {
+      "type": "string"
+    },
+    "decisions_log": {
+      "type": "string",
+      "minLength": 1
+    },
+    "local_origins": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "min_confidence": {
+      "type": "string",
+      "enum": [
+        "low",
+        "medium",
+        "high"
+      ]
+    }
+  }
+}

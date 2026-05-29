@@ -1,0 +1,12 @@
+# Default owner for everything in this repository.
+* @jmrGrav
+
+# Security-sensitive boundaries — require owner review on any change.
+/internal/cloudflare/      @jmrGrav
+/internal/crowdsec/        @jmrGrav
+/internal/abuseipdb/       @jmrGrav
+/internal/rollback/        @jmrGrav
+/internal/runtime/         @jmrGrav
+/internal/policy/          @jmrGrav
+/deployments/              @jmrGrav
+/.github/                  @jmrGrav
