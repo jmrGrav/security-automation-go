@@ -42,12 +42,24 @@ type Zone struct {
 }
 
 // IPAccessRule represents an IP Access Rule (Firewall -> Tools).
+// All fields present in CF API responses are included to satisfy DecodeStrict.
 type IPAccessRule struct {
 	ID            string            `json:"id"`
 	Mode          string            `json:"mode"`
 	Notes         string            `json:"notes"`
 	AllowedModes  []string          `json:"allowed_modes"`
 	Configuration RuleConfiguration `json:"configuration"`
+	Paused        bool              `json:"paused"`
+	CreatedOn     time.Time         `json:"created_on"`
+	ModifiedOn    time.Time         `json:"modified_on"`
+	Scope         *RuleScope        `json:"scope,omitempty"`
+}
+
+// RuleScope describes which CF entity (zone or account) a rule belongs to.
+type RuleScope struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	Type string `json:"type"`
 }
 
 type RuleConfiguration struct {

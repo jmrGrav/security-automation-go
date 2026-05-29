@@ -1,52 +1,65 @@
 # Shadow Mode Validation Report
 
-**Status:** PENDING — awaiting deployment on production host
-
-This file will be overwritten by `cf-shadow` after each cycle once deployed.
-The live version is written to `$STATE_DIR/shadow/SHADOW_MODE_REPORT.md`.
-
----
-
-## Deployment Checklist
-
-| Step | Command | Status |
-|---|---|---|
-| Build binary | `go build -o bin/cf-shadow ./cmd/cf-shadow/` | ☐ |
-| Install on host | `sudo ./deployments/shadow/install-shadow.sh` | ☐ |
-| Configure env | Edit `/etc/security-automation-go/cf-shadow.env` | ☐ |
-| Start service | `systemctl enable --now cf-shadow` | ☐ |
-| Verify first cycle | `journalctl -u cf-shadow -n 50` | ☐ |
-| Monitor reports | `watch -n 60 cat /var/lib/cf-sync/shadow/SHADOW_MODE_REPORT.md` | ☐ |
-| 7-day baseline | Wait for `SevenDayEligible: true` in report | ☐ |
+**Generated:** 2026-05-29T21:11:20Z  
+**Cycles recorded:** 29  
+**Data span:** 28m0s  
 
 ---
+
+## Current Status
+
+**Status:** ✅ IN SYNC  
+**Last cycle:** 2026-05-29T21:11:20Z  
+**Active bans:** 2  
+**CF rules:** 2  
+**Agreement:** 100.00%  
 
 ## Success Criterion
 
-≥ 99.9% average agreement over 7 consecutive days of shadow execution.
+| Criterion | Target | Current | Status |
+|---|---|---|---|
+| 7-day agreement | ≥99.9% | 100.00% | ⏳ Collecting data |
+| All-time average | ≥99.9% | 100.00% | ✅ PASS |
+| Consecutive in-sync | max streak | 29 cycles | — |
 
-Once met, the report will display:
+## Aggregate Metrics
 
-> **GO — Ready for controlled authority.**
-
----
-
-## Reports Generated Per Cycle
-
-| File | Purpose |
+| Metric | Value |
 |---|---|
-| `SHADOW_MODE_REPORT.md` | Per-cycle Jaccard agreement, false pos/neg, migration readiness |
-| `SHADOW_DRIFT_ANALYSIS.md` | Each divergent IP classified + remediation list by risk |
-| `PYTHON_GO_PARITY_REPORT.md` | Feature gap cross-reference with observed drift quantification |
+| Total cycles | 29 |
+| In-sync cycles | 29 (100.0%) |
+| Average agreement | 100.00% |
+| Minimum agreement | 100.00% |
+| Total false positives | 0 |
+| Total false negatives | 0 |
 
----
+## Recent Cycles
 
-## Known Expected Drift (Before Fixes)
+| Timestamp | Active Bans | CF Rules | Agreement | To Add | To Delete | In Sync |
+|---|---|---|---|---|---|---|
+| 2026-05-29 20:52:20 | 2 | 2 | 100.0% | 0 | 0 | ✅ |
+| 2026-05-29 20:53:21 | 2 | 2 | 100.0% | 0 | 0 | ✅ |
+| 2026-05-29 20:54:21 | 2 | 2 | 100.0% | 0 | 0 | ✅ |
+| 2026-05-29 20:55:20 | 2 | 2 | 100.0% | 0 | 0 | ✅ |
+| 2026-05-29 20:56:20 | 2 | 2 | 100.0% | 0 | 0 | ✅ |
+| 2026-05-29 20:57:20 | 2 | 2 | 100.0% | 0 | 0 | ✅ |
+| 2026-05-29 20:58:20 | 2 | 2 | 100.0% | 0 | 0 | ✅ |
+| 2026-05-29 20:59:20 | 2 | 2 | 100.0% | 0 | 0 | ✅ |
+| 2026-05-29 21:00:20 | 2 | 2 | 100.0% | 0 | 0 | ✅ |
+| 2026-05-29 21:01:20 | 2 | 2 | 100.0% | 0 | 0 | ✅ |
+| 2026-05-29 21:02:20 | 2 | 2 | 100.0% | 0 | 0 | ✅ |
+| 2026-05-29 21:03:20 | 2 | 2 | 100.0% | 0 | 0 | ✅ |
+| 2026-05-29 21:04:20 | 2 | 2 | 100.0% | 0 | 0 | ✅ |
+| 2026-05-29 21:05:21 | 2 | 2 | 100.0% | 0 | 0 | ✅ |
+| 2026-05-29 21:06:20 | 2 | 2 | 100.0% | 0 | 0 | ✅ |
+| 2026-05-29 21:07:20 | 2 | 2 | 100.0% | 0 | 0 | ✅ |
+| 2026-05-29 21:08:20 | 2 | 2 | 100.0% | 0 | 0 | ✅ |
+| 2026-05-29 21:09:21 | 2 | 2 | 100.0% | 0 | 0 | ✅ |
+| 2026-05-29 21:10:20 | 2 | 2 | 100.0% | 0 | 0 | ✅ |
+| 2026-05-29 21:11:20 | 2 | 2 | 100.0% | 0 | 0 | ✅ |
 
-| Class | Expected Count | Reason |
-|---|---|---|
-| Allowlist filter | Some | Go enforcement loop doesn't check CS allowlist yet |
-| Confidence gate | Some | CF_MIN_CONFIDENCE gate not ported to Go |
-| ModSec/CIDR rules | Some | Python adds via separate tags (modsec-ban, crowdsec-cidr-ban) |
-| Timing | Some | 60s cycle offset between Python and Go |
-| Protected IP | **0** | Anti-self-ban wired — any occurrence is a P0 bug |
+## Migration Readiness
+
+**PENDING — Collecting 7-day baseline.**  
+Approximately 168h0m0s remaining before eligibility.
+
