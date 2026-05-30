@@ -12,6 +12,7 @@ import (
 	"github.com/jm/security-automation-go/internal/abuseipdb"
 	"github.com/jm/security-automation-go/internal/apperr"
 	"github.com/jm/security-automation-go/internal/betterstack"
+	"github.com/jm/security-automation-go/internal/cidrban"
 	"github.com/jm/security-automation-go/internal/cloudflare"
 	"github.com/jm/security-automation-go/internal/config"
 	"github.com/jm/security-automation-go/internal/crowdsec"
@@ -50,6 +51,7 @@ type CrowdSecSyncApp struct {
 	better      betterstack.IngestClient
 	modsec      modsecurity.Service
 	recidiv     recidive.Service
+	cidr        cidrban.Service
 
 	// Anti-self-ban shield (P0 safety).
 	shield *protected.Shield
@@ -58,6 +60,33 @@ type CrowdSecSyncApp struct {
 	shadowMode   bool
 	shadowStore  *shadow.Store
 	shadowReport string // path to SHADOW_MODE_REPORT.md
+}
+
+// cidrBanSourceAdapter adapts crowdsec.ActiveBanSource → cidrban.RecentBanSource.
+//
+// It also applies the anti-self-ban shield so that protected IPs (RFC1918,
+// Cloudflare ranges, host own IPs) are never counted toward the /24 threshold.
+// This mirrors Python's sync_cidr_bans() which calls is_protected() before
+// grouping IPs, preserving constraint #3 on this newly-live mutation path.
+type cidrBanSourceAdapter struct {
+	src    crowdsec.ActiveBanSource
+	shield *protected.Shield
+}
+
+func (a *cidrBanSourceAdapter) ListRecentBans(ctx context.Context) ([]cidrban.Ban, error) {
+	bans, err := a.src.ListRecentBans(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]cidrban.Ban, 0, len(bans))
+	for _, b := range bans {
+		// Shield check: never count a protected IP toward the /24 threshold.
+		if a.shield != nil && a.shield.IsProtected(b.IP) {
+			continue
+		}
+		out = append(out, cidrban.Ban{IP: b.IP, When: b.When})
+	}
+	return out, nil
 }
 
 type AllowlistSyncApp struct {
@@ -84,18 +113,29 @@ func NewCrowdSecSyncApp(logger *slog.Logger, cfg *config.Config) *CrowdSecSyncAp
 		abuse = abuseipdb.NewClient(cfg.AbuseIPDB.APIKey, httpClient)
 	}
 
+	shield := protected.New()
+
 	return &CrowdSecSyncApp{
-		logger:       logger,
-		cfg:          cfg,
-		store:        state.NewJSONStore(cfg.StateDir),
-		cf:           cfClient,
-		cs:           csClient,
-		csDecisions:  csClient,
-		abuse:        abuse,
-		better:       betterstack.NewClient(httpClient, cfg.BetterStack.SourceToken, cfg.BetterStack.IngestingHost),
-		modsec:       modsecurity.NewService(modsecurity.Config{NginxLogDir: cfg.CrowdSec.NginxLogDir}),
-		recidiv:      recidive.NewService(recidive.Config{StateDir: cfg.StateDir}),
-		shield:       protected.New(),
+		logger:      logger,
+		cfg:         cfg,
+		store:       state.NewJSONStore(cfg.StateDir),
+		cf:          cfClient,
+		cs:          csClient,
+		csDecisions: csClient,
+		abuse:       abuse,
+		better:      betterstack.NewClient(httpClient, cfg.BetterStack.SourceToken, cfg.BetterStack.IngestingHost),
+		modsec:      modsecurity.NewService(modsecurity.Config{NginxLogDir: cfg.CrowdSec.NginxLogDir}),
+		recidiv:     recidive.NewService(recidive.Config{StateDir: cfg.StateDir}),
+		cidr: cidrban.NewService(cidrban.Config{
+			StateDir:      cfg.StateDir,
+			BanSource:     &cidrBanSourceAdapter{src: csClient, shield: shield},
+			CFBanner:      cfClient,
+			CFRuleGetter:  cfClient,
+			CFDeleter:     cfClient,
+			CSRangeBanner: csClient,
+			ZoneID:        cfg.Cloudflare.ZoneID,
+		}),
+		shield:       shield,
 		shadowStore:  shadow.NewStore(cfg.StateDir),
 		shadowReport: filepath.Join(cfg.StateDir, "SHADOW_MODE_REPORT.md"),
 	}
@@ -163,6 +203,14 @@ func (a *CrowdSecSyncApp) Run(ctx context.Context) error {
 		}
 
 		// Subsidiary enforcement features.
+		// cidrban is suppressed in shadow mode: it calls AddIPAccessRule (CF mutation)
+		// which would break the "Go does not mutate Cloudflare" invariant of shadow mode.
+		// recidiv and modsec are currently no-ops (nil deps) so they are not guarded.
+		if !a.shadowMode {
+			if err := a.cidr.Run(runCtx); err != nil && !errors.Is(err, context.Canceled) {
+				l.WarnContext(runCtx, "cidr ban sync failed (non-fatal)", "error", err)
+			}
+		}
 		if err := a.recidiv.Run(runCtx); err != nil && !errors.Is(err, context.Canceled) {
 			l.WarnContext(runCtx, "recidive sync failed (non-fatal)", "error", err)
 		}
