@@ -2,14 +2,17 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net"
+	"os"
 	"path/filepath"
 	"time"
 
 	"github.com/jm/security-automation-go/internal/abuseipdb"
+	cloudflareevent "github.com/jm/security-automation-go/internal/adapters/cloudflareevent"
 	"github.com/jm/security-automation-go/internal/apperr"
 	"github.com/jm/security-automation-go/internal/betterstack"
 	"github.com/jm/security-automation-go/internal/cidrban"
@@ -19,7 +22,7 @@ import (
 	csmodels "github.com/jm/security-automation-go/internal/crowdsec/models"
 	"github.com/jm/security-automation-go/internal/httpclient"
 	"github.com/jm/security-automation-go/internal/logging"
-	"github.com/jm/security-automation-go/internal/modsecurity"
+	luastate "github.com/jm/security-automation-go/internal/openresty/state"
 	"github.com/jm/security-automation-go/internal/recidive"
 	"github.com/jm/security-automation-go/internal/scheduler"
 	"github.com/jm/security-automation-go/internal/security/protected"
@@ -33,9 +36,6 @@ const NOTE_TAG = "crowdsec-local-ban"
 
 // NOTE_TAG_CIDR is the notes tag for automatic /24 CIDR bans.
 const NOTE_TAG_CIDR = "crowdsec-cidr-ban"
-
-// NOTE_TAG_MODSEC is the notes tag for ModSecurity-triggered bans.
-const NOTE_TAG_MODSEC = "modsec-ban"
 
 type Runner interface {
 	Run(ctx context.Context) error
@@ -51,7 +51,6 @@ type CrowdSecSyncApp struct {
 	csAllowlist crowdsec.AllowlistManager // for per-cycle allowlist fetch
 	abuse       *abuseipdb.Client
 	better      betterstack.IngestClient
-	modsec      modsecurity.Service
 	recidiv     recidive.Service
 	cidr        cidrban.Service
 
@@ -62,6 +61,9 @@ type CrowdSecSyncApp struct {
 	shadowMode   bool
 	shadowStore  *shadow.Store
 	shadowReport string // path to SHADOW_MODE_REPORT.md
+
+	// luaWriter publishes bans.json for the OpenResty Lua bouncer (optional).
+	luaWriter *luastate.Writer
 }
 
 // ── allowlistSet ─────────────────────────────────────────────────────────────
@@ -131,6 +133,79 @@ func (a *CrowdSecSyncApp) fetchAllowlist(ctx context.Context) *allowlistSet {
 	return newAllowlistSet(entries)
 }
 
+// newLuaWriter creates a luastate.Writer from config, or nil if push is disabled.
+func newLuaWriter(cfg *config.Config) *luastate.Writer {
+	if !cfg.OpenResty.LuaStatePushEnable {
+		return nil
+	}
+	hostname, _ := os.Hostname()
+	return luastate.New(luastate.Config{
+		Path:       cfg.OpenResty.LuaStatePath,
+		ShadowPath: cfg.OpenResty.ShadowLuaStatePath,
+		Hostname:   hostname,
+		PID:        os.Getpid(),
+	})
+}
+
+// pushLuaState writes bans.json for the OpenResty Lua bouncer.
+// Source: active CrowdSec bans + active CIDR bans from cidrban state.
+// Applies shield + allowlist filters. Skipped if luaWriter is nil.
+func (a *CrowdSecSyncApp) pushLuaState(ctx context.Context, logger *slog.Logger) {
+	if a.luaWriter == nil {
+		return
+	}
+
+	bans, err := a.cs.ListActiveBans(ctx)
+	if err != nil {
+		logger.WarnContext(ctx, "lua state push: ListActiveBans failed (skip)", "error", err)
+		return
+	}
+
+	// Load allowlist for the filter.
+	allowlist := a.fetchAllowlist(ctx)
+	filter := luastate.FilterFunc(func(ip string) bool {
+		if a.shield != nil && a.shield.IsProtected(ip) {
+			return true
+		}
+		return allowlist.contains(ip)
+	})
+
+	// Read active CIDR bans from cidrban state file.
+	cidrs := loadActiveCIDRs(a.cfg.StateDir)
+
+	if err := a.luaWriter.Write(ctx, bans, cidrs, filter); err != nil {
+		logger.WarnContext(ctx, "lua state push failed (non-fatal)", "error", err)
+	}
+}
+
+// loadActiveCIDRs reads the cidrban state file and returns non-expired /24 entries.
+func loadActiveCIDRs(stateDir string) []string {
+	data, err := os.ReadFile(filepath.Join(stateDir, "cidr-banned.json"))
+	if err != nil {
+		return nil
+	}
+	var m map[string]struct {
+		BannedAt string `json:"banned_at"`
+		IPCount  int    `json:"ip_count"`
+	}
+	if err := json.Unmarshal(data, &m); err != nil {
+		return nil
+	}
+	expiry := 24 * time.Hour
+	now := time.Now().UTC()
+	var cidrs []string
+	for cidr, entry := range m {
+		t, err := time.Parse(time.RFC3339Nano, entry.BannedAt)
+		if err != nil {
+			t, err = time.Parse(time.RFC3339, entry.BannedAt)
+		}
+		if err == nil && now.Sub(t.UTC()) < expiry {
+			cidrs = append(cidrs, cidr)
+		}
+	}
+	return cidrs
+}
+
 // cidrBanSourceAdapter adapts crowdsec.ActiveBanSource → cidrban.RecentBanSource.
 //
 // Applies both the anti-self-ban shield and the CrowdSec allowlist filter,
@@ -172,6 +247,42 @@ func (a *cidrBanSourceAdapter) ListRecentBans(ctx context.Context) ([]cidrban.Ba
 	return out, nil
 }
 
+// recidiveBanSourceAdapter adapts crowdsec.ActiveBanSource → recidive.RecentBanSource.
+// Applies shield and allowlist filters identically to cidrBanSourceAdapter so that
+// the same protections apply to recidive tracking as to CIDR aggregation.
+// crowdsec.Client.ListRecentBans() already filters by LOCAL_ORIGINS; no extra origin filter needed.
+type recidiveBanSourceAdapter struct {
+	src           crowdsec.ActiveBanSource
+	shield        *protected.Shield
+	csAllowlist   crowdsec.AllowlistManager
+	allowlistName string
+}
+
+func (a *recidiveBanSourceAdapter) ListRecentBans(ctx context.Context) ([]recidive.Ban, error) {
+	bans, err := a.src.ListRecentBans(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var al *allowlistSet
+	if a.csAllowlist != nil {
+		entries, alErr := a.csAllowlist.ListAllowlist(ctx, a.allowlistName)
+		if alErr == nil {
+			al = newAllowlistSet(entries)
+		}
+	}
+	out := make([]recidive.Ban, 0, len(bans))
+	for _, b := range bans {
+		if a.shield != nil && a.shield.IsProtected(b.IP) {
+			continue
+		}
+		if al.contains(b.IP) {
+			continue
+		}
+		out = append(out, recidive.Ban{IP: b.IP, Scenario: b.Scenario, When: b.When, ID: b.ID})
+	}
+	return out, nil
+}
+
 type AllowlistSyncApp struct {
 	logger *slog.Logger
 	cfg    *config.Config
@@ -208,8 +319,16 @@ func NewCrowdSecSyncApp(logger *slog.Logger, cfg *config.Config) *CrowdSecSyncAp
 		csAllowlist: csClient,
 		abuse:       abuse,
 		better:      betterstack.NewClient(httpClient, cfg.BetterStack.SourceToken, cfg.BetterStack.IngestingHost),
-		modsec:      modsecurity.NewService(modsecurity.Config{NginxLogDir: cfg.CrowdSec.NginxLogDir}),
-		recidiv:     recidive.NewService(recidive.Config{StateDir: cfg.StateDir}),
+		recidiv: recidive.NewService(recidive.Config{
+			StateDir: cfg.StateDir,
+			BanSource: &recidiveBanSourceAdapter{
+				src:           csClient,
+				shield:        shield,
+				csAllowlist:   csClient,
+				allowlistName: cfg.CrowdSec.AllowlistName,
+			},
+			Escalator: csClient,
+		}),
 		cidr: cidrban.NewService(cidrban.Config{
 			StateDir: cfg.StateDir,
 			BanSource: &cidrBanSourceAdapter{
@@ -227,6 +346,7 @@ func NewCrowdSecSyncApp(logger *slog.Logger, cfg *config.Config) *CrowdSecSyncAp
 		shield:       shield,
 		shadowStore:  shadow.NewStore(cfg.StateDir),
 		shadowReport: filepath.Join(cfg.StateDir, "SHADOW_MODE_REPORT.md"),
+		luaWriter:    newLuaWriter(cfg),
 	}
 }
 
@@ -276,6 +396,17 @@ func (a *CrowdSecSyncApp) Run(ctx context.Context) error {
 	wafRuntime := newWAFReportingRuntime(ctx, logger, a.cfg, a.abuse, a.better)
 	defer wafRuntime.close()
 
+	// WAF replay: optional. Active when CF source and AbuseIPDB are both available
+	// and SQLite cursor store is initialised. Suppressed in shadow mode.
+	if !a.shadowMode && wafRuntime != nil && wafRuntime.cursorStore != nil && wafRuntime.service != nil {
+		if wafSource, ok := a.cf.(cloudflareevent.Source); ok {
+			wafSvc := cloudflareevent.NewService(wafSource, wafRuntime.service)
+			wafRuntime.startWAFReplay(ctx, logger, wafSvc, wafRuntime.cursorStore,
+				a.cfg.Cloudflare.ZoneID, a.cfg.Interval)
+			logger.InfoContext(ctx, "cloudflare waf replay started", "interval", a.cfg.Interval)
+		}
+	}
+
 	runner := &scheduler.IntervalRunner{
 		Name:     "crowdsec-sync",
 		Interval: a.cfg.Interval,
@@ -300,17 +431,21 @@ func (a *CrowdSecSyncApp) Run(ctx context.Context) error {
 				l.WarnContext(runCtx, "cidr ban sync failed (non-fatal)", "error", err)
 			}
 		}
-		if err := a.recidiv.Run(runCtx); err != nil && !errors.Is(err, context.Canceled) {
-			l.WarnContext(runCtx, "recidive sync failed (non-fatal)", "error", err)
-		}
-		if err := a.modsec.Run(runCtx); err != nil && !errors.Is(err, context.Canceled) {
-			l.WarnContext(runCtx, "modsec sync failed (non-fatal)", "error", err)
+		if !a.shadowMode {
+			if err := a.recidiv.Run(runCtx); err != nil && !errors.Is(err, context.Canceled) {
+				l.WarnContext(runCtx, "recidive sync failed (non-fatal)", "error", err)
+			}
 		}
 
 		// AbuseIPDB reporting pipeline (CrowdSec events, OpenResty, outbox).
 		wafRuntime.processCrowdSec(runCtx, l)
 		wafRuntime.processOpenResty(runCtx, l)
 		wafRuntime.processOutbox(runCtx, l)
+
+		// Lua/OpenResty state push (optional; suppressed in shadow mode).
+		if !a.shadowMode {
+			a.pushLuaState(runCtx, l)
+		}
 		return nil
 	})
 

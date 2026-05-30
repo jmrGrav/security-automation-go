@@ -65,7 +65,10 @@ type CrowdSecConfig struct {
 }
 
 type OpenRestyConfig struct {
-	EventsFile string `yaml:"events_file"`
+	EventsFile         string `yaml:"events_file"`
+	LuaStatePath       string `yaml:"lua_state_path"`         // default: /run/crowdsec-lua/bans.json
+	LuaStatePushEnable bool   `yaml:"lua_state_push_enabled"` // default: false (opt-in)
+	ShadowLuaStatePath string `yaml:"shadow_lua_state_path"`  // write path when shadow mode
 }
 
 type AbuseIPDBConfig struct {
