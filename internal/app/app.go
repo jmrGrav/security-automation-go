@@ -16,6 +16,7 @@ import (
 	"github.com/jm/security-automation-go/internal/cloudflare"
 	"github.com/jm/security-automation-go/internal/config"
 	"github.com/jm/security-automation-go/internal/crowdsec"
+	csmodels "github.com/jm/security-automation-go/internal/crowdsec/models"
 	"github.com/jm/security-automation-go/internal/httpclient"
 	"github.com/jm/security-automation-go/internal/logging"
 	"github.com/jm/security-automation-go/internal/modsecurity"
@@ -47,6 +48,7 @@ type CrowdSecSyncApp struct {
 	cf          cloudflare.EnforcementClient
 	cs          crowdsec.ActiveBanSource
 	csDecisions crowdsec.DecisionManager
+	csAllowlist crowdsec.AllowlistManager // for per-cycle allowlist fetch
 	abuse       *abuseipdb.Client
 	better      betterstack.IngestClient
 	modsec      modsecurity.Service
@@ -62,15 +64,83 @@ type CrowdSecSyncApp struct {
 	shadowReport string // path to SHADOW_MODE_REPORT.md
 }
 
+// ── allowlistSet ─────────────────────────────────────────────────────────────
+
+// allowlistSet is a compiled view of the CrowdSec allowlist for fast lookup.
+// Mirrors Python's is_allowlisted(): direct IP match, then CIDR coverage.
+type allowlistSet struct {
+	ips  map[string]bool // normalized IP string → bool
+	nets []*net.IPNet    // CIDR entries from the allowlist
+}
+
+func newAllowlistSet(entries []csmodels.AllowlistEntry) *allowlistSet {
+	s := &allowlistSet{ips: make(map[string]bool)}
+	for _, e := range entries {
+		if ip := net.ParseIP(e.Value); ip != nil {
+			s.ips[ip.String()] = true
+		} else if _, cidr, err := net.ParseCIDR(e.Value); err == nil {
+			s.nets = append(s.nets, cidr)
+		}
+	}
+	return s
+}
+
+// contains mirrors Python's is_allowlisted(): direct IP match then CIDR coverage.
+// Returns false if ipStr is not a valid IP (Python: except ValueError: pass).
+func (s *allowlistSet) contains(ipStr string) bool {
+	if s == nil {
+		return false
+	}
+	ip := net.ParseIP(ipStr)
+	if ip == nil {
+		return false
+	}
+	if s.ips[ip.String()] {
+		return true
+	}
+	for _, cidr := range s.nets {
+		if cidr.Contains(ip) {
+			return true
+		}
+	}
+	return false
+}
+
+// asMap returns the direct-IP entries as a map[string]bool for the drift classifier.
+// CIDR-allowlisted IPs that appear as drift strings are not expanded here.
+func (s *allowlistSet) asMap() map[string]bool {
+	if s == nil {
+		return nil
+	}
+	return s.ips
+}
+
+// fetchAllowlist retrieves the CrowdSec allowlist for the current cycle.
+// Fail-open on error: returns nil (no filter applied), matching Python's
+// circuit-breaker behavior which returns set() on failure.
+func (a *CrowdSecSyncApp) fetchAllowlist(ctx context.Context) *allowlistSet {
+	if a.csAllowlist == nil {
+		return nil
+	}
+	entries, err := a.csAllowlist.ListAllowlist(ctx, a.cfg.CrowdSec.AllowlistName)
+	if err != nil {
+		a.logger.WarnContext(ctx, "allowlist fetch failed (fail-open)",
+			"name", a.cfg.CrowdSec.AllowlistName, "error", err)
+		return nil
+	}
+	return newAllowlistSet(entries)
+}
+
 // cidrBanSourceAdapter adapts crowdsec.ActiveBanSource → cidrban.RecentBanSource.
 //
-// It also applies the anti-self-ban shield so that protected IPs (RFC1918,
-// Cloudflare ranges, host own IPs) are never counted toward the /24 threshold.
-// This mirrors Python's sync_cidr_bans() which calls is_protected() before
-// grouping IPs, preserving constraint #3 on this newly-live mutation path.
+// Applies both the anti-self-ban shield and the CrowdSec allowlist filter,
+// mirroring Python's sync_cidr_bans() which calls is_protected() and
+// is_allowlisted() before grouping IPs by /24.
 type cidrBanSourceAdapter struct {
-	src    crowdsec.ActiveBanSource
-	shield *protected.Shield
+	src           crowdsec.ActiveBanSource
+	shield        *protected.Shield
+	csAllowlist   crowdsec.AllowlistManager // nil → no allowlist filter
+	allowlistName string
 }
 
 func (a *cidrBanSourceAdapter) ListRecentBans(ctx context.Context) ([]cidrban.Ban, error) {
@@ -78,11 +148,24 @@ func (a *cidrBanSourceAdapter) ListRecentBans(ctx context.Context) ([]cidrban.Ba
 	if err != nil {
 		return nil, err
 	}
+
+	// Fetch allowlist for this CIDR cycle (mirrors Python's cs_allowlist parameter).
+	// Fail-open on error: nil allowlist means no IPs are filtered.
+	var al *allowlistSet
+	if a.csAllowlist != nil {
+		entries, alErr := a.csAllowlist.ListAllowlist(ctx, a.allowlistName)
+		if alErr == nil {
+			al = newAllowlistSet(entries)
+		}
+	}
+
 	out := make([]cidrban.Ban, 0, len(bans))
 	for _, b := range bans {
-		// Shield check: never count a protected IP toward the /24 threshold.
 		if a.shield != nil && a.shield.IsProtected(b.IP) {
-			continue
+			continue // P0: never count a protected IP
+		}
+		if al.contains(b.IP) {
+			continue // Allowlist: mirrors Python's is_allowlisted() check
 		}
 		out = append(out, cidrban.Ban{IP: b.IP, When: b.When})
 	}
@@ -122,13 +205,19 @@ func NewCrowdSecSyncApp(logger *slog.Logger, cfg *config.Config) *CrowdSecSyncAp
 		cf:          cfClient,
 		cs:          csClient,
 		csDecisions: csClient,
+		csAllowlist: csClient,
 		abuse:       abuse,
 		better:      betterstack.NewClient(httpClient, cfg.BetterStack.SourceToken, cfg.BetterStack.IngestingHost),
 		modsec:      modsecurity.NewService(modsecurity.Config{NginxLogDir: cfg.CrowdSec.NginxLogDir}),
 		recidiv:     recidive.NewService(recidive.Config{StateDir: cfg.StateDir}),
 		cidr: cidrban.NewService(cidrban.Config{
-			StateDir:      cfg.StateDir,
-			BanSource:     &cidrBanSourceAdapter{src: csClient, shield: shield},
+			StateDir: cfg.StateDir,
+			BanSource: &cidrBanSourceAdapter{
+				src:           csClient,
+				shield:        shield,
+				csAllowlist:   csClient,
+				allowlistName: cfg.CrowdSec.AllowlistName,
+			},
 			CFBanner:      cfClient,
 			CFRuleGetter:  cfClient,
 			CFDeleter:     cfClient,
@@ -232,14 +321,19 @@ func (a *CrowdSecSyncApp) Run(ctx context.Context) error {
 }
 
 // buildSyncPlan computes what Go would add/remove without executing anything.
-// Applies anti-self-ban (P0) filter identical to Python's is_protected().
-// Also applies allowlist filter when cs implements AllowlistManager.
+// Applies (in order, mirroring Python's sync_cloudflare()):
+//  1. IP normalization
+//  2. Anti-self-ban shield (P0)
+//  3. CrowdSec allowlist filter (is_allowlisted)
 func (a *CrowdSecSyncApp) buildSyncPlan(
 	ctx context.Context,
 	activeBans []string,
 	cfRules map[string]string, // ip → ruleID
 ) shadow.SyncPlan {
-	// Normalize IPs + apply anti-self-ban (P0) + allowlist filter.
+	// Fetch allowlist once for this plan computation.
+	// Fail-open: nil allowlist → no IPs filtered (matching Python circuit-breaker).
+	allowlist := a.fetchAllowlist(ctx)
+
 	banSet := make(map[string]bool, len(activeBans))
 	for _, ip := range activeBans {
 		parsed := net.ParseIP(ip)
@@ -247,8 +341,14 @@ func (a *CrowdSecSyncApp) buildSyncPlan(
 			continue
 		}
 		norm := parsed.String()
+		// P0: never ban protected ranges (RFC1918, CF, host own IPs).
 		if a.shield != nil && a.shield.IsProtected(norm) {
-			continue // P0: never ban protected ranges
+			continue
+		}
+		// Allowlist filter: mirrors Python's is_allowlisted() in sync_cloudflare().
+		if allowlist.contains(norm) {
+			a.logger.DebugContext(ctx, "allowlist: skip ip", "ip", norm)
+			continue
 		}
 		banSet[norm] = true
 	}
@@ -375,18 +475,24 @@ func (a *CrowdSecSyncApp) recordShadowCycle(ctx context.Context, logger *slog.Lo
 			isProtected := func(ip string) bool {
 				return a.shield != nil && a.shield.IsProtected(ip)
 			}
+			// Fetch current allowlist for drift classification so allowlist-filtered
+			// IPs are labeled DriftAllowlist rather than DriftConfidenceGate/Timing.
+			// Previously passed as nil, causing misclassification.
+			allowlist := a.fetchAllowlist(ctx)
+			allowlistMap := allowlist.asMap()
+
 			// SHADOW_MODE_REPORT.md — per-cycle agreement metrics
 			if err := shadow.WriteReport(a.shadowReport, cycles); err != nil {
 				logger.WarnContext(ctx, "shadow report write failed", "error", err)
 			}
 			// SHADOW_DRIFT_ANALYSIS.md — drift classification and remediation list
 			driftPath := filepath.Join(reportDir, "SHADOW_DRIFT_ANALYSIS.md")
-			if err := shadow.WriteDriftAnalysis(driftPath, cycles, isProtected, nil); err != nil {
+			if err := shadow.WriteDriftAnalysis(driftPath, cycles, isProtected, allowlistMap); err != nil {
 				logger.WarnContext(ctx, "drift analysis write failed", "error", err)
 			}
 			// PYTHON_GO_PARITY_REPORT.md — feature gap cross-reference
 			parityPath := filepath.Join(reportDir, "PYTHON_GO_PARITY_REPORT.md")
-			if err := shadow.WriteParityReport(parityPath, cycles, isProtected, nil); err != nil {
+			if err := shadow.WriteParityReport(parityPath, cycles, isProtected, allowlistMap); err != nil {
 				logger.WarnContext(ctx, "parity report write failed", "error", err)
 			}
 			logger.InfoContext(ctx, "shadow reports updated",
