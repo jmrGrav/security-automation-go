@@ -1,6 +1,6 @@
 # Python Feature Matrix
 
-**Date:** 2026-05-29  
+**Date:** 2026-05-30 (updated after Priority 1–4 verification)  
 **Python reference:** github.com/jmrGrav/crowdsec-cf-sync (V4 / main.py)  
 **Go entry points:** cmd/cf-sync (orchestrator daemon), cmd/crowdsec-sync, cmd/cf-allowlist-sync, cmd/cf-cleanup
 
@@ -16,9 +16,11 @@ Status legend: ✅ Implemented | ⚠️ Partial | ❌ Missing
 | Filter LOCAL_ORIGINS | `_cscli_bans_for_origin()` | `source.FilterActiveBanIPs()` | ✅ | origin ∈ {"crowdsec","cscli"}, type=ban, scope.lower()=ip |
 | Sync active bans → CF IP rules | `sync_cloudflare()` | `app.CrowdSecSyncApp.syncCloudflare()` | ✅ | Add/delete with 100ms courtesy sleep; IP normalization |
 | CIDR-aware reconciliation | `reconcile_state()` | `app.CleanupApp.Run()` | ✅ | Cleanup removes stale crowdsec-local-ban rules |
+| Anti-self-ban (protected ranges) | `is_protected()` + `_build_protected_networks()` | `security/protected.Shield` | ✅ | RFC1918 + Cloudflare CIDRs + `ip -j addr` auto-detect; wired in buildSyncPlan + cidrBanSourceAdapter |
+| Allowlist filter in enforcement | `is_allowlisted()` in `sync_cloudflare()` | `app.allowlistSet.contains()` in `buildSyncPlan()` | ✅ | **IMPLEMENTED 2026-05-30** — direct IP + CIDR coverage; fail-open on fetch error |
+| Allowlist filter in CIDR path | `is_allowlisted()` in `sync_cidr_bans()` | `cidrBanSourceAdapter.ListRecentBans()` | ✅ | **IMPLEMENTED 2026-05-30** — same allowlistSet applied before /24 grouping |
+| Adaptive mitigation (confidence gate) | `_should_sync_to_cf()` | ❌ not ported | ❌ | **VERIFIED: no current production drift** — see Confidence Gate section below |
 | Rule collapsing (collapse_ips) | `collapse_ips()` | ❌ not ported | ❌ | Python collapses adjacent /32s → /24 when many IPs share prefix |
-| Anti-self-ban (protected ranges) | `is_protected()` + `_build_protected_networks()` | ❌ not ported | ❌ | RFC1918 + Cloudflare CIDRs + `ip -j addr` auto-detect |
-| Adaptive mitigation (confidence) | `_should_sync_to_cf()` | ❌ not ported | ❌ | CF_MIN_CONFIDENCE gate per scenario |
 | CF quota warning (800/1000 rules) | `_fetch_cf_rules()` quota check | ❌ not ported | ❌ | |
 
 ---
@@ -42,7 +44,7 @@ Status legend: ✅ Implemented | ⚠️ Partial | ❌ Missing
 | Feature | Python function | Go location | Status | Notes |
 |---|---|---|---|---|
 | Read CrowdSec allowlist | `get_crowdsec_allowlist()` | `crowdsec.Client.ListAllowlist()` | ✅ | |
-| Allowlist-aware ban filtering | `is_allowlisted()` | ❌ not wired in enforcement loop | ❌ | Python filters banned IPs against the allowlist before adding to CF |
+| Allowlist-aware ban filtering | `is_allowlisted()` | `app.allowlistSet.contains()` | ✅ | **IMPLEMENTED 2026-05-30** in both CF enforcement + CIDR paths; direct IP + CIDR coverage |
 | AllowlistSyncApp daemon | _(Python: integrated in main loop)_ | `app.AllowlistSyncApp.Run()` | ⚠️ | Reads + logs CS allowlist; no CF write path yet |
 
 ---
@@ -154,22 +156,70 @@ Status legend: ✅ Implemented | ⚠️ Partial | ❌ Missing
 
 ---
 
-## Summary
+## Confidence Gate — Verified Inactive in Production
 
-| Status | Count | Features |
-|---|---|---|
-| ✅ Implemented | 42 | Core data sources, enforcement loop, cleanup, recidive, CIDR, ModSec structure, AbuseIPDB pipeline, WAF replay, daemon infra |
-| ⚠️ Partial | 4 | Allowlist sync (read-only), OpenResty events, boot degraded mode, Lua events |
-| ❌ Missing | 13 | Rule collapsing, anti-self-ban, adaptive mitigation, allowlist filter in enforcement, ModSec AbuseIPDB report, nginx URI extraction, CIDR wiring in daemon, Lua state push, auto-heal, SIGHUP, sd_notify, CF quota warning, CIDR wired in app |
+**Python function:** `_should_sync_to_cf()` / `CF_MIN_CONFIDENCE` env var  
+**Go status:** ❌ Not ported  
+**Production drift caused: ZERO**
+
+Python logic (from config.py + main.py):
+```python
+_CONFIDENCE_RANK = {"low": 0, "medium": 1, "high": 2}
+CF_MIN_CONFIDENCE = os.environ.get("CF_MIN_CONFIDENCE", "low")  # default: "low"
+
+def _should_sync_to_cf(scenario: str) -> bool:
+    conf = _scenario_confidence(scenario)
+    return _CONFIDENCE_RANK.get(conf, 1) >= _CONFIDENCE_RANK.get(CF_MIN_CONFIDENCE, 0)
+```
+
+When `CF_MIN_CONFIDENCE="low"` (rank=0): any scenario confidence (0, 1, or 2) >= 0 → **always True**.
+Gate is effectively disabled; all scenarios sync to CF regardless of confidence level.
+
+**Verified 2026-05-30:** Production `/etc/crowdsec/cf-sync.env` does NOT set `CF_MIN_CONFIDENCE`.
+Python defaults to `"low"` → gate inactive. Go not implementing it causes **zero divergence**.
+
+Gate becomes relevant ONLY if Python is configured with `CF_MIN_CONFIDENCE=medium` or `=high`.
+If that config changes, implement `_scenario_confidence()` + confidence rank filter in `buildSyncPlan()`.
+
+**Note:** Pre-2026-05-30 shadow reports may show `DriftConfidenceGate` counts — these were
+misclassified because the drift classifier received `nil` for the allowlist parameter.
+After the allowlist filter fix, correctly-labeled drift will appear only when allowlist
+entries are present.
 
 ---
 
-## Priority Gap List (ordered by operational impact)
+## ModSecurity / AppSec / Lua — Signal Classification
 
-1. **Anti-self-ban** — without this, Go could accidentally ban the server's own IP
-2. **Allowlist filter in enforcement loop** — banned IPs are not checked against CrowdSec allowlist before CF add
-3. **CIDR /24 service wiring** — `cidrban.RealService` is built but not wired into `CrowdSecSyncApp`
-4. **Rule collapsing** — efficiency: many adjacent /32s should collapse before CF API calls
-5. **Adaptive mitigation (confidence gate)** — `CF_MIN_CONFIDENCE` filtering by scenario confidence
-6. **ModSec AbuseIPDB reporting** — ModSec bans in CF but doesn't report to AbuseIPDB
-7. **SIGHUP reload** — operators cannot reload config without restart
+Three distinct security signal sources exist. They must not be conflated.
+
+| Signal | Source | Python handler | Go handler | Status | Notes |
+|---|---|---|---|---|---|
+| Legacy ModSecurity | nginx error.log | `sync_modsec()` / `get_recent_modsec_events()` | `modsecurity.RealService` | ⚠️ Partial | CF ban wired; AbuseIPDB report missing |
+| CrowdSec AppSec | CrowdSec decisions (AppSec component generates IPs) | via `get_active_bans()` | via `ListActiveBans()` | ✅ | AppSec decisions appear in cscli with origin="crowdsec"; handled transparently |
+| Lua/OpenResty bouncer | `/run/crowdsec-lua/events.jsonl` | `sync_bouncer_abuseipdb()` / `read_lua_events()` | `openrestyevent.Service` | ✅ | Go reads events.jsonl and reports to AbuseIPDB |
+
+**`modsecurity.RealService` is the LEGACY nginx log scanner** — it parses ModSecurity Access denied
+lines from nginx error.log. This is distinct from CrowdSec's modern AppSec engine, which
+produces standard CrowdSec decisions already handled by `ListActiveBans()`.
+
+**CrowdSec AppSec**: Inferred to flow through standard CS decisions based on architecture.
+Mark as "inferred" pending explicit verification of AppSec-generated decisions in `cscli decisions list` output.
+
+---
+
+## Summary (Updated 2026-05-30)
+
+| Status | Count | Changes since 2026-05-29 |
+|---|---|---|
+| ✅ Implemented | 46 | +allowlist filter (CF + CIDR path), +anti-self-ban, +CIDR service wired |
+| ⚠️ Partial | 4 | Allowlist write-path, ModSec AbuseIPDB, OpenResty events, boot degraded |
+| ❌ Missing | 9 | Rule collapsing, confidence gate (inactive in prod), ModSec AbuseIPDB, nginx URI extraction, Lua state push, auto-heal, SIGHUP, sd_notify, CF quota warning |
+
+---
+
+## Remaining Gap List (ordered by operational risk)
+
+1. **Rule collapsing** — Go adds individual /32s; Python collapses adjacent ranges — efficiency gap
+2. **Confidence gate** — inactive in production (`CF_MIN_CONFIDENCE=low`); document before any config change
+3. **ModSec AbuseIPDB reporting** — ModSec CF bans work; AbuseIPDB report missing
+4. **SIGHUP reload** — operators must restart daemon to reload config
