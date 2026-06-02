@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 	"os"
@@ -19,14 +20,19 @@ import (
 	"github.com/jm/security-automation-go/internal/policy/bundles/registry"
 	"github.com/jm/security-automation-go/internal/policy/federation"
 	"github.com/jm/security-automation-go/internal/policy/replay/recorder"
+	"github.com/jm/security-automation-go/internal/runtime/cooldown"
 	"github.com/jm/security-automation-go/internal/runtime/drift/memory"
 	"github.com/jm/security-automation-go/internal/runtime/engine"
 	"github.com/jm/security-automation-go/internal/runtime/journal"
+	"github.com/jm/security-automation-go/internal/runtime/lock"
 	"github.com/jm/security-automation-go/internal/runtime/ownership"
 	"github.com/jm/security-automation-go/internal/runtime/quarantine"
 	"github.com/jm/security-automation-go/internal/runtime/scheduler/pool"
+	stateful_scheduler "github.com/jm/security-automation-go/internal/runtime/scheduler/stateful"
+	"github.com/jm/security-automation-go/internal/runtime/state"
 	"github.com/jm/security-automation-go/internal/runtime/status"
 	"github.com/jm/security-automation-go/internal/services/reporting"
+	"github.com/jm/security-automation-go/internal/storage/sqlite"
 )
 
 const cloudflareReplayOverlap = 10 * time.Minute
@@ -200,4 +206,46 @@ func nextWAFReplayCursor(report cloudflareevent.ProcessingReport, previous time.
 		return now.UTC()
 	}
 	return previous.UTC()
+}
+
+func runDaemon(ctx context.Context, logger *slog.Logger, orch *pipeline.Orchestrator, collector *status.Collector, j journal.JournalStore, qStore *quarantine.Store, store *state.StateStore, sm *engine.StateMachine, dm *memory.Store, cm *cooldown.Manager, rec *recorder.Recorder, br *registry.Registry, am *activation.Manager, fr *federation.Resolver, adm *admission.Controller, evidence reporting.EvidenceStore, ownershipRepo *sqlite.OwnershipRepository, p *pool.Pool, outboxWorker *reporting.OutboxWorker, stateDir string, interval time.Duration, metricsAddr string, zoneID string, wafReplay *cloudflareevent.Service, cursorStore *sqlite.CursorStore, quotaRefreshers *quotaRefreshers) {
+	logger.Info("starting in daemon mode", "state_dir", stateDir, "interval", interval, "metrics_addr", metricsAddr)
+	var ownershipLineage *ownership.LineageQueryService
+	if ownershipRepo != nil {
+		ownershipLineage = ownership.NewLineageQueryService(ownershipRepo)
+	}
+	srv := startAPIServer(logger, collector, j, qStore, orch, p, sm, dm, rec, br, am, fr, adm, evidence, ownershipLineage, metricsAddr)
+	l := lock.NewFileLock(stateDir)
+	s := stateful_scheduler.New(store, orch, sm, cm, logger, interval)
+	defer s.Stop()
+	childCtx, cancel := newDaemonContext(ctx, logger, srv)
+	defer cancel()
+	startWAFReplayPoller(childCtx, logger, interval, zoneID, wafReplay, cursorStore)
+	if quotaRefreshers != nil {
+		quotaRefreshers.start(childCtx, logger)
+	}
+	if outboxWorker != nil {
+		go func() {
+			if err := outboxWorker.Run(childCtx); err != nil && err != context.Canceled {
+				logger.Warn("abuseipdb report outbox retry failed", "error", err)
+			}
+		}()
+	}
+	acquired, err := l.Acquire()
+	if err != nil {
+		logger.Error("failed to acquire daemon lock", "error", err)
+		os.Exit(1)
+	}
+	if !acquired {
+		logger.Error("failed to acquire daemon lock: another instance is running")
+		os.Exit(1)
+	}
+	defer l.Release()
+	if err := s.Start(childCtx, os.Getenv("CF_ZONE_ID")); err != nil {
+		if errors.Is(err, context.Canceled) {
+			return
+		}
+		logger.Error("daemon error", "error", err)
+		os.Exit(1)
+	}
 }

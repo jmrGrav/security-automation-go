@@ -5,6 +5,7 @@ import (
 	"time"
 
 	cfmodels "github.com/jm/security-automation-go/internal/cloudflare/models"
+	"github.com/jm/security-automation-go/internal/observability/metrics"
 	"github.com/jm/security-automation-go/internal/security/abuseformat"
 	"github.com/jm/security-automation-go/internal/services/reporting"
 	tmevents "github.com/jm/security-automation-go/internal/telemetry/events"
@@ -66,6 +67,7 @@ func (s *Service) ProcessSince(ctx context.Context, zoneID string, since time.Ti
 		})
 		if err != nil {
 			report.Suppressed++
+			metrics.CloudflareWAFMalformedEventsTotal.Inc()
 			s.reporting.Observe(ctx, tmevents.SecurityEvent{
 				Timestamp:         time.Now().UTC(),
 				Source:            "cloudflare_waf",

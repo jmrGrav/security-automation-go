@@ -1,5 +1,610 @@
 # MIGRATION_PROGRESS
 
+## 2026-06-02
+
+### Completed
+
+- Pre-shadow acceptance review:
+  - confirmed the latest hardening tranche is still green under the baseline
+    validation suite
+  - verified recent wiring for AI Explain, MCP read-only, quota refresh,
+    bounded scheduler, retention cleanup, and checkpoint-aware raw archive
+    compaction
+  - confirmed runtime smoke checks fail cleanly without configuration and do
+    not reveal new mutator surfaces
+
+### Current state
+
+- The codebase is ready to enter shadow mode with the current read-only and
+  retention controls.
+- No new feature work was added in this acceptance pass.
+
+## 2026-06-02
+
+### Completed
+
+- Hardening loop for shadow-mode longevity:
+  - bounded the scheduler work queue with coalescing and backpressure metrics
+  - added journal pruning/rotation and capped timeline assembly output
+  - added retention cleanup for reporting evidence and report outbox rows
+  - added in-memory AI cache sweeping and size caps
+  - added UI session sweeping and decision-gate IP lock pruning
+  - added checkpoint-aware raw event archive compaction behind validated retained checkpoints
+- Added regression tests proving:
+  - queue saturation stays bounded
+  - journal retention and count caps work
+  - timeline output is capped
+  - evidence and outbox rows are pruned
+  - AI cache entries are evicted
+  - UI sessions are pruned
+  - reporting decision-gate locks are pruned
+  - replay remains deterministic before and after raw archive compaction
+
+### Current state
+
+- The long-run hot-path surfaces reviewed in the shadow-readiness audit are now
+  bounded and observable.
+- Raw event archive retention is now checkpoint-aware: events older than the
+  oldest retained valid runtime checkpoint can be purged without breaking
+  deterministic replay or recovery.
+- Repo validation for this loop is green.
+
+## 2026-06-01
+
+### Completed
+
+- Enriched the operator UI control plane with read-only security surfaces:
+  - `/providers` now presents a richer Provider Health Center
+  - `/intelligence` now performs read-only IP enrichment and audit logging
+  - `/trusted-networks` now explores the protected registry in read-only mode
+- Added provider and registry evidence without exposing raw secrets or live
+  mutation controls.
+- Updated audit coverage so the new UI events are recorded with source and
+  event identifiers.
+- Aligned the UI docs with the active read-only operator routes and reserved
+  future routes.
+
+### Current state
+
+- The UI remains a local operator console, not a mutation console.
+- No Cloudflare or CrowdSec writer was added in this tranche.
+- No runtime replay, recovery, or storage semantics were changed.
+
+## 2026-06-01T16:00:00+02:00
+
+### Completed
+
+- Closed the operator UI shell drift discovered in the Brooks audit:
+  - removed the external HTMX CDN dependency
+  - reworked the forensic page onto the shared `templ` layout
+  - added a regression test proving pages no longer reference external scripts
+
+- Added the first enrichment slice:
+  - `internal/security/enrichment` package
+  - local DNS/rDNS and ASN lookup scaffolding
+  - automatic vs manual provider gating
+  - TTL cache for repeat lookups
+  - fail-neutral scoring that never lets external signals hard-ban alone
+- Added tests proving:
+  - trusted forward-confirmed DNS reduces score
+  - spoofed rDNS stays neutral
+  - DNS timeout is neutral
+  - protected ASN forces `NoHardBan`
+  - ASN unknown stays neutral
+  - cache hit skips duplicate provider lookup
+  - VirusTotal is manual-only
+  - Spamhaus report flow requires an explicit toggle
+  - external signal alone cannot hard-ban
+
+- Added the first local operator UI slice:
+  - dedicated `ui` mode in `cmd/cf-sync`
+  - Go stdlib `net/http` server
+  - `templ` rendered pages
+  - HTMX shell in the UI
+  - login/session cookie handling
+  - CSRF checks for mutation routes
+  - audit log sink for UI actions
+- Added provider/config plumbing for UI-visible state:
+  - `UI_ENABLED`
+  - `UI_ADDR`
+  - `UI_MUTATIONS_ENABLED`
+  - `UI_SECRET_FILE`
+  - `ENRICHMENT_*` toggles
+  - `ABUSEIPDB_ENABLED`
+  - `SPAMHAUS_ENABLED`
+  - `VIRUSTOTAL_ENABLED`
+  - `CLOUDFLARE_MUTATIONS_ENABLED`
+- Added tests proving:
+  - auth is required for protected UI routes
+  - login sets an `HttpOnly` / `SameSite=Lax` cookie
+  - UI mutations are refused by default
+  - CSRF is required when mutations are enabled
+  - provider keys are masked in the UI
+  - secret files are written with `0600`
+  - dashboard shows fallback/runtime status strings
+
+### Current state
+
+- Enrichment engine scaffolding is now present and fail-neutral by default.
+- GreyNoise is intentionally not part of this slice.
+- UI foundation is present and read-only by default.
+- No destructive CrowdSec or Cloudflare action was added in this slice.
+- Provider secrets remain local and masked.
+- The UI shell is now self-contained and no longer depends on a third-party
+  script origin.
+
+## 2026-06-01T20:30:00+02:00
+
+### Completed
+
+- Expanded the local operator UI into a shared console shell with a persistent
+  sidebar and active navigation state.
+- Added protected foundation routes for Dashboard++, Providers, Forensic,
+  About/System, and Audit Trail.
+- Added reserved coming-soon routes for Timeline, Security Intelligence,
+  Trusted Networks, Cloudflare Diff, Replay, Deban, Recovery, and Drift.
+- Added dashboard status cards for runtime, CrowdSec, Cloudflare, OpenResty,
+  Nginx, SQLite WAL, UI mode, HA/fencing, Replay, Recovery, Ownership, UI
+  mutations, Cloudflare mutations, and shadow/cutover.
+- Added a build/system page that surfaces build info, feature toggles, provider
+  posture, and documented AI assistance.
+- Added provider-health and audit-trail foundation pages.
+- Added tests proving:
+  - future routes are auth-protected
+  - the sidebar includes the reserved pages
+  - active navigation state is correct
+  - console pages are self-contained and CSP-restricted
+  - about/system does not leak secrets
+  - audit-trail renders an empty state
+
+### Current state
+
+- UI shell foundation is in place and ready for the next operator workflow
+  tranche.
+- Mutation pathways remain disabled by default.
+- No CrowdSec or Cloudflare write boundary changed in this tranche.
+
+## 2026-06-01T15:30:00+02:00
+
+### Completed
+
+- Enforced the CrowdSec single-write-boundary decision in code.
+- `crowdsec.Client` now exposes the complete intended future write/read surface
+  for UI, replay, deban, and allowlist workflows without adding those features:
+  add/delete IP decisions, add/delete range decisions, add/remove allowlist
+  entries, list allowlists, and list active decisions.
+- `adapter.CSCLIExecutor` was changed from a direct `os/exec` writer into a
+  delegating batch adapter over `crowdsec.DecisionManager`.
+- Added a static regression test preventing new CrowdSec write command fragments
+  outside `internal/crowdsec/client.go`.
+
+### Current state
+
+- Future CrowdSec UI/replay/deban/allowlist work must depend on
+  `DecisionWriter`, `DecisionRemover`, `AllowlistWriter`, `AllowlistReader`, or
+  `CrowdSecAdminWriter`.
+- No second `cscli` writer is allowed.
+- No UI, replay, deban, or new business feature was integrated in this slice.
+
+## 2026-06-01T06:10:00+02:00
+
+### Release readiness checkpoint
+
+- Current local release state is green for:
+  - architecture
+  - Brooks / maintainability
+  - test hardening
+  - mutator operability
+  - runtime correctness
+  - drift/convergence
+  - scheduler budget/queue
+  - Cloudflare pagination boundary
+  - local production proof
+- Added a release/cutover checklist document for the final operator decision path.
+- Clarified that local green status is distinct from:
+  - external shadow soak completion
+  - controlled authority execution
+  - final Python to Go cutover
+
+### Current state
+
+- Release readiness: green for local artifacts and operator checklist.
+- Cutover readiness: conditional on the external shadow soak and controlled-authority checklist.
+- Production cutover: not complete in this local branch.
+
+## 2026-06-01T05:45:00+02:00
+
+### Completed
+
+- Completed the targeted runtime blind-spot audit without reopening previously green areas.
+- Fixed real runtime issues only:
+  - convergence validation now handles missing current snapshots as non-converged instead of panicking
+  - hostile drift escalation can now reach `Quarantined` from stable/active FSM states
+- Added focused MUST TEST coverage for:
+  - convergence fail-closed behavior
+  - drift oscillation promotion
+  - hostile drift quarantine
+  - scheduler budget limits
+  - scheduler priority queue ordering
+  - Cloudflare pagination boundaries
+
+### Deferred / not changed
+
+- `internal/runtime/ha` remains a placeholder interface/backend and is not the production authority; SQLite lease/fencing remains authoritative.
+- `internal/policy/admission` still uses ownership plus the policy engine on the main `Authorize` path; changing that to require OPA would be a policy semantics change and was not applied.
+- No cosmetic refactor, package split, or Brooks cleanup was performed.
+
+## 2026-06-01T05:10:00+02:00
+
+### Completed
+
+- Completed a controlled deep-audit pass focused on real security/runtime/operator risks.
+- Hardened AbuseIPDB outbox retry claiming:
+  - claim updates now re-check retry eligibility before extending `next_attempt_at`
+  - only rows whose lease update succeeds are returned for processing
+  - added a regression test for claim lease exclusion and re-eligibility after expiry
+- Hardened cleanup cancellation behavior:
+  - cleanup throttling now observes context cancellation between destructive Cloudflare deletes
+  - added a regression test proving a canceled cleanup does not continue deleting additional rules
+- Improved operator error routing for standalone wrappers:
+  - config load failures now write to stderr for `cf-cleanup`, `cf-allowlist-sync`, and `crowdsec-sync`
+
+### Current state
+
+- Behavior-neutral for normal successful runs.
+- More robust under outbox contention and operator cancellation.
+- No runtime architecture, policy, persistence backend, replay, fencing, scope, rollback, or shadow-soak semantics changed.
+
+## 2026-06-01T04:30:00+02:00
+
+### Completed
+
+- Added `--dry-run` to `cmd/cf-cleanup`.
+- Dry-run now:
+  - lists stale rules that would be deleted
+  - never calls `DeleteIPAccessRule`
+  - returns success if listing and planning succeed
+  - logs a clear operator summary
+- Added regression tests for:
+  - cleanup dry-run no-mutation
+  - cleanup dry-run stale rule listing
+  - cleanup dry-run idempotence
+  - cleanup live-run guardrails
+  - allowlist sync list-only behavior
+  - allowlist sync fail-closed on allowlist list error
+- Verified `cf-allowlist-sync` is list-only and not a destructive mutator.
+- Current state:
+  - behavior-neutral
+  - mutator operability is materially safer
+  - cleanup is now testable in dry-run form
+
+## 2026-06-01T04:22:00+02:00
+
+### Completed
+
+- Audited `cmd/cf-cleanup` and confirmed it is an active operational path.
+- Classified cleanup risk as `CRITICAL` because it deletes Cloudflare IP access rules.
+- Added direct regression tests for cleanup:
+  - stale-only deletion
+  - Cloudflare delete failure returns error
+  - owned rules are preserved
+  - config fail-closed remains enforced by `config.Load`
+- Cleanup now fails the run if any Cloudflare deletion fails, instead of reporting a partial failure as success.
+- Validation completed for the cleanup audit stage:
+  - `go test ./internal/app ./internal/config`
+- Current state:
+  - behavior-neutral
+  - cleanup remains operational and must stay covered
+  - Brooks structure remains green
+
+## 2026-06-01T04:08:42+02:00
+
+### Completed
+
+- Hardened tests on the meaningful low-coverage seams:
+  - `internal/services/reporting`
+  - `internal/runtime/recovery`
+  - `internal/runtime/ownership`
+  - `internal/storage/sqlite`
+  - `internal/runtime/events`
+- Added tests only where they protected invariants, determinism, or storage contracts:
+  - replay hash wrappers
+  - report window behavior
+  - fail-closed store error toggle
+  - observed telemetry evidence
+  - dedup mark-error finalization
+  - recovery plan / rotate / recovery mode / string rendering
+  - ownership decision hash / lineage IDs / query / explain
+  - SQLite reporting wiring and rollback checkpoint scope selection
+  - selected typed event constructors
+- Validation completed after the hardening pass:
+  - `gofmt -w` on all Go files
+  - `go test ./...`
+  - `go test -race ./...`
+  - `go vet ./...`
+  - `go build ./...`
+  - `go test -tags=soak ./internal/testing/...`
+- Current state:
+  - behavior-neutral
+  - the useful coverage gaps are now materially smaller
+  - remaining untested items are mostly cosmetic helpers or deeper integration seams
+  - Brooks structure remains green
+
+## 2026-06-01T02:40:00+02:00
+
+### Completed
+
+- Added dedicated tests for `internal/services/reporting/decisionGate`:
+  - recent fingerprint deduplication
+  - concurrent IP lock serialization
+  - clock propagation through `SetClock`
+- Added a service-level regression proving the gate extraction is behaviorally neutral:
+  - same duplicate suppression result
+  - no double upstream report on recent fingerprint
+- Validation completed after the proof pass:
+  - `gofmt -w` on all Go files
+  - `go test ./...`
+  - `go test -race ./...`
+  - `go vet ./...`
+  - `go build ./...`
+  - `go test -tags=soak ./internal/testing/...`
+- Current state:
+  - behavior-neutral
+  - the extracted gate is directly test-proved
+  - remaining hotspots are coordination boundaries, not accidental debt
+  - Brooks verdict is now green
+
+## 2026-06-01T02:25:00+02:00
+
+### Completed
+
+- Added dedicated `decisionGate` tests in `internal/services/reporting`:
+  - recent fingerprint deduplication
+  - concurrent IP lock serialization
+  - clock propagation through `SetClock`
+- Reinforced reporting service regression coverage around duplicate suppression and report-sending behavior.
+- Validation completed after the proof pass:
+  - `gofmt -w` on all Go files
+  - `go test ./...`
+  - `go test -race ./...`
+  - `go vet ./...`
+  - `go build ./...`
+  - `go test -tags=soak ./internal/testing/...`
+- Current state:
+  - behavior-neutral
+  - the extracted gate is now directly test-proved
+  - remaining hotspots are coordination boundaries, not accidental debt
+
+## 2026-06-01T02:10:00+02:00
+
+### Completed
+
+- Further split the `cmd/cf-sync` runtime surface:
+  - `main.go` remains a thin CLI wrapper
+  - `runtime.go` owns config load, tracing, wiring, and mode dispatch
+  - `mode_runtime.go` owns CLI/status/doctor rendering
+  - `daemon_runtime.go` owns API server bootstrap, daemon signals, WAF replay polling, and daemon execution
+- Extracted reporting service mutable state into `internal/services/reporting/decision_gate.go`:
+  - duplicate tracking
+  - IP lock serialization
+  - test-clock control
+- Validation completed after the split:
+  - `gofmt -w` on all Go files
+  - `go test ./...`
+  - `go test -race ./...`
+  - `go vet ./...`
+  - `go build ./...`
+  - `go test -tags=soak ./internal/testing/...`
+- Current state:
+  - behavior-neutral
+  - bootstrap density is lower than before
+  - reporting mutable state is less entangled than before
+  - reporting remains the largest structural coordination hub
+
+## 2026-06-01T01:45:00+02:00
+
+### Completed
+
+- Completed the bootstrap refactor stage:
+  - `main.go` is now a thin CLI wrapper
+  - `runtime.go` owns composition and mode dispatch
+  - `bootstrap.go` owns scope/state/http bootstrap
+  - `setup.go` owns policy conversion and external client assembly
+- Validation completed after the refactor:
+  - `gofmt -w` on all Go files
+  - `go test ./...`
+  - `go test -race ./...`
+  - `go vet ./...`
+  - `go build ./...`
+  - `go test -tags=soak ./internal/testing/...`
+- Current state:
+  - behavior-neutral
+  - reporting hub still remains the largest structural hotspot
+  - further Brooks progress now needs a true reporting split, not more bootstrap shaving
+
+## 2026-06-01T01:30:00+02:00
+
+### Completed
+
+- Brooks cleanup campaign reached its reasonable limit without a runtime rewrite:
+  - `cmd/cf-sync` was mechanically decomposed, but remains a composition root hotspot
+  - `internal/services/reporting` remains a coordination hub by design
+  - further gains now require broader architectural refactoring rather than safe incremental cleanup
+- Validation remained green during the campaign:
+  - `gofmt -w` on all Go files
+  - `go test ./...`
+  - `go test -race ./...`
+  - `go vet ./...`
+  - `go build ./...`
+  - `go test -tags=soak ./internal/testing/...`
+- Current state:
+  - behavior-neutral
+  - Brooks maximum reached
+  - residual work is structural and would need a larger refactor to materially improve further
+
+## 2026-06-01T01:00:00+02:00
+
+### Completed
+
+- Continued the mechanical `cmd/cf-sync` bootstrap split:
+  - HTTP client initialization now lives in `cmd/cf-sync/bootstrap.go`
+  - policy conversion now lives in `cmd/cf-sync/setup.go`
+  - external client assembly now lives in `cmd/cf-sync/setup.go`
+  - `main.go` is narrower, but the runtime order and defaults are unchanged
+- Validation was re-run after the extraction work:
+  - `gofmt -w` on all Go files
+  - `go test ./...`
+  - `go test -race ./...`
+  - `go vet ./...`
+  - `go build ./...`
+  - `go test -tags=soak ./internal/testing/...`
+- Current state:
+  - behavior-neutral
+  - Brooks not yet green
+  - main residual hotspot still `cmd/cf-sync`, plus the central reporting hub
+
+## 2026-06-01T00:45:00+02:00
+
+### Completed
+
+- Reduced `cmd/cf-sync` composition noise without changing runtime semantics:
+  - HTTP client initialization now lives in `cmd/cf-sync/bootstrap.go`
+  - external client assembly now lives in `cmd/cf-sync/setup.go`
+  - policy conversion now lives in `cmd/cf-sync/setup.go`
+  - startup order, flags, and defaults remain unchanged
+- Validation completed after the pass:
+  - `gofmt -w` on all Go files
+  - `go test ./...`
+  - `go test -race ./...`
+  - `go vet ./...`
+  - `go build ./...`
+  - `go test -tags=soak ./internal/testing/...`
+- Current state:
+  - behavior-neutral
+  - Brooks not yet green
+  - remaining work still concentrated in `cmd/cf-sync` and `internal/services/reporting`
+
+## 2026-06-01T00:30:00+02:00
+
+### Completed
+
+- Reduced operator/bootstrap noise without changing runtime semantics:
+  - config open/decode errors now include the path
+  - config validation errors now name the missing operator inputs and allowed runtime profiles
+  - `cmd/cf-sync` now prints startup failures to `stderr` with scope/path context
+  - runbook startup checks now call out `-config`, `CF_API_TOKEN`, `CF_ZONE_ID`, and writable `STATE_DIR`
+- Began a safe composition-root extraction to trim `cmd/cf-sync/main.go`:
+  - runtime scope initialization moved into `cmd/cf-sync/bootstrap.go`
+  - scoped state initialization moved into `cmd/cf-sync/bootstrap.go`
+  - SQLite bootstrap moved into `cmd/cf-sync/bootstrap.go`
+- Validation completed after the pass:
+  - `gofmt -w` on all Go files
+  - `go test ./...`
+  - `go test -race ./...`
+  - `go vet ./...`
+  - `go build ./...`
+  - `go test -tags=soak ./internal/testing/...`
+- Current state:
+  - behavior-neutral
+  - Brooks not yet green
+  - residual maintainability work remains concentrated in `cmd/cf-sync` and `internal/services/reporting`
+
+## 2026-05-31T18:10:00+02:00
+
+### Completed
+
+- Closed the remaining semantic runtime hardening gaps:
+  - atomic SQLite lease acquisition by `(scope_id, action)`
+  - deterministic fallback `event_uid` without timestamp dependence
+  - checkpoint validation before replay plus fallback to an earlier valid checkpoint
+  - rollback plan identity validation before resume
+  - restore/quarantine atomic swap with retry-safe reopen on failure
+- Added regression coverage for:
+  - concurrent lease acquisition and expired/unexpired reuse
+  - fallback `event_uid` stability across timestamps and replay/restart
+  - checkpoint corruption / wrong scope / wrong sequence / wrong event_id / bad checksum handling
+  - rollback plan mismatch on reorder / changed payload / missing operation
+  - SQLite restore/quarantine atomicity with corrupt snapshot rejection and WAL-preserving restore
+- Revalidated the repository:
+  - `go test ./...`
+  - `go test -race ./...`
+  - `go vet ./...`
+  - `go build ./...`
+  - `go test -tags=soak ./internal/testing/...`
+
+## 2026-05-31T16:00:00+02:00
+
+### Completed
+
+- Added fail-open operational counters for:
+  - evidence write failures
+  - telemetry publish failures
+  - AbuseIPDB outbox pending / failed / reported
+  - Cloudflare WAF malformed events
+  - Cloudflare replay cursor load / save failures
+  - runtime recovery divergence / ownership invariant violations
+  - SQLite degraded mode / quarantine creation
+- Reduced `internal/services/reporting.Service` slightly further by extracting suppressed and report-finalization helpers.
+- Hardened daemon/reporting lifecycle wiring:
+  - `cmd/cf-sync` now starts the outbox worker under the daemon context
+  - scheduler shutdown is treated as clean cancellation
+  - outbox retry rows are atomically claimed before AbuseIPDB calls
+- Added reporting regressions:
+  - existing pending same-idempotency reservation short-circuits without resending upstream
+  - concurrent outbox workers do not both process the same SQLite row
+- Operational hardening drills added:
+  - restart replay drill
+  - outbox retry / contention drill
+  - split-brain lease refusal drill
+  - optional soak harness under `-tags=soak`
+- Operator runbook added at `docs/operations/RUNBOOK.md`.
+- Brooks-test follow-up cleanup:
+  - removed a misleading SQLite quarantine test that only covered the healthy path
+  - removed reporting-runtime wiring smoke tests that did not protect behavior
+  - removed the state-machine checkpoint error propagation-only test
+- Strengthened runtime invariants:
+  - recovery snapshot listing now materializes checksum metadata for restore validation
+  - recovery restore tests now exercise checksum-validated restore behavior
+  - heartbeat tests now prove at least one successful renew before lost-lease handling
+- Added a deterministic SQLite corruption/quarantine seam for tests:
+  - integrity-check override path
+  - quarantine test forces failure without a fake healthy DB
+  - quarantine artifact existence is asserted
+- Event append ambiguity regression coverage remains explicit in SQLite event tests:
+  - duplicate `event_uid` is idempotent
+  - commit ambiguity with durable row is accepted
+  - commit ambiguity without durable row returns the typed error
+
+### Validation snapshot
+
+- `GOTOOLCHAIN=local gofmt -w $(find /home/jm/Documents/security-automation-go -type f -name '*.go' -not -path '*/vendor/*')` succeeded
+- `GOTOOLCHAIN=local go test ./...` succeeded
+- `GOTOOLCHAIN=local go test -race ./...` succeeded
+- `GOTOOLCHAIN=local go vet ./...` succeeded
+- `GOTOOLCHAIN=local go build ./...` succeeded
+- `GOTOOLCHAIN=local go test -tags=soak ./internal/testing/...` succeeded
+
+## 2026-06-01T00:00:00+02:00
+
+### Completed
+
+- Reopened `ARCHITECTURE_TARGET_AUDIT.md` and updated the target matrix after the scheduler/state pass:
+  - runtime FSM, scheduler partitioning, evidence lineage, replay determinism, security pipeline, and shadow mode are now classified as `DONE`
+  - CrowdSec/OpenResty parity and Python 3.6.0 parity remain intentionally deferred
+- The scheduler now enumerates persisted runtime scopes instead of deriving one placeholder scope during reconciliation startup.
+- `internal/app` helper logic for allowlist/Lua state/CIDR/recidive adapters moved into `internal/app/runtime_helpers.go` to reduce coordination hotspot density.
+- `internal/app` execution flow for CrowdSec sync / shadow mode moved into `internal/app/crowdsec_sync_runtime.go`, reducing file-level concentration further.
+- Added `StateStore.ListScopes()` coverage to prove only scoped runtime-state files are enumerated for partition-aware scheduling.
+
+### Validation snapshot
+
+- `GOTOOLCHAIN=local go test ./internal/runtime/state ./internal/runtime/scheduler/stateful` succeeded
+- `GOTOOLCHAIN=local go test ./...` succeeded
+- `GOTOOLCHAIN=local go test -race ./...` succeeded
+- `GOTOOLCHAIN=local go vet ./...` succeeded
+- `GOTOOLCHAIN=local go build ./...` succeeded
+- `GOTOOLCHAIN=local go test -tags=soak ./internal/testing/...` succeeded
+
 ## 2026-05-29T15:20:00+02:00
 
 ### Completed

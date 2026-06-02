@@ -1,0 +1,126 @@
+package ui
+
+templ Layout(title string) {
+	<!DOCTYPE html>
+	<html lang="en">
+		<head>
+			<meta charset="utf-8"/>
+			<meta name="viewport" content="width=device-width, initial-scale=1"/>
+			<title>{ title }</title>
+			<style>
+				body { font-family: system-ui, sans-serif; margin: 0; background: #f5f7fb; color: #10243e; }
+				header { padding: 1rem 1.25rem; background: #10243e; color: white; }
+				main { padding: 1.25rem; }
+				.nav { display: flex; gap: 1rem; flex-wrap: wrap; margin-top: 0.75rem; }
+				.nav a { color: #dce8ff; text-decoration: none; }
+				.panel { background: white; border: 1px solid #d8e1ef; border-radius: 8px; padding: 1rem; margin-bottom: 1rem; box-shadow: 0 1px 2px rgba(16,36,62,.06); }
+				.grid { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+				.kv { display: grid; gap: .4rem; }
+				.row { display: flex; justify-content: space-between; gap: 1rem; border-top: 1px solid #eef2f8; padding: .5rem 0; }
+				.row:first-child { border-top: 0; padding-top: 0; }
+				.badge { display: inline-block; padding: .15rem .5rem; border-radius: 999px; font-size: .8rem; background: #eef4ff; color: #234; }
+				.muted { color: #5f6b7a; }
+				.error { color: #9b1c1c; }
+				label { display: block; margin: .5rem 0 .25rem; }
+				input[type="password"], input[type="text"] { width: 100%; box-sizing: border-box; padding: .7rem .8rem; border: 1px solid #c9d5e5; border-radius: 6px; }
+				button { margin-top: .75rem; padding: .65rem .9rem; border: 0; border-radius: 6px; background: #185adb; color: white; }
+				code, pre { background: #f4f7fb; border-radius: 6px; padding: .75rem; display: block; overflow: auto; }
+			</style>
+		</head>
+		<body>
+			<header>
+				<strong>Operator UI</strong>
+				<div class="nav">
+					<a href="/">Dashboard</a>
+					<a href="/providers">Providers</a>
+					<a href="/forensic">Forensic</a>
+					<form action="/logout" method="post" style="display:inline">
+						<button type="submit">Logout</button>
+					</form>
+				</div>
+			</header>
+			<main>
+				{ children... }
+			</main>
+		</body>
+	</html>
+}
+
+templ LoginPage(errorText string) {
+	<!DOCTYPE html>
+	<html lang="en">
+		<head>
+			<meta charset="utf-8"/>
+			<meta name="viewport" content="width=device-width, initial-scale=1"/>
+			<title>Operator Login</title>
+			<style>
+				body { font-family: system-ui, sans-serif; margin: 0; background: #f5f7fb; color: #10243e; }
+				main { max-width: 28rem; margin: 8vh auto; background: white; border: 1px solid #d8e1ef; border-radius: 8px; padding: 1.25rem; box-shadow: 0 1px 2px rgba(16,36,62,.06); }
+				label { display: block; margin: .5rem 0 .25rem; }
+				input { width: 100%; box-sizing: border-box; padding: .7rem .8rem; border: 1px solid #c9d5e5; border-radius: 6px; }
+				button { margin-top: .75rem; padding: .65rem .9rem; border: 0; border-radius: 6px; background: #185adb; color: white; }
+				.error { color: #9b1c1c; }
+			</style>
+		</head>
+		<body>
+			<main>
+				<h1>Local operator access</h1>
+				if errorText != "" {
+					<p class="error">{ errorText }</p>
+				}
+				<form action="/login" method="post">
+					<label for="secret">Secret</label>
+					<input id="secret" name="secret" type="password" autocomplete="current-password"/>
+					<button type="submit">Sign in</button>
+				</form>
+			</main>
+		</body>
+	</html>
+}
+
+templ DashboardPage(view DashboardView) {
+	@Layout("Operator Dashboard") {
+		<section class="grid">
+			<div class="panel">
+				<h2>Runtime status</h2>
+				<div class="kv">
+					<div class="row"><span>CrowdSec</span><span class="badge">{ view.Runtime.CrowdSec }</span></div>
+					<div class="row"><span>OpenResty</span><span class="badge">{ view.Runtime.OpenResty }</span></div>
+					<div class="row"><span>Cloudflare</span><span class="badge">{ view.Runtime.Cloudflare }</span></div>
+					<div class="row"><span>UI</span><span class="badge">{ view.Runtime.UI }</span></div>
+				</div>
+			</div>
+			<div class="panel">
+				<h2>Providers</h2>
+				<div class="kv">
+					for _, provider := range view.Providers {
+						<div class="row">
+							<span>{ provider.Name }</span>
+							<span class="badge">{ provider.Status }</span>
+						</div>
+					}
+				</div>
+			</div>
+		</section>
+	}
+}
+
+templ ProvidersPage(providers []ProviderView) {
+	@Layout("Providers") {
+		<section class="panel">
+			<h2>Providers</h2>
+			<p class="muted">Configured state is local-only. Keys are masked and never rendered in full.</p>
+			<div class="kv">
+				for _, provider := range providers {
+					<div class="row">
+						<div>
+							<strong>{ provider.Name }</strong><br/>
+							<span class="muted">{ provider.MaskedKey }</span>
+						</div>
+						<span class="badge">{ provider.Status }</span>
+					</div>
+				}
+			</div>
+		</section>
+	}
+}

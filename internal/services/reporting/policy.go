@@ -25,7 +25,7 @@ func (s *Service) suppressionReason(req Request, cls classifier.Classification) 
 	if len(cls.Categories) == 0 {
 		return "no_abuse_categories"
 	}
-	if s.isDuplicate(req, cls) {
+	if s.gate.isDuplicate(req, cls) {
 		return "duplicate_report"
 	}
 	return ""

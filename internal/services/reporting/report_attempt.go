@@ -33,6 +33,19 @@ func (s *Service) prepareReportAttempt(req Request, cls classifier.Classificatio
 
 func (s *Service) reserveAndRecordPending(ctx context.Context, req Request, cls classifier.Classification, comment string, telemetryEvent *tmevents.SecurityEvent, attempt reportAttempt) (Result, bool) {
 	if s.reservationStore != nil {
+		if existing, ok, err := s.reservationStore.FindPendingByIPAndIdempotencyKey(ctx, req.Event.IP, attempt.report.ExecutionID); err == nil && ok {
+			telemetryEvent.SuppressionReason = "report_pending"
+			telemetryEvent.Metadata["evidence_id"] = existing.EvidenceID
+			_ = s.publish(ctx, *telemetryEvent)
+			return Result{
+				Classification:    cls,
+				Comment:           comment,
+				Suppressed:        true,
+				SuppressionReason: "report_pending",
+				TelemetryEvent:    *telemetryEvent,
+				Report:            &attempt.report,
+			}, true
+		}
 		if err := s.reservationStore.Reserve(ctx, ReportReservation{
 			IP:             req.Event.IP,
 			Source:         telemetrySource(req.Source),

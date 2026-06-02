@@ -26,8 +26,9 @@ type ReportOutboxItem struct {
 
 type ReportReservationStore interface {
 	Reserve(ctx context.Context, reservation ReportReservation) error
+	FindPendingByIPAndIdempotencyKey(ctx context.Context, ip string, idempotencyKey string) (ReportReservation, bool, error)
 	MarkStatus(ctx context.Context, evidenceID string, status string) error
-	ListRetryable(ctx context.Context, now time.Time, limit int) ([]ReportOutboxItem, error)
+	ClaimRetryable(ctx context.Context, now time.Time, limit int, claimUntil time.Time) ([]ReportOutboxItem, error)
 	RecordAttempt(ctx context.Context, evidenceID string, status string, lastError string, nextAttemptAt time.Time) error
 }
 

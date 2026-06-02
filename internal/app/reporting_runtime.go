@@ -12,6 +12,7 @@ import (
 	openrestyevent "github.com/jm/security-automation-go/internal/adapters/openrestyevent"
 	"github.com/jm/security-automation-go/internal/betterstack"
 	"github.com/jm/security-automation-go/internal/config"
+	"github.com/jm/security-automation-go/internal/observability/metrics"
 	"github.com/jm/security-automation-go/internal/security/trust"
 	"github.com/jm/security-automation-go/internal/services/reporting"
 	"github.com/jm/security-automation-go/internal/storage/sqlite"
@@ -96,6 +97,8 @@ func (r *wafReportingRuntime) startWAFReplay(ctx context.Context, logger *slog.L
 		since := time.Now().UTC().Add(-interval)
 		if persisted, ok, err := cursor.Load(ctx, "cloudflare_waf_since"); err == nil && ok {
 			since = persisted.UTC()
+		} else if err != nil {
+			metrics.CloudflareReplayCursorLoadFailuresTotal.Inc()
 		}
 
 		ticker := time.NewTicker(interval)
@@ -131,6 +134,7 @@ func (r *wafReportingRuntime) startWAFReplay(ctx context.Context, logger *slog.L
 				since = next.UTC()
 				if saveErr := cursor.Save(ctx, "cloudflare_waf_since", since); saveErr != nil {
 					logger.Warn("cloudflare waf replay cursor save failed", "error", saveErr)
+					metrics.CloudflareReplayCursorSaveFailuresTotal.Inc()
 				}
 			}
 

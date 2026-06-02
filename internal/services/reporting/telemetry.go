@@ -3,6 +3,7 @@ package reporting
 import (
 	"context"
 
+	"github.com/jm/security-automation-go/internal/observability/metrics"
 	tmevents "github.com/jm/security-automation-go/internal/telemetry/events"
 )
 
@@ -10,7 +11,11 @@ func (s *Service) publish(ctx context.Context, event tmevents.SecurityEvent) err
 	if s == nil || s.sink == nil {
 		return nil
 	}
-	return s.sink.Publish(ctx, event)
+	if err := s.sink.Publish(ctx, event); err != nil {
+		metrics.TelemetryPublishFailuresTotal.Inc()
+		return err
+	}
+	return nil
 }
 
 func (s *Service) Observe(ctx context.Context, event tmevents.SecurityEvent) {

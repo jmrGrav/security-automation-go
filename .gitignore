@@ -7,6 +7,7 @@
 # Local environment / secrets — NEVER commit real tokens
 *.env
 !*.env.example
+!configs/ai-providers.example.env
 .env.*
 !.env.example
 # Test fixtures use placeholder-only .env files and must be tracked

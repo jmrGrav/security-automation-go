@@ -8,7 +8,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"strconv"
 	"time"
 
 	"github.com/jm/security-automation-go/internal/apperr"
@@ -16,6 +15,7 @@ import (
 	"github.com/jm/security-automation-go/internal/cloudflare/models"
 	"github.com/jm/security-automation-go/internal/httpclient"
 	"github.com/jm/security-automation-go/internal/logging"
+	"github.com/jm/security-automation-go/internal/security/quota"
 )
 
 const (
@@ -38,6 +38,11 @@ func New(client httpclient.Client, token string) *Transport {
 // Request executes a Cloudflare API request with optional ETag support.
 func (t *Transport) Request(ctx context.Context, method, path string, query url.Values, body io.Reader, etag string) ([]byte, string, error) {
 	const op = "cloudflare.transport.Request"
+	if isMutationMethod(method) {
+		if state, ok := quota.DefaultRegistry().State("cloudflare"); ok && state == quota.Exhausted {
+			return nil, "", apperr.Newf(op, "cloudflare quota exhausted; mutation suspended")
+		}
+	}
 
 	fullURL := fmt.Sprintf("%s%s", BaseURL, path)
 	if len(query) > 0 {
@@ -69,6 +74,8 @@ func (t *Transport) Request(ctx context.Context, method, path string, query url.
 	}
 
 	respETag := resp.Header.Get("ETag")
+	obs := quota.ParseCloudflareHeaders(resp.Header)
+	quota.DefaultRegistry().Record(obs)
 
 	// Logging for debug only
 	logger := logging.FromContext(ctx, nil)
@@ -78,6 +85,10 @@ func (t *Transport) Request(ctx context.Context, method, path string, query url.
 			"method", method,
 			"path", path,
 			"etag", respETag,
+			"quota_provider", obs.Provider,
+			"quota_source", obs.QuotaSource,
+			"quota_known", obs.LimitKnown || obs.RemainingKnown || obs.UsedKnown || obs.ResetKnown || len(obs.Notes) > 0,
+			"quota_state", obs.State,
 		)
 	}
 
@@ -194,21 +205,22 @@ func (h *RateLimitHook) Before(ctx context.Context, req *http.Request) error {
 }
 
 func (h *RateLimitHook) After(ctx context.Context, req *http.Request, resp *http.Response, err error) error {
+	if resp != nil {
+		quota.DefaultRegistry().Record(quota.ParseCloudflareHeaders(resp.Header))
+	}
 	return nil
 }
 
 // CloudflareRetryAfter extracts the Retry-After header.
 func CloudflareRetryAfter(resp *http.Response) time.Duration {
-	if resp == nil {
-		return 0
+	return quota.CloudflareRetryAfter(resp)
+}
+
+func isMutationMethod(method string) bool {
+	switch method {
+	case http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete:
+		return true
+	default:
+		return false
 	}
-	val := resp.Header.Get("Retry-After")
-	if val == "" {
-		return 0
-	}
-	seconds, err := strconv.Atoi(val)
-	if err != nil {
-		return 0
-	}
-	return time.Duration(seconds) * time.Second
 }

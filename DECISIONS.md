@@ -1,5 +1,836 @@
 # DECISIONS
 
+## 2026-06-02 - AI provider activation stays file-backed and UI-local
+
+Decision:
+
+- Keep the AI provider contract file-backed only: `AI_PROVIDER_*_API_KEY_FILE`
+  is the supported secret path, and raw `OPENAI_API_KEY` / `ANTHROPIC_API_KEY`
+  / `GEMINI_API_KEY` values are not consumed by the runtime.
+- Activate providers only through the UI runtime path in
+  `cmd/cf-sync/ui_runtime.go` by constructing them from `ai.FromEnv()` and
+  injecting them into the existing gateway.
+- Keep the provider adapters disabled by default and fail closed when the
+  provider flag, model, or secret file is missing or unreadable.
+- Preserve the read-only MCP boundary; AI provider wiring is only for AI Explain.
+- Manage operator enable/disable and last-test metadata in the non-secret state
+  file `/etc/security-automation/providers/ai-providers.env`; keep raw key
+  material only in `/etc/security-automation/secrets/*_api_key`.
+
+Reason:
+
+- The repository already has a safe adapter/gateway boundary; the remaining gap
+  was runtime wiring, not a new security model.
+- File-backed secrets reduce accidental logging and keep the activation path
+  explicit for operators.
+
+Impact:
+
+- OpenAI, Anthropic, and Gemini are ready to activate once operator-supplied
+  secret files and enable flags are present.
+- No new raw-secret environment variables are introduced.
+- The MCP server remains read-only and unchanged.
+- The `/providers` UI can rotate keys, toggle providers, and record redacted
+  test metadata without ever exposing a secret value.
+
+## 2026-06-02 - Pre-shadow acceptance relies on existing read-only boundaries
+
+Decision:
+
+- Treat the current AI Explain, MCP read-only, UI auth/CSRF, quota refresh,
+  scheduler bounding, retention cleanup, and checkpoint-aware archive
+  compaction as the accepted pre-shadow boundary.
+- Do not expand scope or add new features during acceptance review; only fix
+  broken wiring, missing guards, or incorrect documentation if they appear.
+
+Reason:
+
+- Acceptance review is a verification pass, not a product-tranche pass.
+- The current control-plane shape is intended to be exercised in shadow mode as
+  is, provided no new mutator surface appears.
+
+Impact:
+
+- The remaining shadow decision can be made on operational readiness rather
+  than on unresolved wiring uncertainty.
+
+## 2026-06-02 - Shadow hardening must use opportunistic cleanup, not hidden janitors
+
+Decision:
+
+- Keep long-run retention cleanup in existing hot paths rather than introducing
+  background janitor goroutines for the shadow-hardening loop.
+- Bound the scheduler queue, journal, timeline projection, reporting evidence,
+  report outbox, AI cache, UI sessions, and decision-gate lock map with
+  finite caps and retention-based cleanup.
+- Keep raw replay event-history pruning conservative until a separate
+  checkpoint-aware retention policy is defined.
+- Do not introduce aggressive purge of the canonical raw event archive until
+  replay and checkpoint logic can prove the deletion is safe for deterministic
+  restoration.
+- When purging raw events, the cutoff must be the oldest retained valid runtime
+  checkpoint for the scope/name pair, and the compactor must refuse to run if
+  that checkpoint boundary cannot be validated.
+
+Reason:
+
+- The repo already treats hidden goroutines as a risk.
+- Opportunistic cleanup keeps the lifetime changes explicit and testable while
+  avoiding an extra lifecycle manager just for retention.
+- Deterministic replay semantics should not be weakened by accidental event
+  history deletion.
+
+Impact:
+
+- Shadow-mode long-run memory and storage growth are now bounded on the hot
+  path.
+- The retention policy remains visible in code and tests rather than hidden in
+  a daemon.
+- Replay/archive pruning can be revisited later with an explicit
+  checkpoint-aware policy, and the canonical raw archive stays conservative
+  until then.
+- Raw archive compaction is now checkpoint-aware and replay-safe, so the
+  remaining 90-day risk is operationally bounded rather than open-ended.
+
+## 2026-06-01 - Security Intelligence and Trusted Networks remain read-only operator views
+
+Decision:
+
+- `/intelligence` is a read-only enrichment lookup surface. It validates IP
+  input with `netip.ParseAddr`, records `security_intelligence_lookup`, and
+  stays neutral when providers fail or are disabled.
+- `/trusted-networks` is a read-only registry explorer. It renders official
+  registry sources, exposes dry-run or read-only refresh/diff/export actions,
+  and does not auto-allowlist into CrowdSec or Cloudflare.
+- External provider failure or partial coverage must not be interpreted as a
+  hard-ban signal by itself.
+
+Reason:
+
+- Operator review needs visibility without creating a second mutation path.
+- Trusted registry data is useful for evidence and review, but allowlisting
+  remains a separate manual decision.
+
+Impact:
+
+- Security intelligence and trusted networks can be used safely in the UI.
+- The pages stay compatible with the existing fail-closed runtime and audit
+  model.
+
+## 2026-06-01 — Protected Networks Registry: two-layer model, no auto-allowlist
+
+Decision:
+
+- ASN classification (KindProtected/SearchBot/AIAgent/Monitoring) sets `NoHardBan=true` and
+  `HardBanAllowed=false` in `Assessment`. This is a pure signal — no code path in the
+  enrichment package contacts CrowdSec or Cloudflare.
+- All known protected-network entries live in `DefaultRegistry()` in
+  `internal/security/enrichment/asn/registry.go`. Every loaded CIDR must reference a
+  `SourceURL` fetched in the same session as the commit.
+- Propagating a protected ASN to a CrowdSec allowlist or Cloudflare whitelist is always:
+  manual, audited, and preceded by a dry-run.
+- Anthropic IP ranges added (160.79.104.0/21, 2607:6bc0::/48) from
+  https://platform.claude.com/docs/en/api/ip-addresses (verified 2026-06-01).
+
+Reason:
+
+- Automatic allowlisting based on ASN would silently whitelist any traffic originating
+  from a cloud provider that also hosts the protected organisation.
+- The registry gives operators a single auditable list of all protected ranges and their
+  official sources, without coupling classification to allowlist mutation.
+
+Roadmap — Protected Networks Management UI (future):
+
+  A future operator screen will display the registry in the UI with:
+  * organisation, ASN (if known), CIDRs, source URL, last-verified date, status badge
+  * badge states: Up to date / Update available / Source unavailable / Manual review required
+  * Actions: Refresh (re-fetch source), View diff, Approve update, Export
+  * Explicit opt-in buttons to propagate to CrowdSec allowlist or Cloudflare whitelist
+  * All mutations: manual, audited, dry-run first
+  Sources that need periodic refresh:
+  - GitHub Copilot: https://api.github.com/meta (weekly)
+  - OpenAI ChatGPT-User: https://openai.com/chatgpt-user.json (weekly, 237 /28 blocks)
+  - Microsoft Azure: https://www.microsoft.com/en-us/download/details.aspx?id=56519 (weekly)
+  - Google Googlebot: https://developers.google.com/search/apis/ipranges/googlebot.json
+
+## 2026-06-01T20:30:00+02:00 - The operator UI must be self-contained and share one rendering shell
+
+Decision:
+
+- Remove the external HTMX CDN dependency from the local operator UI shell.
+- Render the forensic page through the same shared `templ` layout as the rest of
+  the UI instead of keeping a separate raw HTML renderer.
+- Keep the current slice self-contained and network-independent at runtime.
+
+Reason:
+
+- A local operator console should not need a third-party script origin to render
+  or function.
+- A single rendering shell keeps navigation, styling, and future page additions
+  coherent and reduces drift between pages.
+
+Impact:
+
+- The UI remains fully functional without external network access.
+- Future operator workflows can extend one shared shell instead of duplicating
+  page chrome.
+- HTMX can be reintroduced later from a local asset if and when the partial
+  update flows are actually needed.
+
+## 2026-06-01T20:30:00+02:00 - UI console socle must reserve future operator routes up front
+
+Decision:
+
+- Keep the dashboard, providers, forensic, about/system, audit, and the future
+  operator routes on one shared shell with a persistent sidebar.
+- Reserve authenticated coming-soon routes now for timeline, security
+  intelligence, trusted networks, cloudflare diff, replay, deban, recovery, and
+  drift even before the workflow implementations land.
+- Render provider-health and audit-trail foundation pages now so the shell can
+  expand without relayout work later.
+
+Reason:
+
+- The operator console will otherwise fragment into one-off layouts once the
+  forensic and replay/deban workflows arrive.
+- Reserved routes keep the navigation and security model stable while the
+  workflow internals are still intentionally disabled.
+
+Impact:
+
+- The shell can grow into the later operator phases without another chrome
+  rewrite.
+- Auth and security headers already cover the future routes today.
+
+## 2026-06-01T18:00:00+02:00 - GreyNoise permanently removed from scope
+
+Decision: GreyNoise will never be integrated. All references removed.
+
+Reason: Operator direction — will never use it.
+
+Impact: Previous session entry (2026-06-01T16:00) noted GreyNoise was "left out
+per operator direction for this slice." This entry supersedes it: the exclusion
+is permanent, not slice-scoped.
+
+## 2026-06-01T16:00:00+02:00 - Enrichment must stay fail-neutral and keep GreyNoise out of this slice
+
+Decision:
+
+- Add a local `internal/security/enrichment` engine with DNS/rDNS, ASN, and
+  provider scoring scaffolding.
+- Treat external providers as contributory only. A timeout, lookup error, or
+  missing key must stay neutral.
+- Keep VirusTotal manual-forensics only in this slice and keep Spamhaus report
+  mode separate from Spamhaus lookup mode.
+- Omit GreyNoise from this slice per operator direction.
+
+Reason:
+
+- The UI and runtime need local forensic visibility without creating a second
+  hard-ban authority.
+- Fail-neutral behavior preserves the existing escalation boundaries and keeps
+  the new engine safe to wire into operator workflows later.
+
+Impact:
+
+- Enrichment lookups can improve operator context and scoring.
+- Hard-ban decisions still require local signal plus the existing policy path.
+- No GreyNoise integration is introduced in this tranche.
+
+## 2026-06-01T16:00:00+02:00 - Local operator UI is read-only by default and keeps secrets local
+
+Decision:
+
+- Add a dedicated local operator UI mode built on Go stdlib `net/http`, `templ`, and HTMX.
+- Bind the UI to `127.0.0.1` by default and keep it disabled unless `UI_ENABLED=1` or `ui.enabled=true` is set.
+- Require local authentication backed by `UI_SECRET` and/or `UI_SECRET_FILE`; session cookies must be `HttpOnly`, `SameSite=Lax`, and `Secure` when the request is HTTPS.
+- Keep mutations disabled by default. `UI_MUTATIONS_ENABLED=1` is required before any destructive UI action can proceed.
+- Keep Cloudflare mutations disabled by default. `CLOUDFLARE_MUTATIONS_ENABLED=1` is required before the UI can even preview a live Cloudflare mutation.
+- Keep provider API keys out of logs and evidence; show only masked values in the UI and store any local secret file with `0600` permissions.
+
+Reason:
+
+- The operator UI is a local control surface, not a public API. It needs browser ergonomics without weakening the existing fail-closed runtime.
+- The repo already has high-risk mutating paths; the UI must not become a second writer or a secret leak.
+
+Impact:
+
+- The new UI mode can be used locally and behind OpenResty without changing the core runtime mutation boundaries.
+- The UI can show provider and runtime status while remaining read-only by default.
+- Secret handling remains local and audit-friendly.
+
+## 2026-06-01T15:30:00+02:00 - CrowdSec writer boundary is enforced in code
+
+Decision:
+
+- The single CrowdSec write authority is `crowdsec.Client` (cscli subprocess
+  through one injectable `cscliRunner`).
+- `crowdsec.Client` now owns the full intended write surface:
+  add/delete IP decisions, add/delete range decisions, add/remove allowlist
+  entries, list allowlists, and list active decisions.
+- Narrow future-facing interfaces are defined at the boundary:
+  `DecisionWriter`, `DecisionRemover`, `AllowlistWriter`, `AllowlistReader`,
+  and `CrowdSecAdminWriter`.
+- `adapter.CSCLIExecutor` is no longer a second subprocess writer. It preserves
+  batch semantics only and delegates every mutation to a supplied
+  `crowdsec.DecisionManager`; the default constructor injects
+  `crowdsec.Client`.
+- Future UI, replay Cloudflare to CrowdSec, manual deban, manual allowlist, and
+  orchestrator forward-write flows MUST depend on those interfaces and MUST NOT
+  shell out to `cscli` directly.
+
+Reason:
+
+- Two independent subprocess writers would risk dual-write / split-authority,
+  diverging validation, and inconsistent timeout/audit behavior.
+- The prior dormant `CSCLIExecutor` still had its own `os/exec` path. Even if it
+  was not wired live, that was an attractive nuisance for future UI/replay/deban
+  work. Delegation removes the second writer while preserving the batch adapter
+  shape.
+
+Impact:
+
+- Tests prove `crowdsec.Client` satisfies the narrow interfaces.
+- Tests prove `CSCLIExecutor` delegates to an injected writer and does not expose
+  or execute raw `cscli` commands itself.
+- A static regression test fails if CrowdSec write command fragments
+  (`decisions add/delete`, `allowlists add/remove`) appear outside
+  `internal/crowdsec/client.go`.
+- Behavior remains compatible for current runtime callers; the hardening affects
+  future/deferred writer paths and validation at the single boundary.
+
+## 2026-06-01T15:00:00+02:00 - CrowdSec has exactly ONE write boundary (historical pre-enforcement decision)
+
+Decision:
+
+- This decision recorded the intended single-boundary rule before enforcement.
+- It is superseded by the 2026-06-01T15:30 decision above, which transformed
+  `adapter.CSCLIExecutor` into a delegating adapter and removed its direct
+  subprocess writer role.
+
+## 2026-06-01T14:00:00+02:00 - CrowdSec cscli batch executor stays DORMANT (not wired live)
+
+Status:
+
+- Historical. Superseded by the 2026-06-01T15:30 enforcement decision: the
+  executor no longer owns a direct subprocess writer and now delegates to the
+  `crowdsec.Client` write boundary.
+
+Decision:
+
+- Keep `internal/crowdsec/adapter.CSCLIExecutor` dormant. Do NOT wire it into any
+  live runtime path. Verdict: **KEEP DORMANT** (not INTEGRATE LIVE, not REMOVE).
+
+Reason:
+
+- The live cscli decision-writing path already exists and is wired:
+  `crowdsec.Client.AddIPDecision` / `AddRangeDecision` (`cscli decisions add
+  --ip|--range`), injected as `Escalator` / `CSRangeBanner` into the `recidive`
+  and `cidrban` services in `internal/app/app.go`. Inputs are validated upstream
+  (recidive rejects non-`net.ParseIP` IPs before escalating).
+- `adapter.CSCLIExecutor` is a separate, **redundant** implementation of the same
+  `cscli decisions add/delete` semantics, intended as the execution backend for
+  the orchestrator pipeline. But `internal/orchestrator/pipeline` runs **DryRun
+  only** — it imports `translator`+`validation`, never `adapter`, and never
+  executes translated actions. Nothing constructs `CSCLIExecutor`.
+- Wiring it live would create a second, competing, ungoverned cscli write path
+  (dual-write / split-authority risk) and would NOT improve correctness,
+  observability, recovery, security, or operability.
+- The orchestrator translate→execute chain is also not cscli-ready end to end:
+  the translator emits Cloudflare target names as scope (`ip`, `ip_range`, ...)
+  and, for deletes, sets `Value` to a stable-identity-key string rather than a
+  bare IP, with explicit TODOs. So INTEGRATE LIVE is premature regardless.
+- REMOVE was considered and rejected: the executor is the deferred forward-write
+  seam for the orchestrator; the project intentionally retains deferred scaffolding
+  and keeps Python as source of authority. Revisit removal only if the orchestrator
+  forward-write path is formally abandoned.
+
+Hardening applied (because it builds raw cscli arguments if ever wired):
+
+- Fail-closed input validation added at the executor boundary
+  (`validateExecOperation` in `internal/crowdsec/adapter/cscli.go`), applied to
+  BOTH add and delete before any args are built or any process is spawned:
+  action allowlist (`add_decision`/`delete_decision`), scope allowlist
+  (`ip`/`range`), `net.ParseIP` for scope `ip`, `net.ParseCIDR` for scope
+  `range`, rejection of empty value, rejection of any field starting with `-`
+  (flag injection), and a strict duration format for adds.
+- The shared `internal/crowdsec/validation` package was deliberately NOT
+  tightened: it is load-bearing for the wired orchestrator DryRun stage, and the
+  translator output is not cscli-conformant, so stricter rules there would break
+  the live dry-run. This is an intentional deviation from the literal "harden the
+  validation" instruction, justified by primary-source evidence in the code.
+
+Impact:
+
+- No runtime behavior change: the executor remains uncalled in production.
+- Risk closed: if the executor is ever wired, malformed/injection-prone cscli
+  arguments now fail closed instead of reaching the binary.
+
+## 2026-06-01T06:10:00+02:00 - Release readiness is separate from final production cutover
+
+Decision:
+
+- Treat the local Go repository as release-ready only after documentation, operator checklist, and local validation evidence are coherent.
+- Keep final production cutover gated by external shadow soak completion, controlled-authority rehearsal, rollback confirmation, and operator approval.
+- Keep Python as the rollback/source-of-authority path until that final gate is executed.
+
+Reason:
+
+- Local green tests and audits prove artifact readiness, not that the live host has already switched authority.
+- The cutover is an operational state transition and must remain explicit.
+
+Impact:
+
+- Documentation now distinguishes release readiness, cutover readiness, and completed production cutover.
+- Operators get a concrete checklist instead of inferring cutover state from audit verdicts.
+
+## 2026-06-01T05:45:00+02:00 - Convergence and hostile drift must fail closed instead of panicking or staying active
+
+Decision:
+
+- Treat a missing current snapshot during convergence validation as non-converged with an invariant violation.
+- Allow emergency transition to `Quarantined` from stable and active FSM states when hostile drift is detected.
+
+Reason:
+
+- Provider/discovery failures can leave convergence without a current snapshot; panicking would bypass controlled runtime handling.
+- The drift engine already classified hostile remote deletion as requiring quarantine, but the FSM transition table could reject that fail-closed action from several states.
+
+Impact:
+
+- Normal convergence success and mismatch behavior are unchanged.
+- Hostile drift now reaches the intended fail-closed state instead of depending on the current lifecycle phase.
+
+## 2026-06-01T05:10:00+02:00 - AbuseIPDB outbox retry claims must be lease-checked at update time
+
+Decision:
+
+- Keep the AbuseIPDB outbox retry worker offline and SQLite-backed, but require `ClaimRetryable` to return only rows whose claim lease update succeeds.
+- Re-check retry eligibility in the `UPDATE` predicate so stale selections do not become duplicate upstream reports.
+
+Reason:
+
+- Selecting retryable rows and then updating by `evidence_id/status` alone leaves a race window under concurrent workers.
+- The outbox is an external reporting path, so duplicate claims are a runtime correctness and operator trust risk.
+
+Impact:
+
+- Concurrent workers converge on one active lease per retryable row.
+- Retry semantics remain unchanged after the claim lease expires.
+
+## 2026-06-01T05:10:00+02:00 - Destructive cleanup throttling should respect cancellation
+
+Decision:
+
+- Keep cleanup deletion semantics unchanged, but make the post-delete throttle observe `context.Context`.
+- Return cancellation instead of continuing to the next Cloudflare deletion after the operator or service manager cancels the run.
+
+Reason:
+
+- Cleanup is a destructive path. Once cancellation is requested, continuing to delete additional rules is worse than stopping early with an explicit error.
+
+Impact:
+
+- Normal cleanup runs are unchanged.
+- Interrupted cleanup runs are safer and easier to reason about.
+
+## 2026-06-01T04:30:00+02:00 - `cf-cleanup` should expose a dry-run mode
+
+Decision:
+
+- Keep `cmd/cf-cleanup` as an operational mutator, but require a `--dry-run` mode that plans deletions without mutating Cloudflare.
+- Preserve fail-closed behavior on Cloudflare list/delete failures.
+
+Reason:
+
+- `cf-cleanup` is a destructive path and needs an operator-safe planning mode.
+- Dry-run gives reproducibility and confidence without changing the live mutation semantics.
+
+Impact:
+
+- Cleanup is safer to run during homelab operations and incident response.
+- The command remains a live mutator when dry-run is not set.
+
+## 2026-06-01T04:22:00+02:00 - `cmd/cf-cleanup` is an active destructive path and must remain covered
+
+Decision:
+
+- Treat `cmd/cf-cleanup` as a critical operational path, not a dead wrapper.
+- Keep cleanup regressions in the test suite.
+- Fail the cleanup run if any Cloudflare deletion fails, so partial failure is not reported as a full success.
+
+Reason:
+
+- The command deletes Cloudflare IP access rules and therefore has direct mutation risk.
+- Returning success after a partial delete failure would hide an operational incident.
+
+Impact:
+
+- Cleanup stays visible, testable, and operator-safe.
+- The command remains a live control path that must be audited like any other mutating entrypoint.
+
+## 2026-06-01T04:08:42+02:00 - Test hardening should prioritize invariants over coverage vanity
+
+Decision:
+
+- Add tests only where they protect invariants, determinism, error behavior, storage contracts, or operator-visible outcomes.
+- Treat standalone hash helpers, constructor wrappers, and wiring seams as optional unless they influence a critical contract.
+
+Reason:
+
+- The useful coverage gaps left in the codebase are now mostly second-order proof gaps, not architecture gaps.
+- Coverage that does not protect a contract should remain deferred rather than forcing noise into the suite.
+
+Impact:
+
+- Test hardening stays focused on behavior that matters operationally.
+- Remaining low-value coverage gaps can be documented explicitly instead of chased mechanically.
+
+## 2026-06-01T02:40:00+02:00 - The reporting gate extraction is behaviorally neutral and should stay
+
+Decision:
+
+- Keep `internal/services/reporting/decisionGate` as the internal home for duplicate-fingerprint tracking, IP lock serialization, and clock control.
+- Treat the extraction as a permanent structural improvement, not as provisional scaffolding.
+
+Reason:
+
+- Dedicated tests now prove the extraction is neutral and that the service behavior remains unchanged.
+- Reintroducing this state into `Service` would re-concentrate accidental coordination without adding value.
+
+Impact:
+
+- Reporting remains coherent while being less entangled.
+- The remaining hotspots are intentional coordination boundaries, not accidental debt.
+
+## 2026-06-01T02:25:00+02:00 - `decisionGate` extraction must be kept and covered by direct tests
+
+Decision:
+
+- Keep `internal/services/reporting/decisionGate` as the home for duplicate fingerprint tracking, IP lock serialization, and injected clock control.
+- Add direct tests for the gate instead of reintroducing the state into `Service`.
+
+Reason:
+
+- The gate was a real accidental coupling point, not just a naming change.
+- Direct tests prove the extraction is behaviorally neutral and keep the seam honest.
+
+Impact:
+
+- The reporting package is easier to maintain without fragmenting the actual reporting workflow.
+- The extracted state now has explicit regression coverage.
+
+## 2026-06-01T02:10:00+02:00 - Reporting dedup and IP locking should live behind an internal decision gate
+
+Decision:
+
+- Move duplicate-fingerprint tracking and IP lock serialization out of `internal/services/reporting.Service` and into a dedicated internal gate.
+- Preserve the existing reporting API and decision semantics.
+
+Reason:
+
+- The mutable concurrency state in `Service` was still a maintainability hotspot.
+- A dedicated gate makes the responsibility explicit without changing runtime behavior.
+
+Impact:
+
+- Reporting is a little less entangled and easier to audit.
+- The package remains central by responsibility, but the state boundary is cleaner.
+
+## 2026-06-01T02:10:00+02:00 - `cmd/cf-sync` bootstrap/runtime should be split by execution mode
+
+Decision:
+
+- Keep `cmd/cf-sync/main.go` as a thin CLI wrapper.
+- Keep shared config/bootstrap and dependency assembly in `cmd/cf-sync/runtime.go`.
+- Keep `cli`, `status`, and `doctor` rendering in `cmd/cf-sync/mode_runtime.go`.
+- Keep daemon server/bootstrap/signal handling in `cmd/cf-sync/daemon_runtime.go`.
+- Preserve flags, defaults, startup order, and failure semantics.
+
+Reason:
+
+- The previous monolithic runtime file was still a composition hotspot even after earlier helper extraction.
+- Splitting by execution mode reduces cognitive load without changing the runtime model.
+
+Impact:
+
+- `cmd/cf-sync` is materially easier to navigate.
+- The split is behavior-neutral and remains within the current architecture.
+
+## 2026-06-01T01:45:00+02:00 - Bootstrap composition should live outside `main.go`
+
+Decision:
+
+- Keep `cmd/cf-sync/main.go` as a thin CLI wrapper.
+- Keep runtime composition and mode dispatch in `cmd/cf-sync/runtime.go`.
+- Keep scope/state/bootstrap and external client setup in dedicated helper files.
+- Preserve flags, defaults, startup order, and error semantics.
+
+Reason:
+
+- This reduces the main entrypoint to a clear wrapper without changing runtime invariants.
+- The change improves readability and testability of startup code while keeping the same operational behavior.
+
+Impact:
+
+- The composition root is now structurally clearer.
+- The remaining Brooks hotspot is concentrated in reporting, not in startup glue.
+
+## 2026-06-01T01:30:00+02:00 - Brooks cleanup has reached the reasonable maximum without a larger architectural split
+
+Decision:
+
+- Stop pursuing further small Brooks-driven extractions in the current pass.
+- Treat `cmd/cf-sync` and `internal/services/reporting` as the remaining structural hubs.
+- Do not attempt a larger refactor unless the team explicitly accepts a broader architectural change.
+
+Reason:
+
+- The remaining hotspots are not simple file-level density anymore.
+- Any further meaningful reduction would require splitting the composition root or reworking the reporting coordination model more deeply.
+- That crosses the line from Brooks cleanup into architectural change.
+
+Impact:
+
+- The campaign can now be described honestly as `BROOKS MAXIMUM REACHED`.
+- The code remains behaviorally neutral and validated.
+- This was an interim decision; the later proof pass extracted the real accidental state and superseded the maximum-reached claim.
+
+## 2026-06-01T01:00:00+02:00 - Mechanical bootstrap extraction can continue when it reduces file-level density only
+
+Decision:
+
+- Keep splitting the `cmd/cf-sync` composition root into narrow helpers when the extraction is purely mechanical.
+- Keep policy conversion and external client assembly outside `main.go`.
+- Keep startup ordering, flags, and defaults unchanged.
+
+Reason:
+
+- The remaining Brooks issues are maintainability and readability, not semantic correctness.
+- Mechanical glue extraction lowers the cost of change without changing runtime behavior.
+
+Impact:
+
+- `cmd/cf-sync/main.go` is thinner again.
+- Behavior remains neutral and validation-driven.
+
+## 2026-06-01T00:45:00+02:00 - Main bootstrap glue can be split into small helpers when the extraction is mechanical
+
+Decision:
+
+- Move HTTP client initialization into `cmd/cf-sync/bootstrap.go`.
+- Move external client assembly and policy conversion into `cmd/cf-sync/setup.go`.
+- Keep the startup sequence, flags, defaults, and runtime semantics unchanged.
+
+Reason:
+
+- The remaining Brooks concern is maintainability density in the composition root, not runtime correctness.
+- Mechanical extraction reduces file-level noise without changing policy or execution order.
+
+Impact:
+
+- `cmd/cf-sync/main.go` is narrower and easier to scan.
+- The runtime remains behaviorally neutral.
+
+## 2026-06-01T00:30:00+02:00 - Bootstrap error messages should be operator-actionable without changing startup semantics
+
+Decision:
+
+- Keep config validation fail-closed, but include the config path, required environment variables, and allowed runtime profiles in the error text.
+- Keep `cmd/cf-sync` startup failures on `stderr` and include scope/path context for SQLite and OPA initialization errors.
+- Move only mechanical bootstrap setup into `cmd/cf-sync/bootstrap.go` so the composition root becomes easier to scan without changing ordering or runtime behavior.
+
+Reason:
+
+- The main complaint from the Brooks pass was maintainability and operator clarity, not runtime correctness.
+- These changes improve diagnosis while preserving execution order and failure semantics.
+
+Impact:
+
+- Startup errors are more actionable for Ubuntu/systemd operators.
+- `cmd/cf-sync/main.go` is less dense, but the runtime surface is unchanged.
+
+## 2026-06-01T00:00:00+02:00 - Scheduler startup should enumerate persisted scopes rather than invent a placeholder scope
+
+Decision:
+
+- Let `internal/runtime/state.StateStore` expose persisted scope enumeration.
+- Have `internal/runtime/scheduler/stateful.Scheduler` discover runtime scopes from persisted state and enqueue one work item per scope.
+- Fall back to the caller-provided zone only when no persisted scopes are available or listing fails.
+
+Reason:
+
+- The scheduler should reflect persisted control-plane partitions instead of deriving a synthetic current scope.
+- The change stays local to startup wiring and does not alter scheduling policy or the worker model.
+
+Impact:
+
+- Scheduler partitioning is now grounded in runtime state rather than placeholder derivation.
+- The remaining limitation is still the shared worker pool, so the architecture audit keeps hard worker isolation as `PARTIAL`.
+
+## 2026-06-01T00:00:00+02:00 - `internal/app` helper logic should live outside the main composition file when the behavior is unchanged
+
+Decision:
+
+- Move allowlist filtering, Lua state projection, and CIDR/recidive adapter helpers into `internal/app/runtime_helpers.go`.
+- Keep the runtime wiring and main run loop in `app.go`.
+
+Reason:
+
+- The app package was still carrying too many support helpers in one file, which made maintenance harder without adding architectural value.
+
+Impact:
+
+- `app.go` is smaller and easier to scan.
+- Behavioral scope did not change; the refactor only reduced file-level coordination density.
+
+## 2026-06-01T00:00:00+02:00 - CrowdSec sync and shadow-mode execution should live outside the main app composition file
+
+Decision:
+
+- Move the CrowdSec sync, Cloudflare diffing, and shadow-mode reporting flow into `internal/app/crowdsec_sync_runtime.go`.
+- Keep `app.go` focused on type definitions and constructors.
+
+Reason:
+
+- The `CrowdSecSyncApp` execution path was still the densest coordination hotspot in the package.
+
+Impact:
+
+- The app package is less file-concentrated and easier to maintain.
+- The execution behavior is unchanged; only the file layout changed.
+
+## 2026-05-31T18:10:00+02:00 - Runtime recovery and rollback resume must validate plan and checkpoint identity before reuse
+
+Decision:
+
+- Make lease acquisition atomic at the SQLite boundary for `(scope_id, action)` and let the lease store reject conflicting active owners under a single transaction.
+- Remove timestamp dependence from fallback event UID generation so the same logical event maps to the same idempotency key across replay/restart.
+- Validate checkpoint scope/name/sequence/event_id/canonical state before replaying from it, and allow fallback to an earlier valid checkpoint or genesis only when explicitly permitted.
+- Persist rollback plan identity (`plan_hash`, `operation_ids`, `operation_count`) and refuse resume when the persisted checkpoint does not match the current plan.
+- Restore/quarantine must verify restored SQLite content before swap, keep the current DB recoverable on validation failure, and only clear degraded mode after successful integrity verification.
+
+Reason:
+
+- These are the remaining semantics that matter for deterministic recovery and safe operational restart; they should fail closed instead of drifting silently.
+
+Impact:
+
+- Lease authority is now atomic at the storage layer.
+- Event idempotency becomes restart-stable.
+- Checkpoint replay and rollback resume now reject stale or mismatched state instead of silently proceeding.
+- Restore/quarantine is more defensible under WAL and corrupt snapshot scenarios.
+
+## 2026-05-31T17:15:00+02:00 - Operational signals should be observable without blocking runtime paths
+
+Decision:
+
+- Add fail-open counters for evidence write failures, telemetry publish failures, outbox pending/failed/reported, malformed Cloudflare WAF events, Cloudflare replay cursor load/save failures, runtime recovery divergence, ownership invariant violations, SQLite degraded mode, and SQLite quarantine creation.
+- Keep the counters local to the existing runtime/reporting/storage paths.
+
+Reason:
+
+- These states are operationally important, but telemetry must not become a new failure mode or change runtime policy.
+
+Impact:
+
+- The control plane now exposes more of its recovery and reporting state without blocking mutations or replay.
+
+## 2026-05-31T17:15:00+02:00 - Reporting service may be split into smaller helpers when the extraction is behavior-preserving
+
+Decision:
+
+- Keep the `internal/services/reporting.Service` behavior unchanged while extracting small helper methods for suppressed decision handling and report finalization.
+
+Reason:
+
+- The service was still carrying too much flow logic in one method, but a narrow extraction is safe and does not change policy.
+
+Impact:
+
+- `Service.Process` is slightly easier to read and audit without affecting the runtime decision model.
+
+## 2026-05-31T17:45:00+02:00 - Outbox retries should be atomically claimed before upstream AbuseIPDB calls
+
+Decision:
+
+- Add a claim lease to `OutboxWorker` and let the SQLite reservation store claim retryable rows before reporting.
+- Start the outbox worker in `cmd/cf-sync` daemon mode under the daemon context.
+- Short-circuit pending same-idempotency reservations instead of sending them upstream again.
+
+Reason:
+
+- Retryable outbox rows were still vulnerable to duplicate processing across workers, and same-idempotency pending reservations were not being reused.
+
+Impact:
+
+- AbuseIPDB outbox retries are now more durable under concurrency without changing the external reporting policy.
+
+## 2026-05-31T16:00:00+02:00 - Cosmetic test coverage should be removed when it does not protect behavior
+
+Decision:
+
+- Remove reporting-runtime constructor/wiring smoke tests when they only prove `New...` returns non-nil dependencies.
+- Remove propagation-only state machine tests when they do not protect a runtime invariant or persistence contract.
+- Keep tests that prove real behavior:
+  - recovery restore and checksum validation
+  - heartbeat renew then lost-lease behavior
+  - SQLite event append idempotency and commit ambiguity handling
+
+Reason:
+
+- Coverage that only exercises constructors or setters creates confidence without protecting regressions that matter.
+
+Impact:
+
+- The suite becomes smaller and more meaningful without changing runtime semantics.
+
+## 2026-05-31T16:00:00+02:00 - Recovery snapshot enumeration should carry checksum metadata
+
+Decision:
+
+- Compute checksum metadata when enumerating recovery snapshots so restore can validate the snapshot content path through the same metadata structure used by the engine.
+
+Reason:
+
+- Restore tests need a durable checksum path, not just a file copy assertion, and the existing snapshot listing already owns the directory scan.
+
+Impact:
+
+- Restore validation can now assert checksum-aware behavior without changing the recovery control flow.
+
+## 2026-05-31T16:00:00+02:00 - SQLite corruption/quarantine tests may use a narrow integrity seam
+
+Decision:
+
+- Allow a test-only integrity-check override path in `internal/storage/sqlite.DB`.
+- Use that seam to force `QuarantineCorruption` through the failure path deterministically.
+
+Reason:
+
+- A healthy database pretending to be corrupt is a coverage illusion.
+- A narrow seam is cheaper and safer than a flaky on-disk corruption fixture.
+
+Impact:
+
+- Quarantine behavior is now testable without changing the runtime policy or the storage backend.
+
+## 2026-05-31T16:00:00+02:00 - Operational drills should stay deterministic and offline
+
+Decision:
+
+- Add replay/restart, outbox retry, and split-brain lease drills under `internal/testing/chaos`.
+- Keep long soak coverage behind a build tag so normal CI stays fast and deterministic.
+- Document the operator runbook separately instead of folding it into code comments.
+
+Reason:
+
+- Operational proof needs failure-mode scenarios, but those scenarios must not make the main test suite flaky or slow.
+
+Impact:
+
+- The repository gains repeatable operational drills without turning the baseline suite into a soak job.
+
 ## 2026-05-29T15:20:00+02:00 - Ownership claim store should be runtime authority when configured
 
 Decision:

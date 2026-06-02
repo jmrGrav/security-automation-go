@@ -141,24 +141,29 @@ func (m *StateMachine) isTransitionAllowed(from, to models.RuntimeStatus) bool {
 	allowed := map[models.RuntimeStatus][]models.RuntimeStatus{
 		models.StatusIdle: {
 			models.StatusDiscovering,
+			models.StatusQuarantined,
 		},
 		models.StatusDiscovering: {
 			models.StatusPlanning,
+			models.StatusQuarantined,
 			models.StatusFailed,
 		},
 		models.StatusPlanning: {
 			models.StatusAwaitingApproval,
 			models.StatusExecuting,
+			models.StatusQuarantined,
 			models.StatusFailed,
 		},
 		models.StatusAwaitingApproval: {
 			models.StatusExecuting,
 			models.StatusIdle, // Rejected
+			models.StatusQuarantined,
 			models.StatusFailed,
 		},
 		models.StatusExecuting: {
 			models.StatusValidating,
 			models.StatusRollbackRequired,
+			models.StatusQuarantined,
 			models.StatusFailed,
 		},
 		models.StatusValidating: {
@@ -170,6 +175,7 @@ func (m *StateMachine) isTransitionAllowed(from, to models.RuntimeStatus) bool {
 		models.StatusConverged: {
 			models.StatusIdle,
 			models.StatusDiscovering, // Re-run
+			models.StatusQuarantined,
 		},
 		models.StatusRollbackRequired: {
 			models.StatusRollingBack,
@@ -183,6 +189,7 @@ func (m *StateMachine) isTransitionAllowed(from, to models.RuntimeStatus) bool {
 		models.StatusFailed: {
 			models.StatusIdle,
 			models.StatusDiscovering, // Retry
+			models.StatusQuarantined,
 		},
 		models.StatusQuarantined: {
 			models.StatusIdle, // Manual release
@@ -191,6 +198,7 @@ func (m *StateMachine) isTransitionAllowed(from, to models.RuntimeStatus) bool {
 		models.StatusPaused: {
 			models.StatusIdle,
 			models.StatusDiscovering,
+			models.StatusQuarantined,
 		},
 	}
 

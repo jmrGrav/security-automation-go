@@ -51,8 +51,9 @@ type RuntimeConfig struct {
 }
 
 type CloudflareConfig struct {
-	APIToken string `yaml:"api_token"`
-	ZoneID   string `yaml:"zone_id"`
+	APIToken         string `yaml:"api_token"`
+	ZoneID           string `yaml:"zone_id"`
+	MutationsEnabled bool   `yaml:"mutations_enabled"`
 }
 
 type CrowdSecConfig struct {
@@ -73,11 +74,38 @@ type OpenRestyConfig struct {
 
 type AbuseIPDBConfig struct {
 	APIKey           string        `yaml:"api_key"`
+	Enabled          bool          `yaml:"enabled"`
 	ReportingEnabled *bool         `yaml:"reporting_enabled"`
 	Threshold        int           `yaml:"threshold"`
 	FailureMode      string        `yaml:"failure_mode"`
 	CacheTTL         time.Duration `yaml:"cache_ttl"`
 	RequestTimeout   time.Duration `yaml:"request_timeout"`
+}
+
+type SpamhausConfig struct {
+	APIKey  string `yaml:"api_key"`
+	Enabled bool   `yaml:"enabled"`
+}
+
+type VirusTotalConfig struct {
+	APIKey  string `yaml:"api_key"`
+	Enabled bool   `yaml:"enabled"`
+}
+
+type UIBoolConfig struct {
+	Enabled           bool   `yaml:"enabled"`
+	Addr              string `yaml:"addr"`
+	MutationsEnabled  bool   `yaml:"mutations_enabled"`
+	SecretFile        string `yaml:"secret_file"`
+	ProviderStateFile string `yaml:"provider_state_file"`
+}
+
+type EnrichmentConfig struct {
+	Enabled    bool          `yaml:"enabled"`
+	DNSEnabled bool          `yaml:"dns_enabled"`
+	ASNEnabled bool          `yaml:"asn_enabled"`
+	Timeout    time.Duration `yaml:"timeout"`
+	CacheTTL   time.Duration `yaml:"cache_ttl"`
 }
 
 type BetterStackConfig struct {
@@ -89,10 +117,14 @@ type Config struct {
 	Version     string            `yaml:"version"`
 	Global      GlobalConfig      `yaml:"global"`
 	Runtime     RuntimeConfig     `yaml:"runtime"`
+	UI          UIBoolConfig      `yaml:"ui"`
+	Enrichment  EnrichmentConfig  `yaml:"enrichment"`
 	Cloudflare  CloudflareConfig  `yaml:"cloudflare"`
 	CrowdSec    CrowdSecConfig    `yaml:"crowdsec"`
 	OpenResty   OpenRestyConfig   `yaml:"openresty"`
 	AbuseIPDB   AbuseIPDBConfig   `yaml:"abuseipdb"`
+	Spamhaus    SpamhausConfig    `yaml:"spamhaus"`
+	VirusTotal  VirusTotalConfig  `yaml:"virustotal"`
 	BetterStack BetterStackConfig `yaml:"betterstack"`
 	Policies    []PolicyConfig    `yaml:"policies"`
 	StateDir    string            `yaml:"state_dir"`
@@ -139,12 +171,27 @@ func DefaultConfig() *Config {
 		Runtime: RuntimeConfig{
 			Profile: RuntimeProfileSingleNode,
 		},
+		UI: UIBoolConfig{
+			Addr:              "127.0.0.1:9090",
+			SecretFile:        "/var/lib/cf-sync/secrets.local",
+			ProviderStateFile: "/etc/security-automation/providers/ai-providers.env",
+			MutationsEnabled:  false,
+		},
+		Enrichment: EnrichmentConfig{
+			Enabled:    true,
+			DNSEnabled: true,
+			ASNEnabled: true,
+			Timeout:    800 * time.Millisecond,
+			CacheTTL:   6 * time.Hour,
+		},
 		AbuseIPDB: AbuseIPDBConfig{
 			Threshold:      70,
 			FailureMode:    "suppress",
 			CacheTTL:       15 * time.Minute,
 			RequestTimeout: 2 * time.Second,
 		},
+		Spamhaus:   SpamhausConfig{},
+		VirusTotal: VirusTotalConfig{},
 		CrowdSec: CrowdSecConfig{
 			DecisionsLog:  "/var/log/crowdsec/decisions.log",
 			NginxLogDir:   "/var/log/nginx",
@@ -167,7 +214,7 @@ func Load(path string) (*Config, error) {
 	if path != "" {
 		f, err := os.Open(path)
 		if err != nil {
-			return nil, fmt.Errorf("failed to open config file: %w", err)
+			return nil, fmt.Errorf("failed to open config file %q: %w", path, err)
 		}
 		defer f.Close()
 
@@ -175,7 +222,7 @@ func Load(path string) (*Config, error) {
 		decoder.KnownFields(true) // Strict mode
 		if err := decoder.Decode(cfg); err != nil {
 			if !errors.Is(err, io.EOF) {
-				return nil, fmt.Errorf("failed to decode YAML config: %w", err)
+				return nil, fmt.Errorf("failed to decode YAML config %q: %w", path, err)
 			}
 		}
 	}
@@ -196,6 +243,11 @@ func applyEnvOverrides(cfg *Config) {
 	if v := os.Getenv("CF_ZONE_ID"); v != "" {
 		cfg.Cloudflare.ZoneID = v
 	}
+	if v := os.Getenv("CLOUDFLARE_MUTATIONS_ENABLED"); v != "" {
+		if enabled, err := strconv.ParseBool(v); err == nil {
+			cfg.Cloudflare.MutationsEnabled = enabled
+		}
+	}
 	if v := os.Getenv("CS_API_KEY"); v != "" {
 		cfg.CrowdSec.APIKey = v
 	}
@@ -211,10 +263,75 @@ func applyEnvOverrides(cfg *Config) {
 	if v := os.Getenv("ABUSEIPDB_KEY"); v != "" {
 		cfg.AbuseIPDB.APIKey = v
 	}
+	if v := os.Getenv("ABUSEIPDB_ENABLED"); v != "" {
+		if enabled, err := strconv.ParseBool(v); err == nil {
+			cfg.AbuseIPDB.Enabled = enabled
+		}
+	}
 	if v := os.Getenv("ABUSEIPDB_REPORTING_ENABLED"); v != "" {
 		enabled, err := strconv.ParseBool(v)
 		if err == nil {
 			cfg.AbuseIPDB.ReportingEnabled = &enabled
+		}
+	}
+	if v := os.Getenv("SPAMHAUS_API_KEY"); v != "" {
+		cfg.Spamhaus.APIKey = v
+	}
+	if v := os.Getenv("SPAMHAUS_ENABLED"); v != "" {
+		if enabled, err := strconv.ParseBool(v); err == nil {
+			cfg.Spamhaus.Enabled = enabled
+		}
+	}
+	if v := os.Getenv("VIRUSTOTAL_API_KEY"); v != "" {
+		cfg.VirusTotal.APIKey = v
+	}
+	if v := os.Getenv("VIRUSTOTAL_ENABLED"); v != "" {
+		if enabled, err := strconv.ParseBool(v); err == nil {
+			cfg.VirusTotal.Enabled = enabled
+		}
+	}
+	if v := os.Getenv("UI_ENABLED"); v != "" {
+		if enabled, err := strconv.ParseBool(v); err == nil {
+			cfg.UI.Enabled = enabled
+		}
+	}
+	if v := os.Getenv("UI_ADDR"); v != "" {
+		cfg.UI.Addr = v
+	}
+	if v := os.Getenv("UI_MUTATIONS_ENABLED"); v != "" {
+		if enabled, err := strconv.ParseBool(v); err == nil {
+			cfg.UI.MutationsEnabled = enabled
+		}
+	}
+	if v := os.Getenv("UI_SECRET_FILE"); v != "" {
+		cfg.UI.SecretFile = v
+	}
+	if v := os.Getenv("UI_PROVIDER_STATE_FILE"); v != "" {
+		cfg.UI.ProviderStateFile = v
+	}
+	if v := os.Getenv("ENRICHMENT_ENABLED"); v != "" {
+		if enabled, err := strconv.ParseBool(v); err == nil {
+			cfg.Enrichment.Enabled = enabled
+		}
+	}
+	if v := os.Getenv("ENRICHMENT_DNS_ENABLED"); v != "" {
+		if enabled, err := strconv.ParseBool(v); err == nil {
+			cfg.Enrichment.DNSEnabled = enabled
+		}
+	}
+	if v := os.Getenv("ENRICHMENT_ASN_ENABLED"); v != "" {
+		if enabled, err := strconv.ParseBool(v); err == nil {
+			cfg.Enrichment.ASNEnabled = enabled
+		}
+	}
+	if v := os.Getenv("ENRICHMENT_TIMEOUT_MS"); v != "" {
+		if ms, err := strconv.Atoi(v); err == nil && ms >= 0 {
+			cfg.Enrichment.Timeout = time.Duration(ms) * time.Millisecond
+		}
+	}
+	if v := os.Getenv("ENRICHMENT_CACHE_TTL"); v != "" {
+		if ttl, err := time.ParseDuration(v); err == nil {
+			cfg.Enrichment.CacheTTL = ttl
 		}
 	}
 	if v := os.Getenv("BETTERSTACK_SOURCE_TOKEN"); v != "" {
@@ -236,20 +353,23 @@ func validate(cfg *Config) error {
 		return fmt.Errorf("unsupported config schema version: %s (expected %s)", cfg.Version, SchemaVersion)
 	}
 	if cfg.Cloudflare.APIToken == "" {
-		return errors.New("cloudflare api_token is required")
+		return errors.New("cloudflare.api_token is required (set CF_API_TOKEN or cloudflare.api_token in the config file)")
 	}
 	if cfg.Cloudflare.ZoneID == "" {
-		return errors.New("cloudflare zone_id is required")
+		return errors.New("cloudflare.zone_id is required (set CF_ZONE_ID or cloudflare.zone_id in the config file)")
+	}
+	if cfg.UI.Enabled && cfg.UI.Addr == "" {
+		return errors.New("ui.addr is required when UI is enabled (set UI_ADDR or ui.addr in the config file)")
 	}
 	if cfg.Interval <= 0 {
-		return errors.New("interval must be positive")
+		return errors.New("interval must be positive (set global.interval or interval in the config file)")
 	}
 	switch cfg.Runtime.Profile {
 	case "", RuntimeProfileSingleNode:
 		cfg.Runtime.Profile = RuntimeProfileSingleNode
 	case RuntimeProfileStrictHA:
 	default:
-		return fmt.Errorf("unsupported runtime profile: %s", cfg.Runtime.Profile)
+		return fmt.Errorf("unsupported runtime profile %q (allowed: %q, %q)", cfg.Runtime.Profile, RuntimeProfileSingleNode, RuntimeProfileStrictHA)
 	}
 	return nil
 }
@@ -260,6 +380,21 @@ func (c *Config) MaskedString() string {
 	if len(c.Cloudflare.APIToken) > 8 {
 		maskedToken = c.Cloudflare.APIToken[:4] + "..." + c.Cloudflare.APIToken[len(c.Cloudflare.APIToken)-4:]
 	}
-	return fmt.Sprintf("version=%s env=%s service=%s zone=%s token=%s state=%s interval=%s",
-		c.Version, c.Global.AppEnv, c.Global.ServiceName, c.Cloudflare.ZoneID, maskedToken, c.StateDir, c.Interval)
+	return fmt.Sprintf(
+		"version=%s env=%s service=%s zone=%s token=%s abuseipdb=%t spamhaus=%t virustotal=%t ui=%t ui_addr=%s ui_secret_file=%s ui_provider_state_file=%s state=%s interval=%s",
+		c.Version,
+		c.Global.AppEnv,
+		c.Global.ServiceName,
+		c.Cloudflare.ZoneID,
+		maskedToken,
+		c.AbuseIPDB.Enabled,
+		c.Spamhaus.Enabled,
+		c.VirusTotal.Enabled,
+		c.UI.Enabled,
+		c.UI.Addr,
+		c.UI.SecretFile,
+		c.UI.ProviderStateFile,
+		c.StateDir,
+		c.Interval,
+	)
 }

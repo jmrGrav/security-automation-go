@@ -43,6 +43,9 @@ func (v *Validator) Validate(ctx context.Context, target *snapshot.Snapshot, cur
 		res.Violations = violations
 		v.logger.Warn("invariant violations detected during convergence validation", "count", len(violations))
 	}
+	if current == nil {
+		return res, nil
+	}
 
 	// 2. Canonical hash comparison
 	if target != nil && current.Integrity.SnapshotChecksum != target.Integrity.SnapshotChecksum {

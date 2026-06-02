@@ -18,6 +18,7 @@ type OutboxWorkerConfig struct {
 	Limit        int
 	RetryBackoff time.Duration
 	Interval     time.Duration
+	ClaimLease   time.Duration
 	Clock        func() time.Time
 	LeaseGuard   OutboxLeaseGuard
 }
@@ -35,6 +36,7 @@ type OutboxWorker struct {
 	limit        int
 	retryBackoff time.Duration
 	interval     time.Duration
+	claimLease   time.Duration
 	now          func() time.Time
 	leaseGuard   OutboxLeaseGuard
 }
@@ -49,6 +51,9 @@ func NewOutboxWorker(store ReportReservationStore, reporter abexec.Executor, ded
 	if cfg.Clock == nil {
 		cfg.Clock = func() time.Time { return time.Now().UTC() }
 	}
+	if cfg.ClaimLease <= 0 {
+		cfg.ClaimLease = 30 * time.Second
+	}
 	return &OutboxWorker{
 		store:        store,
 		reporter:     reporter,
@@ -58,6 +63,7 @@ func NewOutboxWorker(store ReportReservationStore, reporter abexec.Executor, ded
 		limit:        cfg.Limit,
 		retryBackoff: cfg.RetryBackoff,
 		interval:     cfg.Interval,
+		claimLease:   cfg.ClaimLease,
 		now:          cfg.Clock,
 		leaseGuard:   cfg.LeaseGuard,
 	}
@@ -75,11 +81,12 @@ func (w *OutboxWorker) ProcessOnce(ctx context.Context) (int, error) {
 	if w == nil || w.store == nil || w.reporter == nil {
 		return 0, nil
 	}
-	items, err := w.store.ListRetryable(ctx, w.now(), w.limit)
+	items, err := w.store.ClaimRetryable(ctx, w.now(), w.limit, w.now().Add(w.claimLease))
 	if err != nil {
 		metrics.AbuseIPDBReportDedupStoreErrorsTotal.Inc()
 		return 0, err
 	}
+	metrics.AbuseIPDBOutboxPendingTotal.Add(float64(len(items)))
 	var firstErr error
 	var processed int
 	for _, item := range items {
@@ -132,21 +139,25 @@ func (w *OutboxWorker) processItem(ctx context.Context, item ReportOutboxItem) e
 	}
 	if err := w.reporter.Execute(ctx, []abmodels.ExecutableReport{report}); err != nil {
 		_ = w.store.RecordAttempt(ctx, item.Reservation.EvidenceID, ReportStatusFailed, err.Error(), w.now().Add(w.retryBackoff))
+		metrics.AbuseIPDBOutboxFailedTotal.Inc()
 		w.recordOutboxEvidence(ctx, item, false, true, "abuseipdb_outbox_retry_failed", err.Error())
 		return err
 	}
 	if err := w.markDedup(ctx, item); err != nil {
 		metrics.AbuseIPDBReportDedupStoreErrorsTotal.Inc()
 		_ = w.store.RecordAttempt(ctx, item.Reservation.EvidenceID, ReportStatusReportedDedupFailed, err.Error(), time.Time{})
+		metrics.AbuseIPDBOutboxFailedTotal.Inc()
 		w.recordOutboxEvidence(ctx, item, true, true, "abuseipdb_outbox_dedup_mark_failed", err.Error())
 		return err
 	}
 	if err := w.store.MarkStatus(ctx, item.Reservation.EvidenceID, ReportStatusReported); err != nil {
 		metrics.AbuseIPDBReportDedupStoreErrorsTotal.Inc()
+		metrics.AbuseIPDBOutboxFailedTotal.Inc()
 		w.recordOutboxEvidence(ctx, item, true, true, "abuseipdb_outbox_status_failed", err.Error())
 		return err
 	}
 	metrics.AbuseIPDBReportsSentTotal.Inc()
+	metrics.AbuseIPDBOutboxReportedTotal.Inc()
 	w.recordOutboxEvidence(ctx, item, true, false, "", "")
 	return nil
 }

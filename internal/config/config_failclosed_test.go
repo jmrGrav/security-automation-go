@@ -16,6 +16,8 @@ func TestValidate_MissingToken_FailClosed(t *testing.T) {
 	cfg.Cloudflare.ZoneID = "z"
 	if err := validate(cfg); err == nil {
 		t.Error("missing API token must be rejected (fail-closed)")
+	} else if !strings.Contains(err.Error(), "CF_API_TOKEN") {
+		t.Fatalf("missing token error should mention operator hint, got %v", err)
 	}
 }
 
@@ -25,6 +27,8 @@ func TestValidate_MissingZoneID_FailClosed(t *testing.T) {
 	cfg.Cloudflare.ZoneID = ""
 	if err := validate(cfg); err == nil {
 		t.Error("missing zone ID must be rejected (fail-closed)")
+	} else if !strings.Contains(err.Error(), "CF_ZONE_ID") {
+		t.Fatalf("missing zone error should mention operator hint, got %v", err)
 	}
 }
 
@@ -55,6 +59,8 @@ func TestValidate_UnknownRuntimeProfile_FailClosed(t *testing.T) {
 	cfg.Runtime.Profile = "unknown-profile"
 	if err := validate(cfg); err == nil {
 		t.Error("unknown runtime profile must be rejected")
+	} else if !strings.Contains(err.Error(), "allowed") {
+		t.Fatalf("unknown profile error should mention allowed values, got %v", err)
 	}
 }
 
@@ -85,6 +91,9 @@ cloudflare:
 	if err == nil {
 		t.Error("malformed YAML must return an error")
 	}
+	if !strings.Contains(err.Error(), f.Name()) {
+		t.Fatalf("malformed YAML error should mention file path, got %v", err)
+	}
 }
 
 // TestLoad_FileNotFound verifies a missing config file path returns an error.
@@ -92,6 +101,9 @@ func TestLoad_FileNotFound(t *testing.T) {
 	_, err := Load("/nonexistent/path/to/config.yaml")
 	if err == nil {
 		t.Error("missing config file must return error")
+	}
+	if !strings.Contains(err.Error(), "/nonexistent/path/to/config.yaml") {
+		t.Fatalf("missing file error should mention path, got %v", err)
 	}
 }
 

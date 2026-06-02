@@ -2,17 +2,71 @@ package adapter
 
 import (
 	"context"
-	"fmt"
-	"os/exec"
+	"net"
+	"regexp"
 	"strings"
 	"time"
 
+	"github.com/jm/security-automation-go/internal/crowdsec"
 	"github.com/jm/security-automation-go/internal/crowdsec/models"
 )
 
-// CSCLIExecutor implements real CrowdSec mutations using the cscli binary.
+// durationPattern matches cscli-style ban durations (e.g. "4h", "30m",
+// "168h", "1h30m"). It deliberately rejects anything else so malformed or
+// hostile durations never reach the delegated CrowdSec write boundary.
+var durationPattern = regexp.MustCompile(`^[0-9]+[smhd]([0-9]+[smhd])*$`)
+
+// allowedScopes is the strict allowlist of CrowdSec decision scopes this batch
+// adapter may delegate. Anything else fails closed before reaching the writer.
+var allowedScopes = map[string]bool{"ip": true, "range": true}
+
+// validateExecOperation enforces fail-closed input validation before this batch
+// adapter delegates to the single CrowdSec write boundary. Returns an empty
+// string when the operation is safe to delegate.
+func validateExecOperation(a models.ExecutableOperation) string {
+	switch a.Type {
+	case models.ActionAddDecision, models.ActionDeleteDecision:
+	default:
+		return "unsupported action type"
+	}
+	if !allowedScopes[a.Scope] {
+		return "invalid scope (allowed: ip, range)"
+	}
+	if a.Value == "" {
+		return "missing target value"
+	}
+	// Reject flag-injection on every field that becomes a positional cscli arg.
+	for _, field := range []string{a.Scope, a.Value, a.Duration, a.Reason} {
+		if strings.HasPrefix(field, "-") {
+			return "argument must not start with '-'"
+		}
+	}
+	switch a.Scope {
+	case "ip":
+		if net.ParseIP(a.Value) == nil {
+			return "value is not a valid IP address"
+		}
+	case "range":
+		if _, _, err := net.ParseCIDR(a.Value); err != nil {
+			return "value is not a valid CIDR range"
+		}
+	}
+	if a.Type == models.ActionAddDecision {
+		if a.Duration == "" {
+			return "missing duration for add decision"
+		}
+		if !durationPattern.MatchString(a.Duration) {
+			return "invalid duration format (expected e.g. 4h, 30m)"
+		}
+	}
+	return ""
+}
+
+// CSCLIExecutor preserves the batch execution contract for orchestrator code,
+// but it is not a CrowdSec write boundary. It delegates all mutations to the
+// injected CrowdSec writer, which in production must be crowdsec.Client.
 type CSCLIExecutor struct {
-	binPath string
+	writer  crowdsec.DecisionManager
 	timeout time.Duration
 }
 
@@ -23,8 +77,15 @@ func NewCSCLIExecutor(binPath string, timeout time.Duration) *CSCLIExecutor {
 	if timeout == 0 {
 		timeout = 10 * time.Second
 	}
+	return NewCSCLIExecutorWithWriter(crowdsec.NewClientFromConfig(binPath, "", timeout), timeout)
+}
+
+func NewCSCLIExecutorWithWriter(writer crowdsec.DecisionManager, timeout time.Duration) *CSCLIExecutor {
+	if timeout == 0 {
+		timeout = 10 * time.Second
+	}
 	return &CSCLIExecutor{
-		binPath: binPath,
+		writer:  writer,
 		timeout: timeout,
 	}
 }
@@ -63,43 +124,56 @@ func (e *CSCLIExecutor) executeSingle(ctx context.Context, a models.ExecutableOp
 			Action:     a.Type,
 			Target:     a.Value,
 			ExecutedAt: start.UTC(),
-			ExecutedBy: "cscli-executor",
+			ExecutedBy: "crowdsec-client-delegating-executor",
 		},
 	}
 
-	var args []string
+	// Fail closed before delegating to the CrowdSec write boundary.
+	if reason := validateExecOperation(a); reason != "" {
+		res.Status = "failed"
+		res.Error = reason
+		return res
+	}
+
+	if e.writer == nil {
+		res.Status = "failed"
+		res.Error = "missing CrowdSec decision writer"
+		return res
+	}
+
+	var err error
 	switch a.Type {
 	case models.ActionAddDecision:
-		args = []string{"decisions", "add", "--" + a.Scope, a.Value, "--duration", a.Duration, "--reason", a.Reason, "--type", "ban"}
+		if a.Scope == "ip" {
+			err = e.writer.AddIPDecision(ctx, a.Value, a.Duration, a.Reason)
+		} else {
+			err = e.writer.AddRangeDecision(ctx, a.Value, a.Duration, a.Reason)
+		}
 	case models.ActionDeleteDecision:
-		args = []string{"decisions", "delete", "--" + a.Scope, a.Value}
+		if a.Scope == "ip" {
+			err = e.writer.DeleteIPDecision(ctx, a.Value)
+		} else {
+			err = e.writer.DeleteRangeDecision(ctx, a.Value)
+		}
 	default:
 		res.Status = "failed"
 		res.Error = "unsupported action type"
 		return res
 	}
 
-	res.Audit.RawCommand = e.binPath + " " + strings.Join(args, " ")
-
-	// Execute command safely
-	cmd := exec.CommandContext(ctx, e.binPath, args...)
-	output, err := cmd.CombinedOutput()
-
 	res.Duration = time.Since(start)
 
 	if err != nil {
-		// Handle idempotence: if it already exists or was already deleted, we might count as success
-		// or specific status.
-		outStr := string(output)
-		if e.isIdempotentSuccess(a.Type, outStr) {
+		if e.isIdempotentSuccess(a.Type, err.Error()) {
 			res.Status = "success"
-			res.Audit.RawCommand += " (idempotent)"
+			res.Audit.RawCommand = "(delegated crowdsec.Client idempotent)"
 		} else {
 			res.Status = "failed"
-			res.Error = fmt.Sprintf("%v: %s", err, outStr)
+			res.Error = err.Error()
 		}
 	} else {
 		res.Status = "success"
+		res.Audit.RawCommand = "(delegated crowdsec.Client)"
 	}
 
 	return res

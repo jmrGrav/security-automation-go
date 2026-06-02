@@ -2,11 +2,13 @@ package executor
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/jm/security-automation-go/internal/abuseipdb/models"
 	"github.com/jm/security-automation-go/internal/abuseipdb/transport"
 	"github.com/jm/security-automation-go/internal/observability/metrics"
+	"github.com/jm/security-automation-go/internal/security/quota"
 )
 
 // Executor defines the contract for sending reports.
@@ -24,6 +26,12 @@ func New(t *transport.Transport) *RealExecutor {
 
 func (e *RealExecutor) Execute(ctx context.Context, reports []models.ExecutableReport) error {
 	for _, r := range reports {
+		if state, ok := quota.DefaultRegistry().State("abuseipdb"); ok && state == quota.Exhausted {
+			metrics.AbuseIPDBFailuresTotal.Inc()
+			metrics.AbuseIPDBRateLimitTotal.Inc()
+			return fmt.Errorf("abuseipdb quota exhausted; reporting suspended")
+		}
+
 		// 1. Send report
 		req := models.ReportRequest{
 			IP:         r.IP,

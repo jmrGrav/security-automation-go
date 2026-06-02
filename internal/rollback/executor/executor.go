@@ -2,6 +2,9 @@ package executor
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"time"
 
 	"github.com/jm/security-automation-go/internal/apperr"
@@ -69,6 +72,7 @@ func (e *Executor) ExecuteRollback(ctx context.Context, batch models.RollbackBat
 	if !e.breaker.Allow() {
 		return apperr.New(op, "circuit breaker is open, refusing rollback")
 	}
+	ensureRollbackPlanIdentity(&batch)
 
 	if e.checkpoints != nil {
 		persisted, ok, err := e.checkpoints.LoadRollbackCheckpoint(ctx, batch.ID)
@@ -76,6 +80,24 @@ func (e *Executor) ExecuteRollback(ctx context.Context, batch models.RollbackBat
 			return apperr.Wrap(op, err)
 		}
 		if ok {
+			if err := validateRollbackPlanIdentity(batch, persisted); err != nil {
+				_ = e.journal.Append(runmodels.AuditEvent{
+					Timestamp: time.Now().UTC(),
+					RunID:     batch.ID,
+					Status:    "rollback_plan_mismatch",
+					Error:     err.Error(),
+					Metadata: map[string]interface{}{
+						"plan_hash":         batch.PlanHash,
+						"persisted_hash":    persisted.PlanHash,
+						"operation_count":   batch.OperationCount,
+						"persisted_count":   persisted.OperationCount,
+						"persisted_op_ids":  persisted.OperationIDs,
+						"operation_ids":     batch.OperationIDs,
+						"originating_batch": batch.OriginatingBatchID,
+					},
+				})
+				return apperr.Wrap(op, err)
+			}
 			if persisted.LastCompletedOpIdx > batch.LastCompletedOpIdx {
 				batch.LastCompletedOpIdx = persisted.LastCompletedOpIdx
 			}
@@ -149,6 +171,78 @@ func (e *Executor) ExecuteRollback(ctx context.Context, batch models.RollbackBat
 	})
 
 	return nil
+}
+
+func ensureRollbackPlanIdentity(batch *models.RollbackBatch) {
+	batch.OperationCount = len(batch.Operations)
+	batch.OperationIDs = batch.OperationIDs[:0]
+	if cap(batch.OperationIDs) < len(batch.Operations) {
+		batch.OperationIDs = make([]string, 0, len(batch.Operations))
+	}
+	for _, op := range batch.Operations {
+		batch.OperationIDs = append(batch.OperationIDs, op.OperationID)
+	}
+	batch.PlanHash = rollbackPlanHash(*batch)
+}
+
+func validateRollbackPlanIdentity(current models.RollbackBatch, persisted models.RollbackBatch) error {
+	if current.ID != persisted.ID {
+		return apperr.New("rollback.executor.ExecuteRollback", "rollback batch id mismatch")
+	}
+	if current.PlanHash != persisted.PlanHash {
+		return apperr.New("rollback.executor.ExecuteRollback", "rollback plan hash mismatch")
+	}
+	if current.OperationCount != persisted.OperationCount {
+		return apperr.New("rollback.executor.ExecuteRollback", "rollback operation count mismatch")
+	}
+	if len(current.OperationIDs) != len(persisted.OperationIDs) {
+		return apperr.New("rollback.executor.ExecuteRollback", "rollback operation ids mismatch")
+	}
+	for i := range current.OperationIDs {
+		if current.OperationIDs[i] != persisted.OperationIDs[i] {
+			return apperr.New("rollback.executor.ExecuteRollback", "rollback operation ids mismatch")
+		}
+	}
+	return nil
+}
+
+func rollbackPlanHash(batch models.RollbackBatch) string {
+	payload, _ := json.Marshal(struct {
+		ID                 string                         `json:"id"`
+		OriginatingBatchID string                         `json:"originating_batch_id"`
+		OperationCount     int                            `json:"operation_count"`
+		OperationIDs       []string                       `json:"operation_ids"`
+		Operations         []models.CompensationOperation `json:"operations"`
+	}{
+		ID:                 batch.ID,
+		OriginatingBatchID: batch.OriginatingBatchID,
+		OperationCount:     len(batch.Operations),
+		OperationIDs:       operationIDs(batch.Operations),
+		Operations:         canonicalRollbackOperations(batch.Operations),
+	})
+	sum := sha256.Sum256(payload)
+	return hex.EncodeToString(sum[:])
+}
+
+func operationIDs(ops []models.CompensationOperation) []string {
+	ids := make([]string, 0, len(ops))
+	for _, op := range ops {
+		ids = append(ids, op.OperationID)
+	}
+	return ids
+}
+
+func canonicalRollbackOperations(ops []models.CompensationOperation) []models.CompensationOperation {
+	out := make([]models.CompensationOperation, len(ops))
+	for i, op := range ops {
+		out[i] = op
+		out[i].State = ""
+		out[i].StartedAt = time.Time{}
+		out[i].FinishedAt = time.Time{}
+		out[i].Error = ""
+		out[i].ResultID = ""
+	}
+	return out
 }
 
 func (e *Executor) executeSingle(ctx context.Context, op *models.CompensationOperation, batchID string) error {

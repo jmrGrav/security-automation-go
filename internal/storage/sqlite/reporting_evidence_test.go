@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -74,6 +75,45 @@ func TestReportingEvidenceStorePersistsAndLists(t *testing.T) {
 	}
 	if len(search) != 1 || search[0].EvidenceID != "ev-2" {
 		t.Fatalf("unexpected search result: %+v", search)
+	}
+}
+
+func TestReportingEvidenceStorePrunesOldEntries(t *testing.T) {
+	db, err := New(t.TempDir())
+	if err != nil {
+		t.Fatalf("new db: %v", err)
+	}
+	defer db.Close()
+
+	store := NewReportingEvidenceStore(db)
+	base := time.Date(2026, 6, 1, 10, 0, 0, 0, time.UTC)
+	store.retention = 24 * time.Hour
+	store.maxEntries = 2
+	store.cleanupEvery = 1
+	store.now = func() time.Time { return base }
+
+	for i := 1; i <= 3; i++ {
+		ev := reporting.DecisionEvidence{
+			EvidenceID: fmt.Sprintf("ev-%d", i),
+			Timestamp:  base.Add(time.Duration(i) * time.Minute),
+			Source:     "cloudflare_waf",
+			IP:         "8.8.8.8",
+			Decision:   "reported",
+		}
+		if err := store.Append(context.Background(), ev); err != nil {
+			t.Fatalf("append %d: %v", i, err)
+		}
+	}
+
+	got, err := store.List(context.Background(), 10)
+	if err != nil {
+		t.Fatalf("list after prune: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("expected pruned evidence to stay bounded at 2, got %d", len(got))
+	}
+	if got[0].EvidenceID != "ev-3" || got[1].EvidenceID != "ev-2" {
+		t.Fatalf("unexpected evidence retention order: %+v", got)
 	}
 }
 
@@ -190,5 +230,100 @@ func TestReportReservationStoreListsRetryableWithReportPayload(t *testing.T) {
 	}
 	if len(items) != 1 || items[0].AttemptCount != 1 || items[0].LastError != "rate limited" {
 		t.Fatalf("expected retry attempt metadata, got %+v", items)
+	}
+}
+
+func TestReportReservationStorePrunesOldRows(t *testing.T) {
+	db, err := New(t.TempDir())
+	if err != nil {
+		t.Fatalf("new db: %v", err)
+	}
+	defer db.Close()
+
+	store := NewReportReservationStore(db)
+	store.retention = 24 * time.Hour
+	store.maxEntries = 2
+	store.cleanupEvery = 1
+	base := time.Date(2026, 6, 1, 8, 0, 0, 0, time.UTC)
+	store.now = func() time.Time { return base }
+
+	for i := 1; i <= 3; i++ {
+		reservation := reporting.ReportReservation{
+			IP:             fmt.Sprintf("8.8.4.%d", i),
+			Source:         "cloudflare_waf",
+			IdempotencyKey: fmt.Sprintf("idem-%d", i),
+			EvidenceID:     fmt.Sprintf("ev-%d", i),
+			Status:         reporting.ReportStatusPending,
+			ExpiresAt:      base.Add(time.Hour),
+		}
+		if err := store.Reserve(context.Background(), reservation); err != nil {
+			t.Fatalf("reserve %d: %v", i, err)
+		}
+	}
+
+	items, err := store.ListRetryable(context.Background(), base, 10)
+	if err != nil {
+		t.Fatalf("list retryable after prune: %v", err)
+	}
+	if len(items) != 2 {
+		t.Fatalf("expected outbox to stay bounded at 2 rows, got %d", len(items))
+	}
+	if items[0].Reservation.EvidenceID != "ev-2" || items[1].Reservation.EvidenceID != "ev-3" {
+		t.Fatalf("unexpected outbox retention order: %+v", items)
+	}
+}
+
+func TestReportReservationStoreClaimRetryableLeasesRowsUntilClaimExpires(t *testing.T) {
+	db, err := New(t.TempDir())
+	if err != nil {
+		t.Fatalf("new db: %v", err)
+	}
+	defer db.Close()
+
+	store := NewReportReservationStore(db)
+	ctx := context.Background()
+	now := time.Date(2026, 6, 1, 8, 0, 0, 0, time.UTC)
+	reservation := reporting.ReportReservation{
+		IP:             "8.8.4.7",
+		Source:         "cloudflare_waf",
+		IdempotencyKey: "idem-claim",
+		EvidenceID:     "ev-claim",
+		Status:         reporting.ReportStatusPending,
+		ExpiresAt:      now.Add(time.Hour),
+		Report: abmodels.ExecutableReport{
+			ExecutionID: "idem-claim",
+			IP:          "8.8.4.7",
+			Categories:  "21",
+			Comment:     "Cloudflare WAF: retry claim",
+			CreatedAt:   now,
+		},
+	}
+	if err := store.Reserve(ctx, reservation); err != nil {
+		t.Fatalf("reserve: %v", err)
+	}
+
+	claimUntil := now.Add(time.Minute)
+	first, err := store.ClaimRetryable(ctx, now, 10, claimUntil)
+	if err != nil {
+		t.Fatalf("first claim: %v", err)
+	}
+	if len(first) != 1 || first[0].Reservation.EvidenceID != reservation.EvidenceID {
+		t.Fatalf("expected first claim to return reservation, got %+v", first)
+	}
+
+	second, err := store.ClaimRetryable(ctx, now.Add(30*time.Second), 10, now.Add(2*time.Minute))
+	if err != nil {
+		t.Fatalf("second claim before lease expiry: %v", err)
+	}
+	if len(second) != 0 {
+		t.Fatalf("expected active claim lease to hide row, got %+v", second)
+	}
+
+	third, err := store.ClaimRetryable(ctx, claimUntil.Add(time.Nanosecond), 10, claimUntil.Add(time.Minute))
+	if err != nil {
+		t.Fatalf("third claim after lease expiry: %v", err)
+	}
+	if len(third) != 1 || third[0].Reservation.EvidenceID != reservation.EvidenceID {
+		t.Fatalf("expected row to be retryable after claim lease expiry, got %+v", third)
 	}
 }

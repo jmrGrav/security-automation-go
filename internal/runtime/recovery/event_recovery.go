@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/jm/security-automation-go/internal/apperr"
+	"github.com/jm/security-automation-go/internal/observability/metrics"
 	"github.com/jm/security-automation-go/internal/runtime/checkpoint"
 	"github.com/jm/security-automation-go/internal/runtime/events"
 	"github.com/jm/security-automation-go/internal/runtime/models"
@@ -140,6 +141,7 @@ func (e *EventEngine) Recover(ctx context.Context, opts RecoveryOptions) (Recove
 	report.OrphanLeaseDetected, report.ZombieEpochDetected = e.detectLeaseAndEpochAnomalies(ctx, opts.ScopeID, replayer.state)
 	report.OwnershipInvariantViolation, report.OwnershipInvariantIssues = e.detectOwnershipInvariants(ctx, opts.ScopeID)
 	if report.OwnershipInvariantViolation {
+		metrics.RuntimeOwnershipInvariantViolationsTotal.Inc()
 		return report, apperr.Newf(op, "ownership invariants violated: %v", report.OwnershipInvariantIssues)
 	}
 
@@ -148,6 +150,9 @@ func (e *EventEngine) Recover(ctx context.Context, opts RecoveryOptions) (Recove
 		return RecoveryReport{}, apperr.Wrap(op, err)
 	}
 	report.DivergenceDetected = !runtimeStatesEqual(current, replayer.state)
+	if report.DivergenceDetected {
+		metrics.RuntimeRecoveryDivergencesTotal.Inc()
+	}
 
 	if !opts.DryRun {
 		if err := e.stateStore.Save(replayer.state); err != nil {

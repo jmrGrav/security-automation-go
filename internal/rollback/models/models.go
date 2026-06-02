@@ -25,6 +25,9 @@ type RollbackBatch struct {
 	CreatedAt          time.Time               `json:"created_at"`
 	Status             RollbackState           `json:"status"`
 	Reason             string                  `json:"reason"`
+	PlanHash           string                  `json:"plan_hash,omitempty"`
+	OperationIDs       []string                `json:"operation_ids,omitempty"`
+	OperationCount     int                     `json:"operation_count,omitempty"`
 
 	// Checkpointing for recovery
 	LastCompletedOpIdx int       `json:"last_completed_op_idx"`

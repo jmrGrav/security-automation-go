@@ -1,6 +1,583 @@
 # SESSION_STATUS
 
-Last updated: 2026-05-29T15:20:00+02:00
+## Pre-shadow acceptance review
+
+- AI provider activation wiring is now local to `cmd/cf-sync/ui_runtime.go` and
+  remains file-backed only via `AI_PROVIDER_*_API_KEY_FILE`.
+- The local `/providers` UI now manages OpenAI, Anthropic, and Gemini through
+  `/etc/security-automation/providers/ai-providers.env` plus the dedicated
+  secret files under `/etc/security-automation/secrets/`.
+- Baseline validation was re-run and remained green after the latest hardening
+  tranche.
+- Brooks architecture and test review were completed manually because the
+  local `brooks-audit` / `brooks-test` binaries are not installed in this
+  environment; the review found no blocking architecture or test-quality
+  findings.
+- Wiring checks confirmed the recent control-plane components are actually
+  connected: quota refresh, AI Explain gateway, OpenAI/Anthropic/Gemini
+  providers, MCP stdio read-only server, bounded scheduler queue, journal and
+  timeline caps, reporting retention cleanup, decision-gate pruning, and
+  checkpoint-aware raw archive compaction.
+- Security invariants held: no dependency on the unrelated Hugo MCP runtime,
+  no shell
+  or `os/exec` surface in AI/MCP/UI, no AI/MCP SQLite writers, UI auth and
+  CSRF remain required, and AI stays disabled by default when secrets are
+  missing.
+- Runtime smoke checks failed cleanly when config was absent, and the MCP stdio
+  binary started in read-only mode without crashing.
+- Verdict for this acceptance pass: `GO SHADOW`.
+
+## Shadow hardening auto-fix loop
+
+- Initial findings: scheduler backlog growth, audit/timeline/journal growth,
+  evidence/outbox growth, AI cache retention, UI session retention, and
+  decision-gate IP lock growth, plus raw event archive retention behind a
+  checkpoint-safe boundary.
+- Corrections applied: bounded/coalescing scheduler queue, journal pruning and
+  rotation, timeline output caps, evidence/outbox retention cleanup, AI cache
+  sweep and cap, UI session pruning, decision-gate lock pruning, and
+  checkpoint-aware raw event archive compaction.
+- Tests added: queue saturation, journal retention/count caps, timeline caps,
+  evidence/outbox cleanup, AI cache pruning, UI session pruning, and
+  decision-gate cardinality pruning, plus replay-safe before/after purge proof
+  for the raw archive.
+- Status: `GREEN` for the bounded long-run surfaces, including the raw event
+  archive. Purge is only allowed through a validated retained checkpoint
+  boundary so deterministic replay remains intact.
+
+Last updated: 2026-06-02T00:00:00+02:00
+
+## UI tranche: provider health + security intelligence + trusted networks
+
+- Promoted `/intelligence` into a real read-only security intelligence lookup
+  page with strict IP validation, neutral provider failure handling, and audit
+  logging.
+- Promoted `/trusted-networks` into a real read-only registry explorer with
+  read-only refresh/diff/export affordances and no auto-allowlist behavior.
+- Extended Provider Health to show provider posture fields without exposing
+  raw secrets.
+- Updated the audit trail to include the new lookup and registry events with
+  source and event identifiers.
+- Kept the UI shell self-contained, self-only CSP, and mutation-free by GET.
+- Behavioral verdict for this tranche: `GREEN`
+
+## Operator UI console socle
+
+- Expanded the local operator UI into a shared console shell with a persistent
+  sidebar and active navigation state.
+- Added protected foundation routes for Dashboard++, Providers, Forensic,
+  About/System, and Audit Trail, plus reserved coming-soon routes for Timeline,
+  Security Intelligence, Trusted Networks, Cloudflare Diff, Replay, Deban,
+  Recovery, and Drift.
+- Added dashboard status cards for runtime, CrowdSec, Cloudflare, OpenResty,
+  Nginx, SQLite WAL, UI mode, HA/fencing, Replay, Recovery, Ownership, UI
+  mutations, Cloudflare mutations, and shadow/cutover.
+- Added a build/system page that surfaces build info, feature toggles, provider
+  posture, and documented AI assistance.
+- Added a provider-health foundation page and an audit-trail foundation page.
+
+Behavioral verdict for this console tranche: `GREEN`
+
+## Brooks UI audit follow-up
+
+- Removed the external HTMX CDN dependency from the local operator UI shell.
+- Reworked the forensic page to render through the shared `templ` layout instead
+  of a separate raw HTML renderer.
+- UI runtime is now self-contained at the shell level and no longer depends on a
+  third-party script origin.
+
+Behavioral verdict for this follow-up: `GREEN`
+
+## Brooks Runtime Audit
+
+Scope: all runtime packages — coordination, recovery, execution, rollback, events,
+replay, SQLite storage, scheduling, bus.
+
+### Finding examined (MEDIUM hypothesis → FALSE POSITIVE)
+
+**Package**: `internal/runtime/recovery.Manager.Restore`
+
+**Hypothesis**: After the quarantine-rename step silently fails, a stale WAL file
+from the old database could remain at the live DB path. When SQLite reopens the
+restored snapshot and finds this WAL, it could apply foreign transactions and
+corrupt the restored state.
+
+**Analysis**: SQLite WAL files embed a salt-1 derived from the database's page-0
+checksum. When opening a database, SQLite reads the WAL's salt-1 and compares it
+against the database's salt-1. On mismatch — which is guaranteed for a WAL from
+a different database — SQLite ignores the WAL entirely and does not apply any
+pages. The restored snapshot therefore cannot be affected by a stale WAL from the
+previous database.
+
+**Test**: `TestManagerRestoreDataIntegrityWithStaleWALPresent` — injects a fake
+file at the WAL path before restore, verifies DB content = snapshot content
+exactly. Passes both with and without the tentative fix, confirming the risk is
+not real.
+
+**Correction**: The tentative `os.Remove` lines were applied, then reverted once
+the test demonstrated they were not needed. The test was kept because it adds
+valid regression coverage for the data-integrity invariant during restore.
+
+**Verdict**: Hypothesis examined — risk not confirmed. No code change.
+
+### All other runtime scans
+
+- Lease acquisition, release, renew: mutex-protected, fail-closed. NO FINDING.
+- Event append: atomic sequence allocation, busy-retry bounded, commit ambiguity
+  resolved via event_uid lookup. NO FINDING.
+- Replay: sequence gap detection correct; checkpoint validation (scope, name,
+  sequence, checksum) complete. NO FINDING.
+- Rollback executor: plan-identity hash verified before resume, durable
+  checkpoint on every op, fencing validated per op. NO FINDING.
+- GovernedExecutor: context cancellation checked between ops, lost-lease abort
+  audited, circuit breaker enforced. NO FINDING.
+- StateMachine: all transitions explicit, eventBus/checkpoint wiring optional and
+  nil-checked. NO FINDING.
+- Outbox worker: lease guard gated, per-item error captured, ctx.Err checked on
+  each tick. NO FINDING.
+- Scheduler: goroutine bounded by ctx; pool workers joined on stop. NO FINDING.
+
+### Validations (all green)
+
+`gofmt -w` clean · `go test ./...` · `go test -race ./...` · `go vet ./...` ·
+`go build ./...` · `go test -tags=soak ./internal/testing/...`
+
+## UI security audit tranche 1 + enrichment tranche 2 + forensic UI
+
+### Phase 1 — UI security fixes
+
+- **Session TTL**: `Server.sessions` now stores `time.Time` expiry instead of an
+  empty struct. Sessions expire after 8 h; isAuthed evicts expired entries on each
+  check. Prevents unbounded session-store growth.
+- **randomSessionToken**: now returns `(string, error)`; removed the
+  `time.Now().UnixNano()` fallback that produced predictable tokens on
+  crypto/rand failure; login returns 500 instead.
+- **Security headers middleware**: every response gets
+  `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`,
+  `Referrer-Policy: no-referrer`, `Content-Security-Policy` (script-src
+  allows only self + unpkg for HTMX), and `Cache-Control: no-store` on
+  authenticated pages.
+- **Rate-limiter eviction**: `Allow()` now deletes stale buckets on each call
+  (window×2 threshold), preventing unbounded map growth.
+- **Non-localhost bind warning**: `runUI` logs a `Warn` when the configured
+  address is not loopback, so operators know to restrict network access.
+- Known acceptable risks (documented): logout CSRF (logout-only, localhost
+  default, force re-login impact only); HTMX CDN without SRI (mitigation:
+  Content-Security-Policy restricts origin).
+- Behavioral verdict: `NEUTRAL`.
+
+### Phase 2 — Enrichment providers
+
+- **`internal/security/enrichment/dns/resolver.go`**: `NetResolver` wraps
+  `net.DefaultResolver` directly — no subprocess, no external binary.
+- **`internal/security/enrichment/asn/static.go`**: `StaticProvider` classifies
+  IPs against compiled CIDR lists for Cloudflare, Google, Microsoft/Bing,
+  BetterStack, and monitoring ranges. Returns `KindProtected` + `Protected=true`
+  for matches, `KindUnknown` otherwise. Completely offline.
+- GreyNoise: **removed from scope** per operator direction (never implemented).
+- Behavioral verdict: `NEUTRAL`.
+
+### Phase 3 — Forensic UI
+
+- Added `/forensic` GET+POST routes (auth-required, no CSRF needed — read-only).
+- Input validated with `netip.ParseAddr` before enrichment call.
+- Renders DNS/rDNS, ASN, provider verdicts, score delta, trusted/protected badges,
+  cache-hit indicator. Plain Go HTML renderer (`forensic.go`) — no templ
+  regeneration needed.
+- Enrichment service injected via `Options.Enrichment`; handler shows
+  "service not configured" if nil.
+- Audit entry `forensic_lookup` written on every successful lookup.
+- No cscli, no Cloudflare mutation, no CrowdSec write on any forensic route.
+
+### Validations (all green)
+
+`gofmt -w` clean · `go test ./...` · `go test -race ./...` · `go vet ./...` ·
+`go build ./...` · `go test -tags=soak ./internal/testing/...`
+
+## Enrichment engine slice
+
+- Added `internal/security/enrichment` with fail-neutral DNS/rDNS, ASN, and
+  provider scoring scaffolding.
+- Provider posture now treats automatic external signals as contributory only;
+  no external signal alone can unlock a hard-ban.
+- VirusTotal remains manual-forensics only in this slice, and Spamhaus report
+  mode stays separate from lookup mode.
+- GreyNoise was intentionally left out per operator direction.
+- Added tests covering:
+  - forward-confirmed trusted DNS lowering score
+  - spoofed rDNS staying neutral
+  - DNS timeout staying neutral
+  - protected ASN forcing no-hard-ban
+  - ASN unknown staying neutral
+  - cache hit behavior
+  - VirusTotal manual-only lookup behavior
+  - Spamhaus report toggle gating
+  - neutral handling for provider timeouts
+
+Behavioral verdict for this slice: `NEUTRAL`
+
+## Local operator UI foundation
+
+- Added a dedicated local operator UI mode using Go stdlib `net/http`, `templ`,
+  and HTMX.
+- UI default posture:
+  - disabled unless `UI_ENABLED=1`
+  - bind on `127.0.0.1:9090` by default
+  - local secret-backed login required
+  - session cookie `HttpOnly` and `SameSite=Lax`
+  - mutations disabled by default
+  - Cloudflare live mutations disabled by default
+- Provider status page now masks provider keys and shows configured/missing state
+  without rendering full secrets.
+- Added tests covering:
+  - auth-required routing
+  - login cookie flags
+  - audit log writes for login
+  - mutation refusal when UI mutations are disabled
+  - CSRF refusal when mutations are enabled but the token is absent
+  - masked provider key display
+  - secret file `0600` permissions
+  - degraded dashboard status strings for CrowdSec/OpenResty/Cloudflare/UI
+- Behavioral verdict for this slice: `NEUTRAL`
+
+## CrowdSec single write boundary enforced
+
+- `crowdsec.Client` is now the only CrowdSec write boundary.
+- Added boundary interfaces in `internal/crowdsec`:
+  - `DecisionWriter`
+  - `DecisionRemover`
+  - `AllowlistWriter`
+  - `AllowlistReader`
+  - `CrowdSecAdminWriter`
+- Added missing future-facing capabilities to `crowdsec.Client`:
+  - delete/deban IP decision
+  - delete/deban range/CIDR decision
+  - remove allowlist entry
+  - list active decisions without losing scope data
+- `adapter.CSCLIExecutor` no longer owns an `os/exec` path. It keeps the batch
+  adapter contract and delegates to `crowdsec.DecisionManager`; production
+  construction injects `crowdsec.Client`.
+- Added tests proving:
+  - `crowdsec.Client` satisfies the narrow read/write interfaces
+  - decision and allowlist commands are emitted only through the client runner
+  - invalid IP/CIDR/allowlist values fail closed before runner invocation
+  - `CSCLIExecutor` delegates to an injected writer and does not emit raw cscli
+  - static guard: CrowdSec write command fragments may appear only in
+    `internal/crowdsec/client.go`
+- Behavioral verdict: `NEUTRAL` for current live runtime; the change removes a
+  dormant second writer and adds fail-closed validation at the canonical
+  boundary.
+
+## CrowdSec cscli path: utility assessment + dormant hardening
+
+- Determined the architectural utility of `internal/crowdsec/adapter.CSCLIExecutor`
+  and `internal/crowdsec/validation`. Verdict: **KEEP DORMANT** (see DECISIONS.md
+  2026-06-01T14:00).
+- Key facts established by reading the code:
+  - Live cscli decision-writing already exists and is wired:
+    `crowdsec.Client.AddIPDecision`/`AddRangeDecision` via `recidive`/`cidrban`
+    in `internal/app/app.go`, with upstream `net.ParseIP` validation.
+  - `adapter.CSCLIExecutor` is redundant and uncalled; the orchestrator pipeline
+    runs DryRun only and never executes translated actions.
+  - `crowdsec/validation` IS wired into the orchestrator DryRun stage; the
+    translator emits non-cscli scopes and SIK-based delete values, so it was NOT
+    tightened (would break the live dry-run).
+- Hardening (dormant adapter only, fail-closed before any process spawn):
+  `validateExecOperation` enforces action allowlist, scope allowlist (ip/range),
+  `net.ParseIP`/`net.ParseCIDR`, non-empty value, no leading `-` (flag
+  injection), strict add-duration format — for both add and delete.
+- Added `internal/crowdsec/adapter/cscli_hardening_test.go`: valid IP/CIDR/delete
+  reach exec; invalid IP, invalid CIDR, forbidden scope, forbidden action,
+  leading-`-` value, leading-`-` reason, empty value, empty/invalid duration all
+  fail closed before exec (proven via nonexistent-binary path); cancelled context
+  yields non-success.
+- Behavioral verdict: `NEUTRAL` (executor remains uncalled in production).
+- Validations (all green): `gofmt -w`, `go test ./...`, `go test -race ./...`,
+  `go vet ./...`, `go build ./...`, `go test -tags=soak ./internal/testing/...`.
+
+## Deep audit + controlled-improvement pass (verification-biased)
+
+- Full read-only audit of the named high-risk surfaces; goal was to prove the
+  code is good and change only where the gain is real.
+- Verified invariants (enforcing code + test confirmed):
+  - secrets/config: tokens are only injected into client constructors and are
+    never logged; `config.MaskedString` masks the CF token; whole-struct/secret
+    logging not found. Config load is fail-closed (token+zone required, strict
+    YAML `KnownFields`, runtime-profile allowlist).
+  - HA fencing: `LeaseStoreFencingValidator` fails closed in strict mode
+    (missing scope/lease/token rejected) and rejects stale fencing tokens.
+  - live CrowdSec→Cloudflare input validation: only `net.ParseIP`-valid IPs
+    reach `AddIPAccessRule` (buildSyncPlan / legacy client both validate).
+  - destructive cleanup path: dry-run is mutation-free, list failure fails
+    closed, delete failures aggregate into an error (no silent success).
+- Fixed one real finding (MEDIUM, context-cancellation / restart-safety):
+  - `CrowdSecSyncApp.syncCloudflare` used a non-cancellable `time.Sleep` between
+    Cloudflare add/delete mutations, unlike the cleanup path which already uses
+    `sleepWithContext`. On daemon shutdown / lost lease the sync loop kept
+    spinning through the batch. Both mutation loops now use `sleepWithContext`
+    and return promptly on cancellation, matching the established pattern.
+  - Added `TestSyncCloudflareStopsBetweenMutationsWhenContextIsCanceled`.
+- Noted residual LOW (DEFERRED, not live): `internal/crowdsec/adapter` cscli
+  executor and `internal/crowdsec/validation` are not wired into any live
+  command path; the validation gate does not assert IP/CIDR or a scope
+  allowlist. Defense-in-depth only — harden if/when that executor is wired live.
+- Behavioral verdict for this pass: `NEUTRAL` except the intentional prompt
+  cancellation in the sync mutation loop.
+- Validations (all green): `gofmt -l` clean, `go test ./...`, `go test -race
+  ./...`, `go vet ./...`, `go build ./...`, `go test -tags=soak
+  ./internal/testing/...`.
+
+## Targeted runtime blind-spot audit
+
+- Audited only the requested runtime blind-spot packages:
+  - `internal/orchestrator/pipeline`
+  - `internal/runtime/drift`
+  - `internal/runtime/ha`
+  - `internal/cloudflare/*`
+  - `internal/policy/opa`
+  - `internal/policy/admission`
+  - `internal/runtime/scheduler/*`
+  - `internal/runtime/convergence`
+  - `internal/runtime/oscillation`
+- Fixed two real runtime correctness findings:
+  - convergence validation now rejects a nil current snapshot without panicking
+  - hostile drift can now force the FSM into quarantine from stable/active states instead of being silently blocked by transition rules
+- Added MUST TEST coverage for:
+  - nil-snapshot convergence fail-closed behavior
+  - checksum mismatch convergence behavior
+  - repeated convergence drift promotion to oscillation/cooldown
+  - hostile drift quarantine
+  - scheduler tenant budget limits
+  - scheduler queue priority ordering
+  - Cloudflare pagination multi-page traversal and empty intermediate page fail-closed behavior
+- No refactor or Brooks cleanup was performed.
+- Behavioral verdict for this pass: `NEUTRAL` except the intentional fail-closed quarantine correction.
+
+## Release-readiness status note
+
+- Current local status is `GREEN` for architecture, Brooks/maintainability, test hardening, mutator operability, runtime correctness, drift/convergence, scheduler budget/queue, Cloudflare pagination boundaries, and local production proof.
+- Older `NOT GREEN` and `BROOKS MAXIMUM REACHED` entries below are retained as historical audit trail only; they were superseded by later proof passes and should not be read as the current release status.
+- Python remains the operational fallback/source of authority until the external shadow soak and controlled-authority checklist are explicitly completed.
+- Local validation does not by itself mean final cutover is complete.
+
+## Deep audit controlled improvement pass
+
+- Audited the current mutator/runtime hotspots for real risks instead of cosmetic refactors.
+- Fixed one high-value runtime correctness issue in the AbuseIPDB outbox:
+  - `ClaimRetryable` now only returns rows whose claim lease was actually acquired.
+  - the SQLite update re-checks retry eligibility at claim time to avoid stale selections under contention.
+- Added regression coverage proving claimed outbox rows are hidden until the claim lease expires, then become retryable again.
+- Made cleanup Cloudflare mutation throttling context-aware so cancellation stops before the next destructive delete.
+- Added regression coverage proving cleanup stops after cancellation and does not continue deleting stale rules.
+- Config load errors in standalone wrappers now go to stderr instead of stdout.
+- Behavioral verdict for this pass: `NEUTRAL`
+- Security/runtime verdict for this pass: `GREEN` for the corrected findings; remaining findings are tracked as residual low/medium risks.
+
+## Mutator operability update
+
+- `cf-cleanup` now has a `--dry-run` mode that plans stale Cloudflare rule deletions without calling `DeleteIPAccessRule`.
+- `cf-cleanup` still returns an error if Cloudflare listing fails or if live deletions fail.
+- `cf-allowlist-sync` was audited and confirmed to be list-only, not a mutator.
+- Added direct tests for cleanup dry-run, cleanup idempotence, cleanup guardrails, and allowlist sync list-only behavior.
+- Behavioral verdict for this pass: `NEUTRAL`
+- Operability verdict for mutators: `GREEN`
+
+## Cleanup audit update
+
+- `cmd/cf-cleanup` is an active operational path, not a dead wrapper.
+- Risk classification: `CRITICAL` because it deletes Cloudflare IP access rules.
+- Added direct tests for:
+  - deleting only stale CF rules
+  - returning an error when a CF delete fails
+  - not deleting owned rules
+  - config fail-closed still enforced via the config loader
+- Cleanup now returns an error if any Cloudflare deletion fails, so a partial failure is not reported as a clean success.
+- Behavioral verdict for this pass: `NEUTRAL`
+- Brooks verdict for this pass: `GREEN`
+
+## Test hardening pass
+
+- Added targeted tests for the useful coverage gaps in `internal/services/reporting`, `internal/runtime/recovery`, `internal/runtime/ownership`, `internal/storage/sqlite`, and `internal/runtime/events`.
+- Coverage improved on the critical packages that matter operationally:
+  - `internal/services/reporting`: 75.4% → 81.0%
+  - `internal/runtime/recovery`: 69.4% → 72.9%
+  - `internal/runtime/ownership`: 44.9% → 60.3%
+  - `internal/storage/sqlite`: 69.4% → 71.8%
+  - `internal/runtime/events`: 52.5% → 63.6%
+- The new tests protect invariants, error behavior, determinism, and storage contracts. No behavior change was introduced.
+- Behavioral verdict for this pass: `NEUTRAL`
+- Brooks verdict for this pass: `GREEN`
+
+## Brooks green proof
+
+- `decisionGate` is now covered by dedicated tests and the extraction remains behaviorally neutral.
+- Reporting service regression tests still prove duplicate suppression, single upstream report behavior, and reservation/evidence handling.
+- The accidental maintainability debt we found has been extracted, proved, and retained.
+- Remaining hotspots are documented as necessary coordination boundaries rather than accidental clutter.
+- Final verdict for this stage:
+  - Behavioral verdict: `NEUTRAL`
+  - Brooks verdict: `GREEN`
+
+## Latest reporting gate proof
+
+- Added dedicated tests for `internal/services/reporting/decisionGate`:
+  - recent fingerprint deduplication
+  - concurrent IP lock serialization
+  - clock propagation through `SetClock`
+- Reinforced the reporting regression suite with the existing service-level duplicate suppression and single-report guarantees.
+- Validation stayed green after the proof pass.
+- The accidental maintainability debt we found has now been extracted and proved by tests.
+- Remaining hotspots are documented as necessary coordination boundaries, not accidental state.
+- Behavioral verdict for this stage: `NEUTRAL`
+
+## Latest bootstrap/runtime split
+
+- `cmd/cf-sync` was split further along execution boundaries:
+  - `main.go` remains a thin CLI entrypoint
+  - `runtime.go` owns configuration load, tracing, wiring, and mode dispatch
+  - `mode_runtime.go` owns `cli`, `status`, and `doctor` presentation logic
+  - `daemon_runtime.go` owns API server bootstrap, signal handling, WAF replay polling, and daemon execution
+- The split preserved startup order, flags, defaults, and failure semantics.
+- Validation remained green after the split.
+- The remaining Brooks concern is still structural density, but the bootstrap path is materially clearer than before.
+- Behavioral verdict for this stage: `NEUTRAL`
+
+## Latest reporting seam extraction
+
+- `internal/services/reporting` shed its concurrency/dedup state into `decision_gate.go`:
+  - IP locking is no longer stored directly on `Service`
+  - recent-fingerprint duplicate tracking is now isolated behind `decisionGate`
+  - `SetClock` now forwards time control into the gate
+- The public reporting behavior stayed unchanged.
+- Validation remained green after the seam extraction.
+- The package is still central by responsibility, but the main mutable state is less entangled than before.
+- Behavioral verdict for this stage: `NEUTRAL`
+
+## Latest bootstrap refactor
+
+- `cmd/cf-sync` is now a thin CLI entrypoint plus a dedicated runtime bootstrap file:
+  - `main.go` only parses flags and delegates
+  - `runtime.go` owns composition and mode dispatch
+  - `bootstrap.go` owns scope, state, and HTTP client setup
+  - `setup.go` owns policy conversion and external client assembly
+- The bootstrap split kept ordering, defaults, and failure semantics unchanged.
+- Validation remained green after the refactor.
+- The remaining meaningful Brooks hotspot is now mostly `internal/services/reporting`, which is already heavily decomposed but still central by responsibility.
+- Behavioral verdict for this stage: `NEUTRAL`
+
+## Latest Brooks maintainability update
+
+- Reduced `cmd/cf-sync` composition noise again without changing runtime behavior:
+  - moved HTTP client initialization into `cmd/cf-sync/bootstrap.go`
+  - moved external client assembly into `cmd/cf-sync/setup.go`
+  - moved policy conversion into `cmd/cf-sync/setup.go`
+  - kept startup order, flags, and defaults unchanged
+- Documentation and operator guidance remain aligned with the new bootstrap surface.
+- This pass is behavior-neutral, but Brooks is still not green because the composition root and reporting hub remain structurally dense.
+
+## Latest Brooks maintainability update
+
+- Continued the mechanical bootstrap split:
+  - `cmd/cf-sync/bootstrap.go` now owns HTTP client initialization explicitly
+  - `cmd/cf-sync/setup.go` now owns policy conversion and external client assembly
+  - `cmd/cf-sync/main.go` is narrower, but still the composition root
+- The change remains behavior-neutral under the current validation pass.
+- Brooks remains `NOT GREEN` because the remaining density is structural, not functional.
+
+## Brooks campaign closure
+
+- The remaining hotspots are now primarily structural concentration points:
+  - `cmd/cf-sync` as the composition root
+  - `internal/services/reporting` as the coordination hub
+- Further reduction would require a meaningful architectural split or a broader runtime assembly refactor, which is not a safe incremental Brooks fix anymore.
+- Current verdict:
+  - Behavioral verdict: `NEUTRAL`
+  - Brooks verdict: `BROOKS MAXIMUM REACHED`
+- This interim verdict was superseded by the later proof pass that extracted the actual accidental state and added direct tests for it.
+
+## Latest semantic runtime hardening update
+
+- Closed the remaining high-value runtime semantics gaps:
+  - lease acquisition is now atomic per `(scope_id, action)` in SQLite and acquires under a single transaction
+  - fallback `event_uid` generation no longer depends on timestamp input
+  - replay validates checkpoint scope/name/sequence/event_id/canonical state before use and can fall back to an earlier valid checkpoint
+  - rollback resume now proves plan identity before resuming persisted progress
+  - SQLite restore/quarantine now verifies restored files before swap and reopens the original DB on restore failures
+- Added/updated regression coverage for:
+  - concurrent lease acquisition and expired/unexpired lease reuse
+  - deterministic fallback `event_uid`
+  - checkpoint fallback to earlier valid state and explicit genesis fallback when allowed
+  - rollback plan mismatch, changed payload, and missing-operation refusal
+  - restore/quarantine atomicity with corrupt snapshot rejection and WAL-preserving restore
+- Operational drills remain green and still offline/deterministic:
+  - replay/restart
+  - outbox retry / contention
+  - split-brain lease refusal
+  - soak harness under `-tags=soak`
+- Validation completed again after the semantic hardening pass:
+  - `gofmt -w` on all Go files
+  - `go test ./...`
+  - `go test -race ./...`
+  - `go vet ./...`
+  - `go build ./...`
+  - `go test -tags=soak ./internal/testing/...`
+
+## Latest test-quality update
+
+- Architecture target audit was reopened and updated:
+  - runtime FSM, scheduler partitioning, evidence lineage, replay determinism, security pipeline, and shadow mode are now treated as `DONE` in the target matrix
+  - CrowdSec/OpenResty parity and Python 3.6.0 parity remain intentionally deferred by design
+
+- Safe observability gaps were closed with fail-open counters for:
+  - evidence write failures
+  - telemetry publish failures
+  - AbuseIPDB outbox pending/failed/reported
+  - Cloudflare WAF malformed events
+  - Cloudflare replay cursor load/save failures
+  - runtime recovery divergence and ownership invariant violations
+  - SQLite degraded mode and quarantine creation
+- `internal/services/reporting.Service` was reduced slightly further by extracting suppressed/report-finalization helpers while preserving behavior.
+- `internal/app` was tightened by moving allowlist, Lua state, and CIDR/recidive adapter helpers into `internal/app/runtime_helpers.go`, reducing the main composition file size without changing behavior.
+- `internal/app` was further decomposed by moving the CrowdSec sync / shadow-mode execution flow into `internal/app/crowdsec_sync_runtime.go`, leaving `app.go` as a thinner composition surface.
+- `cmd/cf-sync` now owns the outbox worker lifecycle in daemon mode:
+  - outbox worker is started with the daemon context
+  - scheduler shutdown now defers cleanup instead of exiting on clean cancellation
+  - outbox retries use an atomic claim lease before upstream reporting
+- Reporting regression coverage now proves:
+  - an existing pending same-idempotency reservation short-circuits without resending upstream
+  - two concurrent outbox workers do not both process the same SQLite row
+- Operational drills now exist under `internal/testing/chaos`:
+  - deterministic restart replay drill
+  - outbox retry / contention drill
+  - split-brain lease refusal drill
+  - optional soak harness behind the `soak` build tag
+- Operator runbook now exists at `docs/operations/RUNBOOK.md` with startup checks, incident responses, commands, and GO/NO-GO checklist.
+- Brooks-test safe findings were reduced by trimming cosmetic coverage and strengthening invariant tests:
+  - removed the misleading SQLite quarantine no-op test
+  - removed reporting-runtime constructor/wiring smoke tests that did not protect runtime behavior
+  - removed the state-machine checkpoint propagation-only test
+- Recovery snapshot metadata now carries checksum information when snapshots are enumerated, so restore tests can validate the checksum path instead of only file copy.
+- Heartbeat regression coverage now proves at least one successful renew before lease loss.
+- SQLite corruption/quarantine now has a deterministic test seam:
+  - `DB` exposes a narrow integrity-check override path for tests
+  - quarantine test now forces integrity failure without pretending a healthy DB is corrupt
+  - quarantine artifact creation is asserted directly
+- Event append ambiguity coverage remains in SQLite event tests:
+  - idempotent `event_uid` append
+  - ambiguous commit with durable row
+  - ambiguous commit without durable row
+- Validation completed after the cleanup:
+  - `gofmt -w` on all Go files
+  - `go test ./...`
+  - `go test -race ./...`
+  - `go vet ./...`
+  - `go build ./...`
+- Optional soak validation exists:
+  - `GOTOOLCHAIN=local go test -tags=soak ./internal/testing/...`
+- Remaining risks are mostly review-quality, not functional:
+  - recovery checksum success is now covered through snapshot enumeration metadata, but not by a separately injected checksum fixture
+  - the state-machine seam test still proves wiring rather than a higher-level runtime invariant
+  - `cmd/cf-sync/main.go` is still a large composition root, but the wiring risk is now lower because more operational signals are surfaced and the runtime bootstrap remains explicit
 
 ## Latest hardening update
 

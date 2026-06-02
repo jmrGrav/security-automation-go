@@ -204,6 +204,64 @@ func TestStrictReservationSuccessRecordsPendingAndSucceededEvidence(t *testing.T
 	}
 }
 
+func TestPendingSameIdempotencyReservationDoesNotResendUpstream(t *testing.T) {
+	base := time.Now().UTC()
+	reporter := &fakeReporter{}
+	reservations := &pendingReservationStore{
+		existing: reporting.ReportReservation{
+			IP:             "7.7.7.11",
+			Source:         "cloudflare_waf",
+			IdempotencyKey: "exec-existing",
+			EvidenceID:     "ev-existing",
+			Status:         reporting.ReportStatusPending,
+		},
+	}
+	service := reporting.New(reporter, &sinks.RecorderSink{}, trust.DefaultRegistry(), time.Minute)
+	service.SetReportReservationStore(reservations)
+	service.SetClock(func() time.Time { return base })
+	event, _ := cloudflareevent.Normalize(cloudflareevent.RawEvent{
+		IP: "7.7.7.11", URI: "/search?q=union+select+1", UserAgent: "sqlmap", Timestamp: base, Hits: 10, WindowSec: 300, RuleID: "r1",
+	})
+
+	result, err := service.Process(context.Background(), reporting.Request{Source: abuseformat.SourceCloudflareWAF, Event: event})
+	if err != nil {
+		t.Fatalf("process: %v", err)
+	}
+	if !result.Suppressed || result.SuppressionReason != "report_pending" {
+		t.Fatalf("expected pending short-circuit, got %+v", result)
+	}
+	if len(reporter.Reports()) != 0 {
+		t.Fatalf("existing pending reservation must not resend upstream, got %d calls", len(reporter.Reports()))
+	}
+	if reservations.reserveCalls != 0 {
+		t.Fatalf("expected no fresh reservation call, got %d", reservations.reserveCalls)
+	}
+}
+
+type pendingReservationStore struct {
+	existing     reporting.ReportReservation
+	reserveCalls int
+}
+
+func (s *pendingReservationStore) Reserve(context.Context, reporting.ReportReservation) error {
+	s.reserveCalls++
+	return nil
+}
+
+func (s *pendingReservationStore) FindPendingByIPAndIdempotencyKey(context.Context, string, string) (reporting.ReportReservation, bool, error) {
+	return s.existing, true, nil
+}
+
+func (s *pendingReservationStore) MarkStatus(context.Context, string, string) error { return nil }
+
+func (s *pendingReservationStore) ClaimRetryable(context.Context, time.Time, int, time.Time) ([]reporting.ReportOutboxItem, error) {
+	return nil, nil
+}
+
+func (s *pendingReservationStore) RecordAttempt(context.Context, string, string, string, time.Time) error {
+	return nil
+}
+
 func TestDedupStoreErrorFailClosedByDefault(t *testing.T) {
 	service := reporting.New(&fakeReporter{}, &sinks.RecorderSink{}, trust.DefaultRegistry(), time.Minute)
 	service.SetReportDedupStore(&fakeDedupStore{err: errors.New("store down"), last: make(map[string]time.Time)})

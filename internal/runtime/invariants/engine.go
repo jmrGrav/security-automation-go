@@ -31,6 +31,12 @@ func New() *Engine {
 
 func (e *Engine) Validate(ctx context.Context, snap *snapshot.Snapshot) []Violation {
 	var violations []Violation
+	if snap == nil {
+		return []Violation{{
+			Type:        ViolationGraphIntegrity,
+			Description: "snapshot is required",
+		}}
+	}
 
 	// 1. Stable Identity Uniqueness
 	seenSIKs := make(map[string]bool)

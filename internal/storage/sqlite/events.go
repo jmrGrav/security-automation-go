@@ -8,9 +8,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/jm/security-automation-go/internal/apperr"
+	"github.com/jm/security-automation-go/internal/observability/metrics"
+	"github.com/jm/security-automation-go/internal/runtime/checkpoint"
 	"github.com/jm/security-automation-go/internal/runtime/events"
 )
 
@@ -170,7 +173,6 @@ func (r *EventRepository) loadExistingEvent(ctx context.Context, event *events.E
 
 func eventUID(event events.Event) string {
 	payload, _ := json.Marshal(struct {
-		Timestamp     string          `json:"timestamp"`
 		Category      events.Category `json:"category"`
 		Type          string          `json:"type"`
 		CorrelationID string          `json:"correlation_id"`
@@ -180,7 +182,6 @@ func eventUID(event events.Event) string {
 		Payload       json.RawMessage `json:"payload"`
 		Metadata      map[string]any  `json:"metadata,omitempty"`
 	}{
-		Timestamp:     event.Timestamp.UTC().Format(time.RFC3339Nano),
 		Category:      event.Category,
 		Type:          event.Type,
 		CorrelationID: event.CorrelationID,
@@ -331,4 +332,136 @@ func (r *EventRepository) DeleteCheckpoint(ctx context.Context, scopeID string, 
 		WHERE scope_id = ? AND name = ? AND sequence = ?
 	`, scopeID, name, sequence)
 	return apperr.Wrap(op, err)
+}
+
+func (r *EventRepository) CompactRawArchive(ctx context.Context, scopeID string, checkpointName string, throughSequence uint64) (checkpoint.ArchiveCompactionStats, error) {
+	const op = "storage.sqlite.EventRepository.CompactRawArchive"
+	var stats checkpoint.ArchiveCompactionStats
+	if err := r.db.ensureWritable(op); err != nil {
+		return stats, err
+	}
+	if throughSequence == 0 {
+		return stats, apperr.New(op, "checkpoint boundary must be positive")
+	}
+	if ok, err := r.hasCheckpointBoundary(ctx, scopeID, checkpointName, throughSequence); err != nil {
+		return stats, apperr.Wrap(op, err)
+	} else if !ok {
+		return stats, apperr.Newf(op, "checkpoint boundary not found for %s/%s at sequence %d", scopeID, checkpointName, throughSequence)
+	}
+
+	total, err := r.countEvents(ctx, scopeID)
+	if err != nil {
+		return stats, apperr.Wrap(op, err)
+	}
+	safeCount, err := r.countEventsThrough(ctx, scopeID, throughSequence)
+	if err != nil {
+		return stats, apperr.Wrap(op, err)
+	}
+	if safeCount == 0 {
+		stats.SafeSequence = throughSequence
+		stats.HotEntries = total
+		stats.ReplaySafeEntries = total
+		stats.StorageBytes = archiveStorageBytes(r.db.Path())
+		metrics.EventArchiveHotEntries.Set(float64(stats.HotEntries))
+		metrics.EventArchiveWarmEntries.Set(float64(stats.WarmEntries))
+		metrics.EventArchiveColdEntries.Set(float64(stats.ColdEntries))
+		metrics.EventArchiveReplaySafeEntries.Set(float64(stats.ReplaySafeEntries))
+		metrics.EventArchivePurgeCandidates.Set(float64(stats.PurgeCandidates))
+		metrics.EventArchiveStorageBytes.Set(float64(stats.StorageBytes))
+		return stats, nil
+	}
+
+	res, err := r.db.Conn().ExecContext(ctx, `
+		DELETE FROM events
+		WHERE scope_id = ? AND sequence <= ?
+	`, scopeID, throughSequence)
+	if err != nil {
+		return stats, apperr.Wrap(op, err)
+	}
+	deleted, err := res.RowsAffected()
+	if err != nil {
+		return stats, apperr.Wrap(op, err)
+	}
+	stats.SafeSequence = throughSequence
+	stats.WarmEntries = safeCount
+	stats.ColdEntries = deleted
+	stats.PurgeCandidates = safeCount
+	stats.ReplaySafeEntries = total - safeCount
+	if total >= safeCount {
+		stats.HotEntries = total - safeCount
+	}
+	stats.Compactions = 1
+	stats.Rotations = 1
+	stats.StorageBytes = archiveStorageBytes(r.db.Path())
+
+	metrics.EventArchiveHotEntries.Set(float64(stats.HotEntries))
+	metrics.EventArchiveWarmEntries.Set(float64(stats.WarmEntries))
+	metrics.EventArchiveColdEntries.Set(float64(stats.ColdEntries))
+	metrics.EventArchiveReplaySafeEntries.Set(float64(stats.ReplaySafeEntries))
+	metrics.EventArchivePurgeCandidates.Set(float64(stats.PurgeCandidates))
+	metrics.EventArchiveCompactionsTotal.Add(float64(stats.Compactions))
+	metrics.EventArchiveRotationsTotal.Add(float64(stats.Rotations))
+	metrics.EventArchiveStorageBytes.Set(float64(stats.StorageBytes))
+	return stats, nil
+}
+
+func (r *EventRepository) PurgeThrough(ctx context.Context, scopeID string, checkpointName string, throughSequence uint64) (checkpoint.ArchiveCompactionStats, error) {
+	return r.CompactRawArchive(ctx, scopeID, checkpointName, throughSequence)
+}
+
+func (r *EventRepository) hasCheckpointBoundary(ctx context.Context, scopeID string, checkpointName string, sequence uint64) (bool, error) {
+	const op = "storage.sqlite.EventRepository.HasCheckpointBoundary"
+	var found int
+	err := r.db.Conn().QueryRowContext(ctx, `
+		SELECT 1
+		FROM event_checkpoints
+		WHERE scope_id = ? AND name = ? AND sequence = ?
+		LIMIT 1
+	`, scopeID, checkpointName, sequence).Scan(&found)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	if err != nil {
+		return false, apperr.Wrap(op, err)
+	}
+	return true, nil
+}
+
+func (r *EventRepository) countEvents(ctx context.Context, scopeID string) (int64, error) {
+	const op = "storage.sqlite.EventRepository.CountEvents"
+	var total int64
+	if err := r.db.Conn().QueryRowContext(ctx, `
+		SELECT COUNT(1)
+		FROM events
+		WHERE scope_id = ?
+	`, scopeID).Scan(&total); err != nil {
+		return 0, apperr.Wrap(op, err)
+	}
+	return total, nil
+}
+
+func (r *EventRepository) countEventsThrough(ctx context.Context, scopeID string, throughSequence uint64) (int64, error) {
+	const op = "storage.sqlite.EventRepository.CountEventsThrough"
+	var total int64
+	if err := r.db.Conn().QueryRowContext(ctx, `
+		SELECT COUNT(1)
+		FROM events
+		WHERE scope_id = ? AND sequence <= ?
+	`, scopeID, throughSequence).Scan(&total); err != nil {
+		return 0, apperr.Wrap(op, err)
+	}
+	return total, nil
+}
+
+func archiveStorageBytes(dbPath string) int64 {
+	var total int64
+	if info, err := os.Stat(dbPath); err == nil {
+		total += info.Size()
+	}
+	for _, suffix := range []string{"-wal", "-shm"} {
+		if info, err := os.Stat(dbPath + suffix); err == nil {
+			total += info.Size()
+		}
+	}
+	return total
 }

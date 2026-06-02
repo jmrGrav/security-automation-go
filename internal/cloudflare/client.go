@@ -13,6 +13,7 @@ import (
 	"github.com/jm/security-automation-go/internal/cloudflare/models"
 	cftransport "github.com/jm/security-automation-go/internal/cloudflare/transport"
 	"github.com/jm/security-automation-go/internal/httpclient"
+	"github.com/jm/security-automation-go/internal/security/quota"
 	"github.com/jm/security-automation-go/internal/snapshot"
 )
 
@@ -55,6 +56,21 @@ func NewClient(httpClient httpclient.Client, token string) *Client {
 
 func (c *Client) VerifyToken(ctx context.Context) (*models.TokenVerification, error) {
 	return c.inner.Discovery.VerifyToken(ctx)
+}
+
+// RefreshQuota performs a lightweight read-only request so the transport can
+// observe live quota headers without invoking any mutation path.
+func (c *Client) RefreshQuota(ctx context.Context) (quota.Observation, error) {
+	_, err := c.VerifyToken(ctx)
+	if err != nil {
+		quota.RecordRefreshFailure("cloudflare")
+		return quota.Observation{Provider: "cloudflare", QuotaSource: "api:/user/tokens/verify", State: quota.Unknown}, err
+	}
+	obs, ok := quota.DefaultRegistry().Get("cloudflare")
+	if !ok {
+		return quota.Observation{Provider: "cloudflare", QuotaSource: "api:/user/tokens/verify", State: quota.Unknown}, nil
+	}
+	return obs, nil
 }
 
 func (c *Client) ListZones(ctx context.Context) ([]models.Zone, error) {

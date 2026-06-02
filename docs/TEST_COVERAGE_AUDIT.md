@@ -1,5 +1,25 @@
 # Test Coverage Audit
 
+**Updated:** 2026-06-01
+**Second-order pass:** targeted hardening of useful gaps only
+
+## Current critical-package coverage snapshot
+
+- `internal/services/reporting`: 81.0%
+- `internal/runtime/recovery`: 72.9%
+- `internal/runtime/ownership`: 60.3%
+- `internal/storage/sqlite`: 71.8%
+- `internal/runtime/events`: 63.6%
+- `cmd/cf-cleanup` is now directly covered by operational tests in `internal/app`
+- `cmd/cf-allowlist-sync` is confirmed list-only and covered by direct tests in `internal/app`
+- Outbox retry claiming now has a direct storage regression test for active claim leases.
+- Cleanup destructive-delete cancellation now has a direct application regression test.
+- Runtime blind-spot audit added focused tests for convergence nil-snapshot safety, drift oscillation/quarantine, scheduler budget/queue invariants, and Cloudflare pagination boundaries.
+
+Remaining gaps are mostly helper wrappers or deeper integration seams and are now explicitly classified rather than treated as accidental debt.
+
+Sections below this current snapshot are historical audit inventory. Package counts and coverage numbers in those older tables are retained for traceability and should not override the current green status summarized above.
+
 **Date:** 2026-05-30  
 **Baseline total:** 49.2%  
 **Post-hardening total:** 50.0%  
