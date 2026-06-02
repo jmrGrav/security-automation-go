@@ -1,7 +1,9 @@
 package startupcheck
 
 import (
+	"fmt"
 	"net"
+	"strings"
 	"testing"
 )
 
@@ -45,4 +47,28 @@ func findFreePort(t *testing.T) int {
 	}
 	defer listener.Close()
 	return listener.Addr().(*net.TCPAddr).Port
+}
+
+func TestPortInUseErrorMessage(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to create listener: %v", err)
+	}
+	defer listener.Close()
+
+	addr := listener.Addr().(*net.TCPAddr)
+	port := addr.Port
+
+	err = CheckPortAvailable("127.0.0.1", port)
+	if err == nil {
+		t.Fatalf("expected error for occupied port")
+	}
+
+	errMsg := err.Error()
+	if !strings.Contains(errMsg, fmt.Sprintf("%d", port)) {
+		t.Errorf("error message should contain port number %d, got: %s", port, errMsg)
+	}
+	if !strings.Contains(errMsg, "already in use") && !strings.Contains(errMsg, "in use") {
+		t.Errorf("error message should say port is in use, got: %s", errMsg)
+	}
 }

@@ -82,3 +82,25 @@ func TestReleaseLock(t *testing.T) {
 	}
 	locker2.Release()
 }
+
+func TestStaleLocksAreCleanedUp(t *testing.T) {
+	tmpDir := t.TempDir()
+	lockFile := filepath.Join(tmpDir, "app.pid")
+
+	// Simulate stale lock with invalid PID (99999 is unlikely to be running)
+	if err := os.WriteFile(lockFile, []byte("99999\n"), 0o644); err != nil {
+		t.Fatalf("failed to write stale lock: %v", err)
+	}
+
+	// Try to acquire — should succeed (stale lock cleaned up)
+	locker, err := NewFileLock(lockFile)
+	if err != nil {
+		t.Fatalf("NewFileLock failed: %v", err)
+	}
+
+	err = locker.Acquire()
+	if err != nil {
+		t.Errorf("Acquire should succeed for stale lock, got error: %v", err)
+	}
+	locker.Release()
+}
