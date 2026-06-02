@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -215,7 +216,27 @@ func runDaemon(ctx context.Context, logger *slog.Logger, orch *pipeline.Orchestr
 		ownershipLineage = ownership.NewLineageQueryService(ownershipRepo)
 	}
 	srv := startAPIServer(logger, collector, j, qStore, orch, p, sm, dm, rec, br, am, fr, adm, evidence, ownershipLineage, metricsAddr)
-	l := lock.NewFileLock(stateDir)
+
+	// Acquire daemon lock
+	lockFile := filepath.Join(stateDir, "security-automation-go.pid")
+	locker, err := lock.NewFileLock(lockFile)
+	if err != nil {
+		logger.Error("failed to create daemon lock", "error", err)
+		os.Exit(1)
+	}
+
+	if err := locker.Acquire(); err != nil {
+		if lockErr, ok := err.(lock.PIDLockedError); ok {
+			logger.Error("failed to acquire daemon lock: another instance is running", "pid", lockErr.PID)
+		} else {
+			logger.Error("failed to acquire daemon lock", "error", err)
+		}
+		os.Exit(1)
+	}
+	defer locker.Release()
+
+	logger.Info("daemon lock acquired", "lock_file", lockFile)
+
 	s := stateful_scheduler.New(store, orch, sm, cm, logger, interval)
 	defer s.Stop()
 	childCtx, cancel := newDaemonContext(ctx, logger, srv)
@@ -231,16 +252,6 @@ func runDaemon(ctx context.Context, logger *slog.Logger, orch *pipeline.Orchestr
 			}
 		}()
 	}
-	acquired, err := l.Acquire()
-	if err != nil {
-		logger.Error("failed to acquire daemon lock", "error", err)
-		os.Exit(1)
-	}
-	if !acquired {
-		logger.Error("failed to acquire daemon lock: another instance is running")
-		os.Exit(1)
-	}
-	defer l.Release()
 	if err := s.Start(childCtx, os.Getenv("CF_ZONE_ID")); err != nil {
 		if errors.Is(err, context.Canceled) {
 			return
