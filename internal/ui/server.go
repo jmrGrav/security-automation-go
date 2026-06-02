@@ -2,7 +2,6 @@ package ui
 
 import (
 	"crypto/hmac"
-	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
@@ -190,37 +189,6 @@ func (s *Server) handleLoginPage(w http.ResponseWriter, r *http.Request) {
 	_ = LoginPage("").Render(r.Context(), w)
 }
 
-func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
-	if !s.limiter.Allow(clientKey(r)) {
-		http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
-		return
-	}
-	if err := r.ParseForm(); err != nil {
-		s.audit.Record("login_error", map[string]string{"reason": "bad_form"})
-		http.Error(w, "bad request", http.StatusBadRequest)
-		return
-	}
-	secret := r.PostForm.Get("secret")
-	expected, ok := s.secretProvider.Lookup("UI_SECRET")
-	if !ok || expected == "" || subtleConstantTime(secret, expected) != 1 {
-		s.audit.Record("login_failed", map[string]string{"reason": "invalid_secret"})
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
-		return
-	}
-	token, err := randomSessionToken()
-	if err != nil {
-		s.logger.Error("failed to generate session token", "error", err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
-		return
-	}
-	s.mu.Lock()
-	s.sessions[token] = time.Now().UTC().Add(sessionTTL)
-	s.pruneSessionsLocked(time.Now().UTC())
-	s.mu.Unlock()
-	http.SetCookie(w, s.sessionCookie(r, token))
-	s.audit.Record("login_success", map[string]string{"actor": "local"})
-	http.Redirect(w, r, "/", http.StatusFound)
-}
 
 func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	if cookie, err := r.Cookie(sessionCookieName); err == nil {
@@ -1018,19 +986,6 @@ func clientKey(r *http.Request) string {
 		return r.RemoteAddr
 	}
 	return host
-}
-
-func randomSessionToken() (string, error) {
-	const letters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-	var raw [32]byte
-	if _, err := rand.Read(raw[:]); err != nil {
-		return "", err
-	}
-	var out [32]byte
-	for i := range out {
-		out[i] = letters[int(raw[i])%len(letters)]
-	}
-	return string(out[:]), nil
 }
 
 type rateLimiter struct {
