@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -20,6 +21,8 @@ import (
 	aigemini "github.com/jm/security-automation-go/internal/ai/providers/gemini"
 	aiopenai "github.com/jm/security-automation-go/internal/ai/providers/openai"
 	"github.com/jm/security-automation-go/internal/config"
+	"github.com/jm/security-automation-go/internal/runtime/lock"
+	"github.com/jm/security-automation-go/internal/startupcheck"
 	"github.com/jm/security-automation-go/internal/ui"
 )
 
@@ -27,6 +30,43 @@ func runUI(ctx context.Context, logger *slog.Logger, cfg *config.Config) error {
 	if !cfg.UI.Enabled {
 		return errors.New("ui mode requires UI_ENABLED=1 or ui.enabled=true")
 	}
+
+	// Extract port from address
+	host, portStr, err := net.SplitHostPort(cfg.UI.Addr)
+	if err != nil {
+		return fmt.Errorf("parse ui.addr: %w", err)
+	}
+	port := parseInt(portStr)
+	if port == 0 {
+		return fmt.Errorf("invalid port in ui.addr: %s", portStr)
+	}
+
+	// Check port availability
+	if err := startupcheck.CheckPortAvailable(host, port); err != nil {
+		if pidErr, ok := err.(startupcheck.PortInUseError); ok {
+			return fmt.Errorf("UI port %d already in use.\n\nPID: %d\nProcess: %s",
+				port, pidErr.PID, pidErr.ProcName)
+		}
+		return err
+	}
+
+	// Acquire instance lock
+	lockFile := filepath.Join(cfg.StateDir, "security-automation-go.pid")
+	locker, err := lock.NewFileLock(lockFile)
+	if err != nil {
+		return fmt.Errorf("create lock: %w", err)
+	}
+
+	if err := locker.Acquire(); err != nil {
+		if lockErr, ok := err.(lock.PIDLockedError); ok {
+			return fmt.Errorf("another instance (PID %d) is running", lockErr.PID)
+		}
+		return err
+	}
+	defer locker.Release()
+
+	logger.Info("instance lock acquired", "lock_file", lockFile)
+
 	auditSink, err := ui.NewFileAuditSink(filepath.Join(cfg.StateDir, "ui-audit.log"))
 	if err != nil {
 		return err
@@ -120,4 +160,9 @@ func buildAIProviders(cfg ai.Config, logger *slog.Logger) []providers.Provider {
 	})
 
 	return out
+}
+
+func parseInt(s string) int {
+	v, _ := strconv.Atoi(s)
+	return v
 }
