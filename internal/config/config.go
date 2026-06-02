@@ -93,11 +93,13 @@ type VirusTotalConfig struct {
 }
 
 type UIBoolConfig struct {
-	Enabled           bool   `yaml:"enabled"`
-	Addr              string `yaml:"addr"`
-	MutationsEnabled  bool   `yaml:"mutations_enabled"`
-	SecretFile        string `yaml:"secret_file"`
-	ProviderStateFile string `yaml:"provider_state_file"`
+	Enabled             bool   `yaml:"enabled"`
+	Addr                string `yaml:"addr"`
+	Port                int    `yaml:"port"` // extracted from Addr; deprecated
+	MutationsEnabled    bool   `yaml:"mutations_enabled"`
+	SecretFile          string `yaml:"secret_file"`
+	ProviderStateFile   string `yaml:"provider_state_file"`
+	AdminPasswordFile   string `yaml:"admin_password_file"` // New: path to admin password hash
 }
 
 type EnrichmentConfig struct {
@@ -172,8 +174,11 @@ func DefaultConfig() *Config {
 			Profile: RuntimeProfileSingleNode,
 		},
 		UI: UIBoolConfig{
-			Addr:              "127.0.0.1:9090",
-			SecretFile:        "/var/lib/cf-sync/secrets.local",
+			Enabled:           false,
+			Addr:              "127.0.0.1:6969",
+			Port:              6969,
+			SecretFile:        "/etc/security-automation/secrets/ui_secret",
+			AdminPasswordFile: "/etc/security-automation/secrets/admin_password",
 			ProviderStateFile: "/etc/security-automation/providers/ai-providers.env",
 			MutationsEnabled:  false,
 		},
@@ -308,6 +313,9 @@ func applyEnvOverrides(cfg *Config) {
 	}
 	if v := os.Getenv("UI_PROVIDER_STATE_FILE"); v != "" {
 		cfg.UI.ProviderStateFile = v
+	}
+	if v := os.Getenv("UI_ADMIN_PASSWORD_FILE"); v != "" {
+		cfg.UI.AdminPasswordFile = v
 	}
 	if v := os.Getenv("ENRICHMENT_ENABLED"); v != "" {
 		if enabled, err := strconv.ParseBool(v); err == nil {
