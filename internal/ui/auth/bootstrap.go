@@ -69,6 +69,20 @@ func GetBootstrapState(secretFile string) (BootstrapState, error) {
 	return state, nil
 }
 
+// SaveBootstrapState persists the bootstrap state to the secret file.
+func SaveBootstrapState(secretFile string, state BootstrapState) error {
+	data, err := json.Marshal(state)
+	if err != nil {
+		return fmt.Errorf("marshal state: %w", err)
+	}
+
+	if err := os.WriteFile(secretFile, data, 0o600); err != nil {
+		return fmt.Errorf("write secret file: %w", err)
+	}
+
+	return nil
+}
+
 // ClearBootstrapState marks the bootstrap password as no longer active.
 func ClearBootstrapState(secretFile string) error {
 	state, err := GetBootstrapState(secretFile)
