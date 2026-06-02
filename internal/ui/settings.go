@@ -132,9 +132,13 @@ func (s *Server) getSession(r *http.Request) (string, bool) {
 
 	s.mu.Lock()
 	expiry, ok := s.sessions[cookie.Value]
+	if ok && time.Now().After(expiry) {
+		delete(s.sessions, cookie.Value)
+		ok = false
+	}
 	s.mu.Unlock()
 
-	if !ok || time.Now().After(expiry) {
+	if !ok {
 		return "", false
 	}
 

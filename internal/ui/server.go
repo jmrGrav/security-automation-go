@@ -24,6 +24,7 @@ import (
 	"github.com/jm/security-automation-go/internal/observability/metrics"
 	"github.com/jm/security-automation-go/internal/security"
 	"github.com/jm/security-automation-go/internal/security/enrichment"
+	"github.com/jm/security-automation-go/internal/ui/auth"
 )
 
 const (
@@ -152,33 +153,34 @@ func securityHeaders(next http.Handler) http.Handler {
 func (s *Server) routes() {
 	s.mux.HandleFunc("GET /login", s.handleLoginPage)
 	s.mux.HandleFunc("POST /login", s.handleLogin)
-	s.mux.HandleFunc("POST /logout", s.requireAuth(s.handleLogout))
-	s.mux.HandleFunc("GET /", s.requireAuth(s.handleDashboard))
-	s.mux.HandleFunc("GET /providers", s.requireAuth(s.handleProviders))
-	s.mux.HandleFunc("POST /admin/providers/{name}/key", s.requireAuth(s.handleProviderReplaceKey))
-	s.mux.HandleFunc("POST /admin/providers/{name}/test", s.requireAuth(s.handleProviderTest))
-	s.mux.HandleFunc("POST /admin/providers/{name}/enable", s.requireAuth(s.handleProviderEnable))
-	s.mux.HandleFunc("POST /admin/providers/{name}/disable", s.requireAuth(s.handleProviderDisable))
-	s.mux.HandleFunc("GET /forensic", s.requireAuth(s.handleForensicPage))
-	s.mux.HandleFunc("POST /forensic", s.requireAuth(s.handleForensicLookup))
-	s.mux.HandleFunc("GET /about", s.requireAuth(s.handleAboutPage))
-	s.mux.HandleFunc("GET /system", s.requireAuth(s.handleAboutPage))
-	s.mux.HandleFunc("GET /audit", s.requireAuth(s.handleAuditTrailPage))
-	s.mux.HandleFunc("GET /timeline", s.requireAuth(s.handleTimelinePage))
-	s.mux.HandleFunc("GET /intelligence", s.requireAuth(s.handleIntelligencePage))
-	s.mux.HandleFunc("POST /intelligence", s.requireAuth(s.handleIntelligenceLookup))
-	s.mux.HandleFunc("GET /trusted-networks", s.requireAuth(s.handleTrustedNetworksPage))
-	s.mux.HandleFunc("GET /trusted-networks/diff", s.requireAuth(s.handleTrustedNetworksDiff))
-	s.mux.HandleFunc("GET /trusted-networks/refresh", s.requireAuth(s.handleTrustedNetworksRefreshDryRun))
-	s.mux.HandleFunc("GET /trusted-networks/export", s.requireAuth(s.handleTrustedNetworksExport))
-	s.mux.HandleFunc("GET /cloudflare/diff", s.requireAuth(s.handleCloudflareDiffPage))
-	s.mux.HandleFunc("GET /replay", s.requireAuth(s.handleReplayPage))
-	s.mux.HandleFunc("GET /deban", s.requireAuth(s.handleDebanPage))
-	s.mux.HandleFunc("GET /recovery", s.requireAuth(s.handleRecoveryPage))
-	s.mux.HandleFunc("GET /drift", s.requireAuth(s.handleDriftPage))
-	s.mux.HandleFunc("POST /actions/cloudflare/ban", s.requireAuth(s.handleCloudflareBanPreview))
-	s.mux.HandleFunc("POST /ui/ai/explain", s.requireAuth(s.handleAIExplain))
-	s.mux.HandleFunc("GET /static/ai-explain.js", s.requireAuth(s.handleAIExplainScript))
+	s.mux.Handle("POST /ui/settings/password/change", s.forcePasswordChangeMiddleware(http.HandlerFunc(s.handleChangePassword)))
+	s.mux.Handle("POST /logout", s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleLogout))))
+	s.mux.Handle("GET /", s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleDashboard))))
+	s.mux.Handle("GET /providers", s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleProviders))))
+	s.mux.Handle("POST /admin/providers/{name}/key", s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleProviderReplaceKey))))
+	s.mux.Handle("POST /admin/providers/{name}/test", s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleProviderTest))))
+	s.mux.Handle("POST /admin/providers/{name}/enable", s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleProviderEnable))))
+	s.mux.Handle("POST /admin/providers/{name}/disable", s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleProviderDisable))))
+	s.mux.Handle("GET /forensic", s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleForensicPage))))
+	s.mux.Handle("POST /forensic", s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleForensicLookup))))
+	s.mux.Handle("GET /about", s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleAboutPage))))
+	s.mux.Handle("GET /system", s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleAboutPage))))
+	s.mux.Handle("GET /audit", s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleAuditTrailPage))))
+	s.mux.Handle("GET /timeline", s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleTimelinePage))))
+	s.mux.Handle("GET /intelligence", s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleIntelligencePage))))
+	s.mux.Handle("POST /intelligence", s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleIntelligenceLookup))))
+	s.mux.Handle("GET /trusted-networks", s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleTrustedNetworksPage))))
+	s.mux.Handle("GET /trusted-networks/diff", s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleTrustedNetworksDiff))))
+	s.mux.Handle("GET /trusted-networks/refresh", s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleTrustedNetworksRefreshDryRun))))
+	s.mux.Handle("GET /trusted-networks/export", s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleTrustedNetworksExport))))
+	s.mux.Handle("GET /cloudflare/diff", s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleCloudflareDiffPage))))
+	s.mux.Handle("GET /replay", s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleReplayPage))))
+	s.mux.Handle("GET /deban", s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleDebanPage))))
+	s.mux.Handle("GET /recovery", s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleRecoveryPage))))
+	s.mux.Handle("GET /drift", s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleDriftPage))))
+	s.mux.Handle("POST /actions/cloudflare/ban", s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleCloudflareBanPreview))))
+	s.mux.Handle("POST /ui/ai/explain", s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleAIExplain))))
+	s.mux.Handle("GET /static/ai-explain.js", s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleAIExplainScript))))
 }
 
 func (s *Server) handleLoginPage(w http.ResponseWriter, r *http.Request) {
@@ -535,6 +537,16 @@ func (s *Server) handleForensicLookup(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) requireAuth(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !s.isAuthed(r) {
+			http.Redirect(w, r, "/login", http.StatusFound)
+			return
+		}
+		next(w, r)
+	}
+}
+
+func (s *Server) requireAuthHandler(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if !s.isAuthed(r) {
 			http.Redirect(w, r, "/login", http.StatusFound)
@@ -974,6 +986,45 @@ func subtleConstantTime(a, b string) int {
 		return 1
 	}
 	return 0
+}
+
+func (s *Server) forcePasswordChangeMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Allow access to login and password change endpoints
+		if r.URL.Path == "/login" || r.URL.Path == "/ui/settings/password/change" {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		// Check session
+		_, ok := s.getSession(r)
+		if !ok {
+			http.Redirect(w, r, "/login", http.StatusFound)
+			return
+		}
+
+		// Check if bootstrap password is still active
+		isBootstrap := s.isBootstrapActive()
+		if isBootstrap {
+			// Force password change
+			http.Redirect(w, r, "/ui/settings/password/change", http.StatusFound)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
+
+// isBootstrapActive checks if the bootstrap password is still active.
+// Returns false if the bootstrap state file doesn't exist (system is initialized).
+func (s *Server) isBootstrapActive() bool {
+	state, err := auth.GetBootstrapState(s.cfg.UI.AdminPasswordFile)
+	if err != nil {
+		// If we can't load the bootstrap state, assume it's not active
+		// (system is already initialized or bootstrap file doesn't exist yet)
+		return false
+	}
+	return state.IsBootstrap
 }
 
 func clientKey(r *http.Request) string {
