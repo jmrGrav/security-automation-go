@@ -4,7 +4,6 @@ import (
 	"context"
 	"net/netip"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/jm/security-automation-go/internal/observability/metrics"
@@ -84,39 +83,6 @@ func (s *Service) isProtected(ip string) bool {
 		return false
 	}
 	return len(s.trust.MatchIP(ip)) > 0
-}
-
-func (s *Service) isDuplicate(req Request, cls classifier.Classification) bool {
-	key := fingerprint(req, cls)
-	now := s.now()
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for k, expires := range s.recentFingerprints {
-		if now.After(expires) {
-			delete(s.recentFingerprints, k)
-		}
-	}
-	if expires, ok := s.recentFingerprints[key]; ok && now.Before(expires) {
-		return true
-	}
-	s.recentFingerprints[key] = now.Add(s.dedupTTL)
-	return false
-}
-
-func (s *Service) lockIP(ip string) func() {
-	if s == nil || ip == "" {
-		return func() {}
-	}
-	s.mu.Lock()
-	lock, ok := s.ipLocks[ip]
-	if !ok {
-		lock = &sync.Mutex{}
-		s.ipLocks[ip] = lock
-	}
-	s.mu.Unlock()
-	lock.Lock()
-	return lock.Unlock
 }
 
 func (s *Service) markReported(ctx context.Context, ip string, evidenceID string) error {

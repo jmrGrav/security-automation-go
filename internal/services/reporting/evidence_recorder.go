@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"time"
 
+	"github.com/jm/security-automation-go/internal/observability/metrics"
 	"github.com/jm/security-automation-go/internal/security/classifier"
 	tmevents "github.com/jm/security-automation-go/internal/telemetry/events"
 )
@@ -61,6 +62,7 @@ func (s *Service) recordEvidenceWithID(ctx context.Context, evidenceID string, r
 		},
 	}
 	if err := s.evidenceStore.Append(ctx, ev); err != nil {
+		metrics.EvidenceWriteFailuresTotal.Inc()
 		telemetryEvent.Metadata["evidence_store_error"] = err.Error()
 		return ""
 	}
@@ -103,6 +105,7 @@ func (s *Service) recordObservedEvidence(ctx context.Context, event tmevents.Sec
 		},
 	}
 	if err := s.evidenceStore.Append(ctx, ev); err != nil {
+		metrics.EvidenceWriteFailuresTotal.Inc()
 		if event.Metadata != nil {
 			event.Metadata["evidence_store_error"] = err.Error()
 		}

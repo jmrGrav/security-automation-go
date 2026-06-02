@@ -15,6 +15,34 @@ type checkpointStore struct {
 	lastSeq     uint64
 }
 
+type archiveCompactorRecorder struct {
+	calls []archiveCompactorCall
+}
+
+type archiveCompactorCall struct {
+	scopeID        string
+	checkpointName string
+	throughSeq     uint64
+}
+
+func (r *archiveCompactorRecorder) CompactRawArchive(_ context.Context, scopeID string, checkpointName string, throughSequence uint64) (ArchiveCompactionStats, error) {
+	r.calls = append(r.calls, archiveCompactorCall{
+		scopeID:        scopeID,
+		checkpointName: checkpointName,
+		throughSeq:     throughSequence,
+	})
+	return ArchiveCompactionStats{
+		HotEntries:        2,
+		WarmEntries:       3,
+		ColdEntries:       4,
+		ReplaySafeEntries: 5,
+		PurgeCandidates:   3,
+		Compactions:       1,
+		Rotations:         0,
+		StorageBytes:      1024,
+	}, nil
+}
+
 func (s *checkpointStore) SaveCheckpoint(_ context.Context, checkpoint events.Checkpoint) error {
 	s.checkpoints = append(s.checkpoints, checkpoint)
 	return nil
@@ -149,6 +177,36 @@ func TestManagerRetentionAndStaleInvalidation(t *testing.T) {
 		if cp.Sequence > 2 {
 			t.Fatalf("expected stale checkpoint removal, found sequence %d", cp.Sequence)
 		}
+	}
+}
+
+func TestManagerInvokesArchiveCompactionThroughOldestRetainedValidCheckpoint(t *testing.T) {
+	store := &checkpointStore{lastSeq: 4}
+	recorder := &archiveCompactorRecorder{}
+	mgr := NewManager(store, store, nil, 2, WithArchiveCompactor(recorder))
+	state := models.RuntimeState{Lifecycle: models.LifecycleState{Status: models.StatusIdle, LastUpdatedAt: time.Now().UTC()}}
+
+	for seq := uint64(1); seq <= 4; seq++ {
+		_, err := mgr.SaveNamedRuntimeState(context.Background(), "runtime-state", "scope-a", "test", events.Event{
+			ID:        int64(seq),
+			Sequence:  seq,
+			ScopeID:   "scope-a",
+			Timestamp: time.Now().UTC(),
+		}, state)
+		if err != nil {
+			t.Fatalf("save checkpoint %d: %v", seq, err)
+		}
+	}
+
+	if len(recorder.calls) == 0 {
+		t.Fatal("expected archive compactor to be called")
+	}
+	call := recorder.calls[len(recorder.calls)-1]
+	if call.scopeID != "scope-a" || call.checkpointName != DefaultRuntimeCheckpointName {
+		t.Fatalf("unexpected archive compactor call: %+v", call)
+	}
+	if call.throughSeq != 3 {
+		t.Fatalf("expected archive compaction through oldest retained checkpoint 3, got %d", call.throughSeq)
 	}
 }
 

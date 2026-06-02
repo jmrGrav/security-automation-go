@@ -102,6 +102,17 @@ func (s *fakeReservationStore) Reserve(_ context.Context, reservation reporting.
 	return nil
 }
 
+func (s *fakeReservationStore) FindPendingByIPAndIdempotencyKey(_ context.Context, ip string, idempotencyKey string) (reporting.ReportReservation, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, reservation := range s.reserve {
+		if reservation.IP == ip && reservation.IdempotencyKey == idempotencyKey && reservation.Status == reporting.ReportStatusPending {
+			return reservation, true, nil
+		}
+	}
+	return reporting.ReportReservation{}, false, nil
+}
+
 func (s *fakeReservationStore) MarkStatus(_ context.Context, evidenceID string, status string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -117,19 +128,23 @@ func (s *fakeReservationStore) MarkStatus(_ context.Context, evidenceID string, 
 	return nil
 }
 
-func (s *fakeReservationStore) ListRetryable(_ context.Context, _ time.Time, _ int) ([]reporting.ReportOutboxItem, error) {
+func (s *fakeReservationStore) ClaimRetryable(_ context.Context, now time.Time, limit int, claimUntil time.Time) ([]reporting.ReportOutboxItem, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.err != nil {
 		return nil, s.err
 	}
 	if len(s.items) > 0 {
-		return append([]reporting.ReportOutboxItem(nil), s.items...), nil
+		out := append([]reporting.ReportOutboxItem(nil), s.items...)
+		for i := range out {
+			out[i].NextAttemptAt = claimUntil
+		}
+		return out, nil
 	}
 	var out []reporting.ReportOutboxItem
 	for _, reservation := range s.reserve {
 		if reservation.Status == reporting.ReportStatusPending || reservation.Status == reporting.ReportStatusFailed {
-			out = append(out, reporting.ReportOutboxItem{Reservation: reservation})
+			out = append(out, reporting.ReportOutboxItem{Reservation: reservation, NextAttemptAt: claimUntil})
 		}
 	}
 	return out, nil

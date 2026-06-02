@@ -3,6 +3,7 @@ package sqlite
 import (
 	"context"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -125,6 +126,148 @@ func TestLeaseRepositoryRenewLease(t *testing.T) {
 	// Test epoch mismatch
 	if err := repo.RenewLease(ctx, "scope-a", "lease-a", "worker-a", "epoch-stale", 1, renewed.Add(3*time.Minute)); err == nil {
 		t.Fatal("expected error on epoch mismatch, got nil")
+	}
+}
+
+func TestLeaseRepositoryAcquireLeaseIsAtomicPerScopeAction(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbA, err := New(tmpDir)
+	if err != nil {
+		t.Fatalf("new db a: %v", err)
+	}
+	defer dbA.Close()
+	dbB, err := New(tmpDir)
+	if err != nil {
+		t.Fatalf("new db b: %v", err)
+	}
+	defer dbB.Close()
+
+	repoA := NewLeaseRepository(dbA)
+	repoB := NewLeaseRepository(dbB)
+	ctx := context.Background()
+	expiresAt := time.Now().UTC().Add(time.Minute)
+	start := make(chan struct{})
+	errs := make(chan error, 2)
+	var wg sync.WaitGroup
+
+	worker := func(repo *LeaseRepository, lease models.Lease, scopeID string) {
+		defer wg.Done()
+		<-start
+		errs <- repo.AcquireLease(ctx, scopeID, lease)
+	}
+
+	wg.Add(2)
+	go worker(repoA, models.Lease{
+		ID:           "lease-a",
+		Owner:        "worker-a",
+		Action:       "reconcile",
+		EpochID:      "epoch-a",
+		FencingToken: 1,
+		ExpiresAt:    expiresAt,
+	}, "scope-a")
+	go worker(repoB, models.Lease{
+		ID:           "lease-b",
+		Owner:        "worker-b",
+		Action:       "reconcile",
+		EpochID:      "epoch-b",
+		FencingToken: 2,
+		ExpiresAt:    expiresAt,
+	}, "scope-a")
+	close(start)
+	wg.Wait()
+	close(errs)
+
+	var successes int
+	for err := range errs {
+		if err == nil {
+			successes++
+		}
+	}
+	if successes != 1 {
+		t.Fatalf("expected exactly one successful acquire, got %d", successes)
+	}
+	lease, err := repoA.GetActiveLease(ctx, "scope-a", "reconcile")
+	if err != nil {
+		t.Fatalf("get active lease: %v", err)
+	}
+	if lease == nil {
+		t.Fatal("expected active lease after atomic acquire")
+	}
+	if lease.Owner != "worker-a" && lease.Owner != "worker-b" {
+		t.Fatalf("unexpected winning owner: %+v", lease)
+	}
+}
+
+func TestLeaseRepositoryRejectsUnexpiredLeaseForDifferentOwner(t *testing.T) {
+	tmpDir := t.TempDir()
+	db, err := New(tmpDir)
+	if err != nil {
+		t.Fatalf("new db: %v", err)
+	}
+	defer db.Close()
+
+	repo := NewLeaseRepository(db)
+	ctx := context.Background()
+	expiresAt := time.Now().UTC().Add(time.Hour)
+	if err := repo.AcquireLease(ctx, "scope-a", models.Lease{
+		ID:           "lease-a",
+		Owner:        "worker-a",
+		Action:       "reconcile",
+		EpochID:      "epoch-a",
+		FencingToken: 1,
+		ExpiresAt:    expiresAt,
+	}); err != nil {
+		t.Fatalf("acquire lease: %v", err)
+	}
+	if err := repo.AcquireLease(ctx, "scope-a", models.Lease{
+		ID:           "lease-b",
+		Owner:        "worker-b",
+		Action:       "reconcile",
+		EpochID:      "epoch-b",
+		FencingToken: 2,
+		ExpiresAt:    expiresAt,
+	}); err == nil {
+		t.Fatal("expected different owner to be rejected")
+	}
+}
+
+func TestLeaseRepositoryAllowsExpiredLeaseReacquire(t *testing.T) {
+	tmpDir := t.TempDir()
+	db, err := New(tmpDir)
+	if err != nil {
+		t.Fatalf("new db: %v", err)
+	}
+	defer db.Close()
+
+	repo := NewLeaseRepository(db)
+	ctx := context.Background()
+	expired := time.Now().UTC().Add(-time.Minute)
+	if err := repo.AcquireLease(ctx, "scope-a", models.Lease{
+		ID:           "lease-old",
+		Owner:        "worker-a",
+		Action:       "reconcile",
+		EpochID:      "epoch-a",
+		FencingToken: 1,
+		ExpiresAt:    expired,
+	}); err != nil {
+		t.Fatalf("seed expired lease: %v", err)
+	}
+	if err := repo.AcquireLease(ctx, "scope-a", models.Lease{
+		ID:           "lease-new",
+		Owner:        "worker-b",
+		Action:       "reconcile",
+		EpochID:      "epoch-b",
+		FencingToken: 2,
+		ExpiresAt:    time.Now().UTC().Add(time.Minute),
+	}); err != nil {
+		t.Fatalf("reacquire expired lease: %v", err)
+	}
+	lease, err := repo.GetActiveLease(ctx, "scope-a", "reconcile")
+	if err != nil {
+		t.Fatalf("get active lease: %v", err)
+	}
+	if lease == nil || lease.ID != "lease-new" {
+		t.Fatalf("expected new active lease after expiry, got %+v", lease)
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"github.com/jm/security-automation-go/internal/apperr"
@@ -120,6 +121,37 @@ func (s *StateStore) LoadForScope(scopeID string) (models.RuntimeState, error) {
 		return models.RuntimeState{}, apperr.Wrap(op, err)
 	}
 	return st, nil
+}
+
+func (s *StateStore) ListScopes() ([]string, error) {
+	const op = "runtime.state.ListScopes"
+
+	entries, err := os.ReadDir(s.dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, apperr.Wrap(op, err)
+	}
+
+	scopes := make([]string, 0, len(entries))
+	seen := make(map[string]struct{})
+	for _, entry := range entries {
+		name := entry.Name()
+		if !strings.HasPrefix(name, "runtime_state_") || !strings.HasSuffix(name, ".json") {
+			continue
+		}
+		scopeID := strings.TrimSuffix(strings.TrimPrefix(name, "runtime_state_"), ".json")
+		if scopeID == "" {
+			continue
+		}
+		if _, ok := seen[scopeID]; ok {
+			continue
+		}
+		seen[scopeID] = struct{}{}
+		scopes = append(scopes, scopeID)
+	}
+	return scopes, nil
 }
 
 func (s *StateStore) loadGlobalUnlocked() (models.RuntimeState, error) {

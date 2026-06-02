@@ -3,11 +3,13 @@ package reporting_test
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
 	abmodels "github.com/jm/security-automation-go/internal/abuseipdb/models"
 	"github.com/jm/security-automation-go/internal/services/reporting"
+	"github.com/jm/security-automation-go/internal/storage/sqlite"
 	"github.com/jm/security-automation-go/internal/telemetry/sinks"
 )
 
@@ -161,4 +163,85 @@ func TestOutboxWorkerLeaseGuardRefusalSkipsUpstreamCall(t *testing.T) {
 	if guard.calls != 1 {
 		t.Fatalf("expected one lease guard validation call, got %d", guard.calls)
 	}
+}
+
+func TestOutboxWorkerClaimsRowBeforeReporting(t *testing.T) {
+	db, err := sqlite.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("sqlite new: %v", err)
+	}
+	defer db.Close()
+
+	store := sqlite.NewReportReservationStore(db)
+	base := time.Date(2026, 5, 28, 12, 0, 0, 0, time.UTC)
+	reservation := reporting.ReportReservation{
+		IP:             "8.8.8.8",
+		Source:         "cloudflare_waf",
+		IdempotencyKey: "exec-claim",
+		EvidenceID:     "ev-claim",
+		Status:         reporting.ReportStatusPending,
+		ExpiresAt:      base.Add(time.Hour),
+		Report:         abmodels.ExecutableReport{ExecutionID: "exec-claim", IP: "8.8.8.8", Categories: "21", Comment: "x", CreatedAt: base},
+	}
+	if err := store.Reserve(context.Background(), reservation); err != nil {
+		t.Fatalf("reserve: %v", err)
+	}
+
+	started := make(chan struct{}, 1)
+	release := make(chan struct{})
+	reporter := &blockingReporter{
+		started: started,
+		release: release,
+	}
+	worker := reporting.NewOutboxWorker(store, reporter, newFakeDedupStore(), nil, nil, reporting.OutboxWorkerConfig{
+		Clock:      func() time.Time { return base },
+		ClaimLease: time.Second,
+	})
+
+	errs := make(chan error, 2)
+	go func() {
+		_, err := worker.ProcessOnce(context.Background())
+		errs <- err
+	}()
+	<-started
+	go func() {
+		_, err := worker.ProcessOnce(context.Background())
+		errs <- err
+	}()
+	close(release)
+
+	if err := <-errs; err != nil {
+		t.Fatalf("first worker: %v", err)
+	}
+	if err := <-errs; err != nil {
+		t.Fatalf("second worker: %v", err)
+	}
+	if got := len(reporter.Reports()); got != 1 {
+		t.Fatalf("expected exactly one upstream report, got %d", got)
+	}
+}
+
+type blockingReporter struct {
+	started chan struct{}
+	release chan struct{}
+	mu      sync.Mutex
+	reports []abmodels.ExecutableReport
+}
+
+func (b *blockingReporter) Execute(_ context.Context, reports []abmodels.ExecutableReport) error {
+	b.mu.Lock()
+	b.reports = append(b.reports, reports...)
+	b.mu.Unlock()
+	select {
+	case b.started <- struct{}{}:
+	default:
+	}
+	<-b.release
+	return nil
+}
+
+func (b *blockingReporter) Reports() []abmodels.ExecutableReport {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return append([]abmodels.ExecutableReport(nil), b.reports...)
 }

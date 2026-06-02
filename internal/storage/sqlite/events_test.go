@@ -9,6 +9,7 @@ import (
 	"errors"
 	"os"
 	"sort"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -341,9 +342,10 @@ func TestEventRepositoryConcurrentAppendSameScope(t *testing.T) {
 				Category:      events.CategoryLifecycle,
 				Type:          "concurrent",
 				CorrelationID: "corr",
+				CausalID:      "seq-" + strconv.Itoa(i),
 				Actor:         "tester",
 				ScopeID:       "scope-a",
-				Payload:       []byte(`{"i":1}`),
+				Payload:       []byte(`{"i":` + strconv.Itoa(i) + `}`),
 			}
 			if err := repo.Append(ctx, ev); err != nil {
 				errs <- err
@@ -401,9 +403,10 @@ func TestEventRepositoryConcurrentAppendMultiScope(t *testing.T) {
 					Category:      events.CategoryLifecycle,
 					Type:          "concurrent",
 					CorrelationID: "corr",
+					CausalID:      "seq-" + strconv.Itoa(i),
 					Actor:         "tester",
 					ScopeID:       scopeID,
-					Payload:       []byte(`{"ok":true}`),
+					Payload:       []byte(`{"ok":` + strconv.FormatBool(i%2 == 0) + `,"n":` + strconv.Itoa(i) + `}`),
 				})
 			}()
 		}
@@ -424,6 +427,146 @@ func TestEventRepositoryConcurrentAppendMultiScope(t *testing.T) {
 		if last != 16 {
 			t.Fatalf("expected 16 events for %s, got %d", scopeID, last)
 		}
+	}
+}
+
+func TestEventRepositoryFallbackUIDIsStableWithoutTimestamp(t *testing.T) {
+	base := events.Event{
+		Category:      events.CategoryLifecycle,
+		Type:          "logical.event",
+		CorrelationID: "corr-stable",
+		CausalID:      "cause-stable",
+		Actor:         "tester",
+		ScopeID:       "scope-a",
+		Payload:       []byte(`{"kind":"stable"}`),
+		Metadata:      map[string]any{"source": "unit", "attempt": 1},
+	}
+	first := base
+	first.Timestamp = time.Date(2026, 5, 31, 10, 0, 0, 0, time.UTC)
+	second := base
+	second.Timestamp = first.Timestamp.Add(2 * time.Hour)
+	if got, want := eventUID(first), eventUID(second); got != want {
+		t.Fatalf("expected stable fallback uid across timestamps, got %s and %s", got, want)
+	}
+
+	tmpDir := t.TempDir()
+	db, err := New(tmpDir)
+	if err != nil {
+		t.Fatalf("failed to create db: %v", err)
+	}
+	defer db.Close()
+
+	repo := NewEventRepository(db)
+	ctx := context.Background()
+	if err := repo.Append(ctx, &first); err != nil {
+		t.Fatalf("append first event: %v", err)
+	}
+	if err := repo.Append(ctx, &second); err != nil {
+		t.Fatalf("append duplicate logical event: %v", err)
+	}
+	list, err := repo.List(ctx, "scope-a", 0)
+	if err != nil {
+		t.Fatalf("list events: %v", err)
+	}
+	if len(list) != 1 {
+		t.Fatalf("expected one durable event after dedup, got %d", len(list))
+	}
+	if list[0].UID == "" || list[0].UID != first.UID || list[0].UID != second.UID {
+		t.Fatalf("expected durable fallback uid to be reused, got first=%s second=%s stored=%s", first.UID, second.UID, list[0].UID)
+	}
+}
+
+func TestEventRepositoryCompactRawArchiveRequiresCheckpointBoundary(t *testing.T) {
+	db, err := New(t.TempDir())
+	if err != nil {
+		t.Fatalf("failed to create db: %v", err)
+	}
+	defer db.Close()
+
+	repo := NewEventRepository(db)
+	_, err = repo.CompactRawArchive(context.Background(), "scope-a", "runtime-state", 1)
+	if err == nil {
+		t.Fatal("expected compaction to fail without a validated checkpoint boundary")
+	}
+}
+
+func TestEventRepositoryCompactRawArchivePurgesOnlySafeEvents(t *testing.T) {
+	db, err := New(t.TempDir())
+	if err != nil {
+		t.Fatalf("failed to create db: %v", err)
+	}
+	defer db.Close()
+
+	repo := NewEventRepository(db)
+	ctx := context.Background()
+
+	eventsToInsert := []*events.Event{
+		{
+			Timestamp:     time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC),
+			Category:      events.CategoryLifecycle,
+			Type:          "step-1",
+			CorrelationID: "corr-1",
+			Actor:         "tester",
+			ScopeID:       "scope-a",
+			Payload:       []byte(`{"step":1}`),
+		},
+		{
+			Timestamp:     time.Date(2026, 6, 1, 12, 1, 0, 0, time.UTC),
+			Category:      events.CategoryLifecycle,
+			Type:          "step-2",
+			CorrelationID: "corr-1",
+			Actor:         "tester",
+			ScopeID:       "scope-a",
+			Payload:       []byte(`{"step":2}`),
+		},
+		{
+			Timestamp:     time.Date(2026, 6, 1, 12, 2, 0, 0, time.UTC),
+			Category:      events.CategoryLifecycle,
+			Type:          "step-3",
+			CorrelationID: "corr-1",
+			Actor:         "tester",
+			ScopeID:       "scope-a",
+			Payload:       []byte(`{"step":3}`),
+		},
+	}
+	for _, ev := range eventsToInsert {
+		if err := repo.Append(ctx, ev); err != nil {
+			t.Fatalf("append event: %v", err)
+		}
+	}
+
+	checkpoint := events.Checkpoint{
+		Name:          "runtime-state",
+		ScopeID:       "scope-a",
+		Sequence:      2,
+		EventID:       eventsToInsert[1].ID,
+		Checksum:      "sha256:test",
+		State:         json.RawMessage(`{"status":"planning"}`),
+		Metadata:      map[string]any{"source": "test"},
+		SchemaVersion: events.SchemaVersion,
+		CreatedAt:     time.Now().UTC(),
+	}
+	if err := repo.SaveCheckpoint(ctx, checkpoint); err != nil {
+		t.Fatalf("save checkpoint: %v", err)
+	}
+
+	stats, err := repo.CompactRawArchive(ctx, "scope-a", "runtime-state", 2)
+	if err != nil {
+		t.Fatalf("compact raw archive: %v", err)
+	}
+	if stats.SafeSequence != 2 {
+		t.Fatalf("expected safe sequence 2, got %d", stats.SafeSequence)
+	}
+	if stats.ColdEntries == 0 || stats.PurgeCandidates == 0 {
+		t.Fatalf("expected purge candidates to be recorded, got %+v", stats)
+	}
+
+	list, err := repo.List(ctx, "scope-a", 0)
+	if err != nil {
+		t.Fatalf("list after compaction: %v", err)
+	}
+	if len(list) != 1 || list[0].Sequence != 3 {
+		t.Fatalf("expected only sequence 3 to remain, got %+v", list)
 	}
 }
 

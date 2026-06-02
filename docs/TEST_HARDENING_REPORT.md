@@ -1,5 +1,31 @@
 # Test Hardening Report
 
+**Updated:** 2026-06-01
+**Second-order hardening:** targeted gaps only
+
+## Current coverage snapshot
+
+- `internal/services/reporting`: 81.0%
+- `internal/runtime/recovery`: 72.9%
+- `internal/runtime/ownership`: 60.3%
+- `internal/storage/sqlite`: 71.8%
+- `internal/runtime/events`: 63.6%
+- `cmd/cf-cleanup` is now directly covered by operational tests in `internal/app`
+- `cmd/cf-allowlist-sync` is confirmed list-only and covered by direct tests in `internal/app`
+- `internal/storage/sqlite` now has a direct outbox claim-lease regression test.
+- `internal/app` now has a cleanup cancellation regression test for destructive delete loops.
+
+These gains came from invariant-focused tests, not coverage vanity. Remaining gaps are mostly helper wrappers or deeper integration seams that are explicitly deferred.
+
+## 2026-06-01 controlled audit additions
+
+- `ReportReservationStore.ClaimRetryable` is now covered for claim lease exclusion and retry eligibility after claim expiry.
+- `CleanupApp.Run` is now covered for context cancellation between destructive Cloudflare deletes.
+- These tests protect runtime safety and operator cancellation behavior; they were added because the audit found concrete failure scenarios, not for cosmetic coverage.
+- Later runtime blind-spot coverage added convergence nil-snapshot safety, hostile drift quarantine, drift oscillation promotion, scheduler budget/queue invariants, and Cloudflare pagination boundaries.
+
+Sections below this current snapshot are historical coverage inventory. Older package coverage numbers are retained for traceability and should not override the current green status summarized above.
+
 **Date:** 2026-05-30  
 **Session:** Critical Path Test Coverage Hardening
 

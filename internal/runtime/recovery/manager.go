@@ -3,6 +3,7 @@ package recovery
 import (
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"fmt"
 	"io"
@@ -47,30 +48,69 @@ func (m *Manager) Restore(ctx context.Context, snapshotID string) error {
 		return apperr.Wrapf(op, err, "snapshot not found: %s", snapshotID)
 	}
 
-	// 1. Close active DB
 	if err := m.db.Close(); err != nil {
 		return apperr.Wrap(op, err)
 	}
 
-	// 2. Quarantine current (if exists)
 	curPath := m.db.Path()
-	if _, err := os.Stat(curPath); err == nil {
-		quarantinePath := curPath + ".bak-" + time.Now().Format("20060102-150405")
-		if err := os.Rename(curPath, quarantinePath); err != nil {
-			return apperr.Wrap(op, err)
-		}
-		// Also move WAL/SHM if they exist
-		_ = os.Rename(curPath+"-wal", quarantinePath+"-wal")
-		_ = os.Rename(curPath+"-shm", quarantinePath+"-shm")
+	tempPath := curPath + ".restore-" + time.Now().Format("20060102-150405")
+	if err := copyFile(path, tempPath); err != nil {
+		_ = m.db.Reopen(ctx)
+		return apperr.Wrap(op, err)
 	}
-
-	// 3. Copy snapshot to active path
-	if err := copyFile(path, curPath); err != nil {
+	if err := verifySQLiteFile(tempPath); err != nil {
+		_ = os.Remove(tempPath)
+		_ = m.db.Reopen(ctx)
 		return apperr.Wrap(op, err)
 	}
 
-	// 4. Reopen and verify
-	return m.db.Reopen(ctx)
+	quarantinePath := curPath + ".bak-" + time.Now().Format("20060102-150405")
+	curExists := false
+	if _, err := os.Stat(curPath); err == nil {
+		curExists = true
+		if err := os.Rename(curPath, quarantinePath); err != nil {
+			_ = os.Remove(tempPath)
+			_ = m.db.Reopen(ctx)
+			return apperr.Wrap(op, err)
+		}
+		_ = os.Rename(curPath+"-wal", quarantinePath+"-wal")
+		_ = os.Rename(curPath+"-shm", quarantinePath+"-shm")
+	}
+	if err := os.Rename(tempPath, curPath); err != nil {
+		if curExists {
+			_ = os.Rename(quarantinePath, curPath)
+			_ = os.Rename(quarantinePath+"-wal", curPath+"-wal")
+			_ = os.Rename(quarantinePath+"-shm", curPath+"-shm")
+		}
+		_ = os.Remove(tempPath)
+		_ = m.db.Reopen(ctx)
+		return apperr.Wrap(op, err)
+	}
+	if err := m.db.Reopen(ctx); err != nil {
+		_ = os.Rename(curPath, tempPath)
+		if curExists {
+			_ = os.Rename(quarantinePath, curPath)
+			_ = os.Rename(quarantinePath+"-wal", curPath+"-wal")
+			_ = os.Rename(quarantinePath+"-shm", curPath+"-shm")
+		}
+		_ = os.Remove(tempPath)
+		_ = m.db.Reopen(ctx)
+		return apperr.Wrap(op, err)
+	}
+	if err := verifySQLiteFile(curPath); err != nil {
+		_ = m.db.Close()
+		_ = os.Rename(curPath, tempPath)
+		if curExists {
+			_ = os.Rename(quarantinePath, curPath)
+			_ = os.Rename(quarantinePath+"-wal", curPath+"-wal")
+			_ = os.Rename(quarantinePath+"-shm", curPath+"-shm")
+		}
+		_ = os.Remove(tempPath)
+		_ = m.db.Reopen(ctx)
+		return apperr.Wrap(op, err)
+	}
+	m.db.SetReadOnlyDegradedMode(false)
+	return nil
 }
 
 func copyFile(src, dst string) error {
@@ -86,6 +126,22 @@ func copyFile(src, dst string) error {
 	defer destination.Close()
 	_, err = io.Copy(destination, source)
 	return err
+}
+
+func verifySQLiteFile(path string) error {
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	var result string
+	if err := db.QueryRow("PRAGMA integrity_check;").Scan(&result); err != nil {
+		return err
+	}
+	if result != "ok" {
+		return fmt.Errorf("integrity_check failed: %s", result)
+	}
+	return nil
 }
 
 func (m *Manager) CreateSnapshot(ctx context.Context) (*SnapshotMetadata, error) {
@@ -148,11 +204,18 @@ func (m *Manager) ListSnapshots() ([]SnapshotMetadata, error) {
 			continue
 		}
 
+		checksum, err := fileChecksum(filepath.Join(m.dir, entry.Name()))
+		if err != nil {
+			continue
+		}
+
 		snapshots = append(snapshots, SnapshotMetadata{
 			ID:        id,
 			Timestamp: ts,
+			Checksum:  checksum,
 			Path:      filepath.Join(m.dir, entry.Name()),
 		})
+
 	}
 
 	sort.Slice(snapshots, func(i, j int) bool {
@@ -160,6 +223,20 @@ func (m *Manager) ListSnapshots() ([]SnapshotMetadata, error) {
 	})
 
 	return snapshots, nil
+}
+
+func fileChecksum(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+
+	hasher := sha256.New()
+	if _, err := io.Copy(hasher, f); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(hasher.Sum(nil)), nil
 }
 
 func (m *Manager) Rotate(ctx context.Context, keep int) error {

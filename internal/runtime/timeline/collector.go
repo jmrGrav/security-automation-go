@@ -20,17 +20,28 @@ type TimelineEntry struct {
 
 // Collector assembles a forensic timeline from journals and state history.
 type Collector struct {
-	store events.EventStore
+	store      events.EventStore
+	maxEntries int
 }
 
 func NewCollector(store events.EventStore) *Collector {
-	return &Collector{store: store}
+	return NewCollectorWithLimit(store, 1000)
+}
+
+func NewCollectorWithLimit(store events.EventStore, maxEntries int) *Collector {
+	if maxEntries <= 0 {
+		maxEntries = 1000
+	}
+	return &Collector{store: store, maxEntries: maxEntries}
 }
 
 func (c *Collector) Assemble(ctx context.Context, scopeID string) ([]TimelineEntry, error) {
 	evs, err := c.store.List(ctx, scopeID, 0)
 	if err != nil {
 		return nil, err
+	}
+	if c.maxEntries > 0 && len(evs) > c.maxEntries {
+		evs = evs[len(evs)-c.maxEntries:]
 	}
 
 	entries := make([]TimelineEntry, len(evs))

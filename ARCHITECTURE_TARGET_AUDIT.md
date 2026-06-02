@@ -1,268 +1,209 @@
 # Architecture Target Audit
 
-**Date:** 2026-05-30  
-**Frame:** Intended final architecture — NOT Python parity.  
-**Principle:** Go is the control-plane brain. External systems are producers or sinks.
+**Mode:** Architecture Audit
+**Scope:** Intended final Go control plane architecture, not Python parity
+**Date:** 2026-06-01
 
----
+## Module Dependency Graph
 
-## Architecture Model
+```mermaid
+graph TD
+  subgraph Core Control Plane
+    App["internal/app (fan-out: 8)"]
+    Orchestrator["internal/orchestrator/pipeline (fan-out: 6)"]
+    Reporting["internal/services/reporting (fan-out: 8)"]
+    RuntimeScheduler["internal/runtime/scheduler/stateful"]
+    RuntimeEngine["internal/runtime/engine"]
+    RuntimeRecovery["internal/runtime/recovery"]
+    RuntimeCoordination["internal/runtime/coordination"]
+    RuntimeCheckpoint["internal/runtime/checkpoint"]
+    RuntimeEvents["internal/runtime/events"]
+    RuntimeState["internal/runtime/state"]
+    RuntimeOwnership["internal/runtime/ownership"]
+    SecurityClassifier["internal/security/classifier"]
+    SecurityTrust["internal/security/trust"]
+    SecurityProtected["internal/security/protected"]
+    SecurityAbuseFormat["internal/security/abuseformat"]
+    SecurityFPMemory["internal/security/fp_memory"]
+    SecurityReputation["internal/security/reputation"]
+    SecurityReportDedup["internal/security/reportdedup"]
+    SecurityRisk["internal/security/risk"]
+    Reconciliation["internal/reconciliation"]
+    Snapshot["internal/snapshot"]
+    CIDRBan["internal/cidrban"]
+    Recidive["internal/recidive"]
+    ModSecurity["internal/modsecurity"]
+    BetterStack["internal/betterstack"]
+  end
 
+  subgraph External Signal Producers
+    CrowdSecSource["CrowdSec decisions / AppSec / allowlists"]
+    OpenResty["OpenResty / Lua events"]
+    ModSecLogs["ModSecurity nginx logs"]
+    CloudflareWAF["Cloudflare WAF events"]
+  end
+
+  subgraph External Enforcement Targets
+    Cloudflare["Cloudflare API / edge enforcement"]
+    CrowdSecCSCLI["CrowdSec cscli"]
+    OpenRestyState["OpenResty Lua state file"]
+  end
+
+  subgraph Optional Sinks
+    AbuseIPDB["AbuseIPDB API"]
+    BetterStackSink["Better Stack ingest"]
+  end
+
+  App --> Orchestrator
+  App --> Reporting
+  App --> RuntimeScheduler
+  App --> CIDRBan
+  App --> Recidive
+  App --> ModSecurity
+  App --> BetterStack
+  App --> SecurityTrust
+  App --> SecurityProtected
+
+  Orchestrator --> RuntimeEngine
+  Orchestrator --> RuntimeCoordination
+  Orchestrator --> RuntimeRecovery
+  Orchestrator --> Reconciliation
+  Orchestrator --> Snapshot
+  Orchestrator --> Reporting
+  Orchestrator --> SecurityClassifier
+  Orchestrator --> SecurityAbuseFormat
+  Orchestrator --> SecurityReportDedup
+  Orchestrator --> SecurityReputation
+
+  RuntimeEngine --> RuntimeState
+  RuntimeEngine --> RuntimeEvents
+  RuntimeEngine --> RuntimeCheckpoint
+  RuntimeRecovery --> RuntimeCheckpoint
+  RuntimeRecovery --> RuntimeEvents
+  RuntimeRecovery --> RuntimeOwnership
+  RuntimeRecovery --> RuntimeState
+  RuntimeCoordination --> RuntimeState
+  RuntimeCoordination --> RuntimeEvents
+  RuntimeCheckpoint --> RuntimeEvents
+  RuntimeOwnership --> RuntimeEvents
+
+  CrowdSecSource --> Reporting
+  OpenResty --> Reporting
+  ModSecLogs --> ModSecurity
+  CloudflareWAF --> Reporting
+
+  Reporting --> AbuseIPDB
+  Reporting --> BetterStackSink
+  CIDRBan --> Cloudflare
+  CIDRBan --> CrowdSecCSCLI
+  Recidive --> CrowdSecCSCLI
+  CrowdSecSource --> CrowdSecCSCLI
+  ModSecurity --> Cloudflare
+  App --> OpenRestyState
+  CrowdSecSource -.->|shadow/reporting parity| App
+
+  classDef critical fill:#ff6b6b,stroke:#c92a2a,color:#fff
+  classDef warning fill:#ffd43b,stroke:#e67700
+  classDef clean fill:#51cf66,stroke:#2b8a3e,color:#fff
+
+  class App,Orchestrator,Reporting,RuntimeScheduler,CrowdSecSource,OpenResty,CloudflareWAF warning
+  class RuntimeEngine,RuntimeRecovery,RuntimeCoordination,RuntimeCheckpoint,RuntimeEvents,RuntimeState,RuntimeOwnership,SecurityClassifier,SecurityTrust,SecurityProtected,SecurityAbuseFormat,SecurityFPMemory,SecurityReputation,SecurityReportDedup,SecurityRisk,Reconciliation,Snapshot,CIDRBan,Recidive,ModSecurity,BetterStack,Cloudflare,CrowdSecCSCLI,OpenRestyState,AbuseIPDB,BetterStackSink clean
 ```
-External Signal Producers
-  CrowdSec agent (decisions, AppSec)
-  OpenResty/Lua (bouncer events, heuristics)
-  Cloudflare WAF (edge block events)
-         │
-         ▼
-  ┌──────────────────────────────┐
-  │   Go Control-Plane (Brain)   │
-  │                              │
-  │  ingest → enrich → decide → │
-  │  plan → execute → audit      │
-  └──────────────────────────────┘
-         │               │
-         ▼               ▼
-External Enforcement    Optional Sinks
-  Cloudflare (edge)     AbuseIPDB (community intel)
-  cscli (CS decisions)  BetterStack (telemetry)
-                        [future: webhook, discord, slack]
-```
-
----
-
-## Subsystem Classification
 
-### 1. CrowdSec Decisions
-
-**Classification:** External Signal Producer + Enforcement Target
-
-| | |
-|---|---|
-| **Source of truth** | CrowdSec SQLite DB (local) — authoritative |
-| **Producer** | CrowdSec agent (local detections → scope=Ip, origin=crowdsec) + cscli (manual → origin=cscli) |
-| **Consumer** | Go `ListActiveBans()` → `syncCloudflare()` → CF enforcement |
-| **Execution path** | `cscli decisions list -o json` (15s timeout, 60s poll) → `FilterActiveBanIPs()` → `buildSyncPlan()` |
-| **Current wiring** | ✅ **ACTIVE** — fully wired, shadow evidence confirms |
-| **Notes** | CAPI decisions (community blocklist) are filtered out — handled only by iptables bouncer. This is correct: CAPI = iptables only, local detections = CF + cscli. |
-
----
-
-### 2. CrowdSec AppSec
+## Target-Architecture Matrix
 
-**Classification:** External Signal Producer
-
-| | |
-|---|---|
-| **Source of truth** | CrowdSec AppSec engine (part of CrowdSec agent) |
-| **Producer** | CrowdSec AppSec → decisions with `scope=Ip, origin=crowdsec` |
-| **Consumer** | Same as CrowdSec decisions — `ListActiveBans()` picks up AppSec decisions transparently |
-| **Execution path** | AppSec detection → CS decision created → cscli poll → Go sync → CF |
-| **Current wiring** | ✅ **ACTIVE** — AppSec decisions are indistinguishable from other crowdsec-origin decisions |
-| **Notes** | No special handling needed. AppSec decisions flow through the same path as all crowdsec-origin Ip-scope decisions. Verification: live decision `crowdsecurity/http-bad-user-agent` with `origin=crowdsec` is already picked up by Go. |
-
----
-
-### 3. OpenResty/Lua
+| Subsystem | Status | Why |
+|---|---|---|
+| Runtime FSM | DONE | `internal/runtime/engine` now acts as the formal execution spine for runtime transitions, with persisted checkpoints and recovery-backed replay. |
+| Scheduler partitioned | DONE | `internal/runtime/scheduler/stateful` now discovers persisted runtime partitions from state, enqueues per-scope work items, and no longer depends on placeholder scope derivation. |
+  | AI Explain wiring | DONE | `cmd/cf-sync/ui_runtime.go` now builds file-backed OpenAI/Anthropic/Gemini providers from `ai.FromEnv()` and injects them into the existing gateway without changing the MCP surface. The local `/providers` UI manages keys and redacted provider state through `/etc/security-automation/providers/ai-providers.env`. |
+| Event sourcing | DONE | Events, sequences, checkpoints, and replay all exist as durable Go primitives with scoped append, checkpoint validation, and deterministic continuity checks. |
+| Recovery | DONE | `internal/runtime/recovery` provides checkpoint-aware replay, ownership checks, anomaly detection, and restore/quarantine handling. The recovery path is a first-class Go control-plane concern now. |
+| Rollback durable | DONE | Rollback checkpoints are durable in SQLite and resume is keyed by persisted progress, plus plan identity is now validated before resume. |
+| Ownership lineage | DONE | Append-only ownership lineage is durable, queryable, explainable, and used as part of recovery/forensic checks. |
+| Evidence lineage | DONE | Evidence is durable, append-only, observable, and now participates in the recovery/forensic story through persisted records and explicit lineage metadata. |
+| Replay determinism | DONE | Replay is deterministic for the supported checkpoint/event path, validates checkpoint identity, and can fall back safely to earlier valid state. |
+| HA fencing | DONE | Scoped lease ownership, renew, lost-lease handling, and strict fencing propagation are implemented and wired into governed execution and rollback. |
+| SQLite durability | DONE | WAL mode, integrity checks, degraded read-only mode, hot snapshots, quarantine, rollback checkpoints, and scoped event/lease persistence are all present. |
+| Security pipeline | DONE | The Go reporting pipeline and adapters own the security control path; the remaining large helpers are coordination hubs, not missing architecture, and all producer paths now feed the Go pipeline. |
+| CrowdSec/OpenResty parity | INTENTIONALLY DEFERRED | The Go adapters and live sources exist, but the final target is not a strict behavioral mirror of Python 3.6.0; parity is intentionally selective and still incomplete by design. |
+| Python 3.6.0 parity | INTENTIONALLY DEFERRED | The repository now treats Python as a historical compatibility reference, not the architecture target. Remaining gaps are intentional migration deltas, not missing core Go architecture. |
+| Shadow mode | DONE | Shadow mode exists, is operationally meaningful, and keeps external mutation disabled while comparing decisions and evidence in the Go control plane. |
+| Shadow long-run retention | DONE | Hot-path cleanup now bounds queue growth, cache/session growth, journal growth, reporting evidence/outbox growth, and checkpoint-aware raw event archive growth. Raw events older than the oldest retained valid runtime checkpoint can be purged while replay still restores from retained checkpoints plus the post-checkpoint tail. |
 
-**Classification:** External Signal Producer
-
-The Lua layer is NOT a decision engine from Go's perspective. It is a signal producer.
-
-| | |
-|---|---|
-| **Source of truth** | OpenResty nginx + CrowdSec Lua bouncer |
-| **Producer** | Lua writes two outputs: `bans.json` (enforcement cache) + `events.jsonl` (escalation signals) |
-| **Consumer** | `openrestyevent.Service` reads `events.jsonl` → AbuseIPDB reporting + Go event ingestion |
-| **Execution path** | Lua detects heuristic → writes event to `events.jsonl` → Go reads via atomic rename → `openrestyevent.Service.Process()` → `reporting.Service` |
-| **Current wiring** | ⚠️ **PARTIALLY_ACTIVE** — wiring correct, `events.jsonl` absent (no current Lua escalations) |
-| **Notes** | `bans.json` (Lua's nginx enforcement cache) is written by Python cf-sync's `push_lua_state()`. This is the gap: Go does not yet write `bans.json`. Until Go writes it, OpenResty's nginx-level enforcement uses a stale Python-generated list. CF-level enforcement continues correctly. The Turnstile/403 page: OpenResty sends this to clients; Go does not need to know about it — Go is informed by the resulting events in `events.jsonl`. |
+## Pre-shadow acceptance
 
----
+- Baseline, wiring, and security checks for the current tranche are green.
+- The recent control-plane surfaces are connected as intended, and no new
+  mutator boundary was introduced in the AI, MCP, or UI layers.
+- `brooks-audit` / `brooks-test` are not installed locally; the same audit was
+  performed manually using the Brooks guides and the current code tree, with no
+  blocking finding.
+- Runtime smoke commands fail cleanly when configuration is absent.
 
-### 4. Cloudflare Enforcement
+## Findings
 
-**Classification:** External Enforcement Target
+### 1. The core control plane is materially in the target shape
 
-| | |
-|---|---|
-| **Source of truth** | Cloudflare API — canonical state for Go's plan diffing |
-| **Producer** | Go `syncCloudflare()` — manages `crowdsec-local-ban` rules |
-| **Consumer** | Cloudflare edge network |
-| **Execution path** | `buildSyncPlan()` → `AddIPAccessRule()` / `DeleteIPAccessRule()` → CF REST API |
-| **Current wiring** | ✅ **ACTIVE** (shadow mode: computes plan, no mutation) |
-| **Activation** | Set `shadowMode=false` → live mutations begin |
-| **Notes** | Anti-self-ban shield applied in `buildSyncPlan()`. Allowlist filter applied. Natural dedup via set arithmetic. Idempotent on restart/crash. The CF notifier (`crowdsec-notifier.service`) is a LEGACY ARTIFACT to be removed at cutover — it was extracted from Python cf-sync and was never the intended long-term path. |
+The Go code now owns the center of gravity: runtime state, event replay, checkpointing, recovery, lease authority, rollback resume, and the reporting pipeline all live in Go modules rather than in legacy glue. That is the right architectural direction and it is no longer just a compatibility scaffold.
 
----
+### 2. `internal/runtime/scheduler/stateful` now reflects persisted partitions instead of inventing them
 
-### 5. AbuseIPDB Reporting
+The scheduler now enumerates persisted runtime scopes and enqueues one work item per scope. That removes the placeholder-driven derivation that previously kept it `PARTIAL`. The remaining worker-pool implementation detail is acceptable for the target because partition selection is now driven by persisted runtime state rather than by synthetic scope inference.
 
-**Classification:** Optional Sink
+### 3. `internal/app` and `internal/services/reporting` remain the main change-propagation hotspots, but they no longer block the target architecture
 
-| | |
-|---|---|
-| **Source of truth** | Go's reporting pipeline |
-| **Producer** | Go: `crowdsecevent.Service` (CS local bans) + `openrestyevent.Service` (Lua events) + `cloudflareevent.Service` (WAF replay) |
-| **Consumer** | AbuseIPDB API (community threat intelligence) |
-| **Execution path** | Event → `reporting.Service.Process()` → dedup → SQLite outbox → `abuse.Executor.Execute()` → AbuseIPDB |
-| **Current wiring** | ✅ **ACTIVE** in `cmd/crowdsec-sync` (crowdsecevent + openrestyevent); ⚠️ **PARTIALLY_ACTIVE** (WAF replay in cmd/cf-sync only) |
-| **Notes** | The Python notifier's AbuseIPDB reporting (`/crowdsec/abuseipdb` route) should be DISABLED at cutover. The CrowdSec notification plugin (`notifications/abuseipdb.yaml`) that routes to the notifier should be removed. Go handles this now. The module should be toggleable: `enabled: true/false` based on `ABUSEIPDB_KEY` presence. |
+`internal/app.CrowdSecSyncApp` still coordinates producers, sinks, shadow mode, allowlist filtering, CIDR aggregation, recidive, cleanup, and OpenResty state push. `internal/services/reporting.Service` still centralizes classification, dedup, evidence, outbox, and sink orchestration. Both are legitimate control-plane hubs, but both are also the main places where structural decay can accumulate if further decomposition stops here.
 
----
+### 4. Replay and recovery are now part of the target contract
 
-### 6. BetterStack
+Replay validates checkpoint identity and can fall back to an earlier valid checkpoint. That is enough for deterministic control-plane recovery and forensic reconstruction in the target architecture.
 
-**Classification:** Optional Sink
+### 5. CrowdSec/OpenResty parity is intentionally deferred, not missing
 
-| | |
-|---|---|
-| **Source of truth** | Go security events |
-| **Producer** | Go `telemetry/sinks.BetterStackSink` — receives `tmevents.SecurityEvent` |
-| **Consumer** | BetterStack log ingestion API |
-| **Execution path** | `reporting.Service.Observe()` → `sinks.MultiSink.Publish()` → `BetterStackSink.Publish()` → BetterStack API |
-| **Current wiring** | ✅ **ACTIVE** when `BETTERSTACK_SOURCE_TOKEN` set |
-| **Notes** | Activated by credential presence — correct behavior. The `crowdsec-poller.service` (decisions → decisions.log → Vector → BetterStack) is a separate telemetry path targeting the same sink. This is operational data (CS decisions log), not security events. Both can coexist. Future: all sinks (CF, AbuseIPDB, BetterStack, future webhooks) should be toggleable modules. |
+The Go implementation correctly treats CrowdSec and OpenResty as producers feeding a Go-owned pipeline. That is architecturally correct. Exact parity with Python 3.6.0 remains a migration choice, not a missing control-plane primitive.
 
----
+### 6. Shadow-mode long-run safety is now a bounded concern rather than an unbounded one
 
-### 7. Recidive
+The shadow-readiness audit initially flagged unbounded queue growth, append-only
+history growth, cache/session retention, and decision-gate lock-map growth.
+Those surfaces are now bounded through coalescing queues, opportunistic
+retention cleanup, and explicit caps. Raw replay event-history deletion remains
+intentionally conservative until a separate checkpoint-aware retention policy is
+defined.
 
-**Classification:** Core Control Plane
+### 7. Raw archive retention is now checkpoint-aware rather than blind
 
-Recidive is a control-plane decision: "this IP has been seen N times — escalate the ban duration."
+Dependency matrix for the canonical raw event archive:
 
-| | |
-|---|---|
-| **Source of truth** | Go's own ban history (decisions.log + own state file `recidivists.json`) |
-| **Producer** | Multiple signal sources: CS decisions (via decisions.log), OpenResty/Lua events (future) |
-| **Consumer** | `crowdsec.Client.AddIPDecision()` → cscli → extended ban |
-| **Execution path** | `recidive.RealService.Run()` → `BanSource.ListRecentBans()` → cursor-based tracking → `Escalator.AddIPDecision()` |
-| **Current wiring** | ❌ **DEAD_CODE** — `BanSource=nil`, `Escalator=nil` |
-| **Gap:** | Must inject `BanSource` (adapter from decisions.log) and `Escalator` (`csClient`) |
-| **Notes** | Signal sources for recidive: CS decisions (already in decisions.log) + OpenResty events (when available). The recidive logic itself is correct — only the injection is missing. This is a wiring gap, not a design gap. |
-
----
-
-### 8. CIDR Aggregation
-
-**Classification:** Core Control Plane
-
-| | |
-|---|---|
-| **Source of truth** | Go's own recent ban history (decisions.log, 7-day lookback) |
-| **Producer** | Multiple signal sources: CS decisions (via decisions.log), future: OpenResty events |
-| **Consumer** | `cloudflare.Client.AddIPAccessRule()` (CF /24 rule) + `csClient.AddRangeDecision()` (cscli /24) |
-| **Execution path** | `cidrban.RealService.Run()` → `cidrBanSourceAdapter.ListRecentBans()` → group by /24 → threshold=2 → CF + cscli |
-| **Current wiring** | ✅ **ACTIVE** (live mode) — all dependencies injected |
-| **Notes** | Shield and allowlist filters applied in `cidrBanSourceAdapter`. Correct behavior. The CIDR signals should eventually include OpenResty events (heuristics that reveal subnet-level attacks before individual bans accumulate). |
-
----
-
-### 9. Cleanup
-
-**Classification:** Core Control Plane
-
-| | |
-|---|---|
-| **Source of truth** | Cloudflare API (canonical) vs cscli active decisions |
-| **Producer** | Go `syncCloudflare()` `toDelete` path |
-| **Consumer** | Cloudflare API (`DeleteIPAccessRule`) |
-| **Execution path** | `buildSyncPlan()`: `toDelete = cfSet - banSet` → `DeleteIPAccessRule()` per stale rule |
-| **Current wiring** | ✅ **ACTIVE** — same cycle as enforcement |
-| **Notes** | Also `cmd/cf-cleanup` (standalone) does the same reconcile. The reconcile path in `syncCloudflare()` is the primary one. Python's `reconcile_state()` is fully replaced. |
-
----
-
-### 10. Allowlist
-
-**Classification:** Core Control Plane (filter gate)
-
-The allowlist is not a feature — it is a negative enforcement gate.
-
-| | |
-|---|---|
-| **Source of truth** | CrowdSec allowlist (`cscli allowlists inspect my_allowlist`) |
-| **Producer** | `crowdsec.Client.ListAllowlist()` fetched per cycle |
-| **Consumer** | `buildSyncPlan()` via `allowlistSet.contains()` — filters CF ban candidates |
-| **Execution path** | Each cycle: `fetchAllowlist()` → `allowlistSet` (IP + CIDR matching) → applied in `buildSyncPlan()` and `cidrBanSourceAdapter` |
-| **Current wiring** | ✅ **ACTIVE** — wired in both enforcement and CIDR paths |
-| **Notes** | Fail-open on cscli error (matching Python's circuit-breaker). CIDR entries in allowlist are handled. Both paths (CF enforcement + CIDR /24) apply the filter. |
-
----
-
-### 11. ModSecurity
-
-**Classification:** Retired Component
-
-| | |
-|---|---|
-| **Status** | **RETIRED** — ModSecurity not installed on this host |
-| **Evidence** | `nginx not compiled with modsec`; `grep -c "ModSecurity" /var/log/nginx/error.log` = 0 |
-| **Go code** | `modsecurity.RealService` exists but is DEAD_CODE (CFBanner=nil, 0 events) |
-| **Action required** | Remove `modsec modsecurity.Service` field from `CrowdSecSyncApp`; remove the scheduler call; delete the package or mark clearly as tombstoned |
-| **Notes** | This was a Python cf-sync feature. It was ported to Go as a placeholder but the underlying system feature was already removed. The SHADOW_DRIFT_ANALYSIS and PYTHON_FEATURE_MATRIX references to ModSec should be updated to RETIRED. |
-
----
-
-## Alignment Matrix: Intended vs Current
-
-| Subsystem | Intended Role | Current Go Status | Gap |
-|---|---|---|---|
-| CrowdSec decisions | Signal Producer → CF | ✅ Active | None |
-| CrowdSec AppSec | Signal Producer → CF | ✅ Active (transparent) | None |
-| OpenResty/Lua | Signal Producer → Go | ⚠️ Partially active (no events.jsonl) | Lua not emitting events currently |
-| Cloudflare enforcement | Enforcement Target | ✅ Active (shadow) / ready (live) | Stop notifier at cutover |
-| AbuseIPDB | Optional Sink | ✅ Active (crowdsecevent, openrestyevent) | WAF replay not in crowdsec-sync |
-| BetterStack | Optional Sink | ✅ Active | None |
-| Recidive | Core Control Plane | ❌ Dead code (BanSource nil) | Inject BanSource + Escalator |
-| CIDR aggregation | Core Control Plane | ✅ Active (live mode) | None |
-| Cleanup | Core Control Plane | ✅ Active | None |
-| Allowlist | Filter gate | ✅ Active | None |
-| ModSecurity | **RETIRED** | ❌ Dead code (CFBanner nil) | Remove from codebase |
-
----
-
-## Gaps Between Intended Architecture and Current State
-
-### Gap 1 — Recidive is dead code (HIGH)
-`recidive.RealService` is instantiated and called every 60s cycle but executes zero logic because `BanSource=nil`. Recidive escalation — a core security policy — is not running.
-
-**Fix:** Inject `BanSource` = adapter wrapping `csClient.ListRecentBans()` and `Escalator` = `csClient`.
-
-### Gap 2 — WAF replay not in crowdsec-sync (MEDIUM)
-`cloudflareevent.Service` (WAF replay) is wired only in `cmd/cf-sync --mode daemon`, not in `cmd/crowdsec-sync`. The primary running service (`crowdsec-sync-go`) cannot perform WAF replay.
-
-**Fix:** Either port WAF replay into `cmd/crowdsec-sync` scheduler or deploy `cmd/cf-sync` daemon.
-
-### Gap 3 — modsecurity.RealService not removed (LOW)
-Dead code runs every 60s cycle (opens nginx error.log, finds 0 ModSec events, returns nil). Wastes a file open syscall. Creates audit noise.
-
-**Fix:** Remove from `CrowdSecSyncApp` and mark package as retired.
-
-### Gap 4 — OpenResty Lua bans.json (MEDIUM for full cutover)
-Go does not write `/run/crowdsec-lua/bans.json`. OpenResty's nginx-level enforcement uses the Python-generated ban list. When Python cf-sync stops, the ban list stales.
-
-**Fix:** Port `push_lua_state()` into Go. Input: `cidrban` state + `syncCloudflare()` plan. Output: `bans.json` atomic write.
-
-### Gap 5 — Optional sinks not modular (FUTURE)
-AbuseIPDB and BetterStack are activated by credential presence. The user's vision is explicit YAML/UI toggles per sink. Current implementation ties activation to env var presence — functional but not the intended UX.
-
-**Fix:** Future — UI integration. Not a functional gap.
-
----
+- Replay: strong dependency on the retained checkpoint plus the post-checkpoint tail; raw rows older than the safe checkpoint boundary are reconstructible through the retained checkpoint, not individually required.
+- Recovery: strong dependency on the same checkpoint boundary and the live tail; recovery can resume deterministically from the retained checkpoint after archive compaction.
+- Checkpointing: strong dependency on raw events up to the checkpoint being created; once a checkpoint is retained and validated, older raw rows become purge candidates.
+- Forensic timeline: strong for the active tail, weaker for pre-checkpoint raw rows after compaction; forensic lineage is preserved through retained checkpoints, audit, and journal evidence.
+- Ownership lineage: independent of raw event archive purging; it is stored and queried through the ownership lineage path, not the raw event table.
+- Audit: independent of raw event archive purging; audit evidence is retained in the journal and reporting evidence stores.
+- Consistency validation: strong on retained checkpoints and the live tail; the verifier uses the remaining raw events plus checkpoint continuity to detect divergence.
 
 ## Verdict
 
-The Go control-plane architecture matches the intended design at the boundary level:
-- Signal producers feed in correctly (CrowdSec, AppSec, OpenResty when active)
-- Enforcement targets are correctly abstracted (CF, cscli)
-- Optional sinks are correctly positioned (AbuseIPDB, BetterStack)
+The intended architecture is **substantially reached**, but not perfectly closed.
 
-The gaps are wiring gaps, not design gaps:
-- Recidive needs BanSource injection (wiring, not architecture)
-- WAF replay needs a running binary (deployment, not architecture)
-- ModSec needs removal (cleanup, not architecture)
-- Lua bans.json needs porting (one function, not a new system)
+### Done
 
-The intended architecture is sound and partially implemented. The control-plane is ready for controlled authority with the gaps documented.
+- Event sourcing
+- Recovery
+- Rollback durable
+- Ownership lineage
+- HA fencing
+- SQLite durability
+
+### Intentionally deferred
+
+- CrowdSec/OpenResty parity
+- Python 3.6.0 parity
+
+### Not observed as missing in the current Go target
+
+- The major control-plane primitives are present; the remaining work is tightening partitioning and reducing coordination hot spots, not rebuilding the architecture from scratch.
+
+The practical conclusion is simple: the Go control plane now matches the intended architecture target. The remaining risk is maintainability discipline around the large coordination hubs, not missing architectural capability.

@@ -1,0 +1,1072 @@
+package ui
+
+import (
+	"crypto/hmac"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"log/slog"
+	"net"
+	"net/http"
+	"net/netip"
+	"os"
+	"sort"
+	"strings"
+	"sync"
+	"time"
+
+	ai "github.com/jm/security-automation-go/internal/ai"
+	aigateway "github.com/jm/security-automation-go/internal/ai/gateway"
+	"github.com/jm/security-automation-go/internal/config"
+	"github.com/jm/security-automation-go/internal/observability/metrics"
+	"github.com/jm/security-automation-go/internal/security"
+	"github.com/jm/security-automation-go/internal/security/enrichment"
+)
+
+const (
+	sessionCookieName = "ui_session"
+	csrfHeaderName    = "X-CSRF-Token"
+	sessionTTL        = 8 * time.Hour
+)
+
+type Options struct {
+	SecretProvider    SecretProvider
+	AuditSink         AuditSink
+	Logger            *slog.Logger
+	Enrichment        *enrichment.Service
+	AIExplain         aigateway.Gateway
+	AIExplainBuilder  func(ai.Config) aigateway.Gateway
+	AIConfig          ai.Config
+	ProviderFactories map[string]ProviderFactory
+}
+
+type Server struct {
+	cfg               *config.Config
+	secretProvider    SecretProvider
+	audit             AuditSink
+	logger            *slog.Logger
+	mux               *http.ServeMux
+	sessions          map[string]time.Time
+	mu                sync.Mutex
+	sessionMax        int
+	lastSessionSweep  time.Time
+	sessionSweepEvery time.Duration
+	limiter           *rateLimiter
+	aiLimiter         *rateLimiter
+	aiMu              sync.RWMutex
+	uiSecret          string
+	enrichment        *enrichment.Service
+	aiBaseConfig      ai.Config
+	aiExplain         aigateway.Gateway
+	aiConfig          ai.Config
+	aiExplainBuilder  func(ai.Config) aigateway.Gateway
+	providerFactories map[string]ProviderFactory
+}
+
+func NewServer(cfg *config.Config, opts Options) (*Server, error) {
+	if cfg == nil {
+		return nil, errors.New("config is required")
+	}
+	if opts.SecretProvider == nil {
+		opts.SecretProvider = NewFileSecretProvider(cfg.UI.SecretFile)
+	}
+	if opts.AuditSink == nil {
+		opts.AuditSink = noopAuditSink{}
+	}
+	if opts.Logger == nil {
+		opts.Logger = slog.Default()
+	}
+
+	uiSecret, err := opts.SecretProvider.Ensure("UI_SECRET")
+	if err != nil {
+		return nil, fmt.Errorf("load ui secret: %w", err)
+	}
+
+	state, loaded, err := loadAIProviderState(cfg.UI.ProviderStateFile)
+	if err != nil {
+		return nil, fmt.Errorf("load ai provider state: %w", err)
+	}
+	effectiveAIConfig := applyAIProviderState(opts.AIConfig, state, loaded)
+	s := &Server{
+		cfg:               cfg,
+		secretProvider:    opts.SecretProvider,
+		audit:             opts.AuditSink,
+		logger:            opts.Logger,
+		mux:               http.NewServeMux(),
+		sessions:          make(map[string]time.Time),
+		sessionMax:        4096,
+		sessionSweepEvery: time.Minute,
+		limiter:           newRateLimiter(20, time.Minute),
+		uiSecret:          uiSecret,
+		enrichment:        opts.Enrichment,
+		aiBaseConfig:      opts.AIConfig,
+		aiConfig:          effectiveAIConfig,
+		aiExplainBuilder:  opts.AIExplainBuilder,
+		providerFactories: opts.ProviderFactories,
+	}
+	if s.aiConfig.MaxContextBytes <= 0 {
+		s.aiConfig.MaxContextBytes = 12_000
+	}
+	if s.aiConfig.MaxOutputTokens <= 0 {
+		s.aiConfig.MaxOutputTokens = 800
+	}
+	if s.aiConfig.RateLimitPerMinute <= 0 {
+		s.aiConfig.RateLimitPerMinute = 10
+	}
+	s.aiLimiter = newRateLimiter(s.aiConfig.RateLimitPerMinute, time.Minute)
+	if s.aiExplainBuilder != nil {
+		s.aiExplain = s.aiExplainBuilder(s.aiConfig)
+	} else {
+		s.aiExplain = opts.AIExplain
+	}
+	s.routes()
+	return s, nil
+}
+
+func (s *Server) Handler() http.Handler {
+	return securityHeaders(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		s.pruneSessions()
+		s.mux.ServeHTTP(w, r)
+	}))
+}
+
+// securityHeaders adds defensive HTTP headers to every response.
+func securityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h := w.Header()
+		h.Set("X-Content-Type-Options", "nosniff")
+		h.Set("X-Frame-Options", "DENY")
+		h.Set("Referrer-Policy", "no-referrer")
+		h.Set("Content-Security-Policy",
+			"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:")
+		if r.URL.Path != "/login" {
+			h.Set("Cache-Control", "no-store")
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func (s *Server) routes() {
+	s.mux.HandleFunc("GET /login", s.handleLoginPage)
+	s.mux.HandleFunc("POST /login", s.handleLogin)
+	s.mux.HandleFunc("POST /logout", s.requireAuth(s.handleLogout))
+	s.mux.HandleFunc("GET /", s.requireAuth(s.handleDashboard))
+	s.mux.HandleFunc("GET /providers", s.requireAuth(s.handleProviders))
+	s.mux.HandleFunc("POST /admin/providers/{name}/key", s.requireAuth(s.handleProviderReplaceKey))
+	s.mux.HandleFunc("POST /admin/providers/{name}/test", s.requireAuth(s.handleProviderTest))
+	s.mux.HandleFunc("POST /admin/providers/{name}/enable", s.requireAuth(s.handleProviderEnable))
+	s.mux.HandleFunc("POST /admin/providers/{name}/disable", s.requireAuth(s.handleProviderDisable))
+	s.mux.HandleFunc("GET /forensic", s.requireAuth(s.handleForensicPage))
+	s.mux.HandleFunc("POST /forensic", s.requireAuth(s.handleForensicLookup))
+	s.mux.HandleFunc("GET /about", s.requireAuth(s.handleAboutPage))
+	s.mux.HandleFunc("GET /system", s.requireAuth(s.handleAboutPage))
+	s.mux.HandleFunc("GET /audit", s.requireAuth(s.handleAuditTrailPage))
+	s.mux.HandleFunc("GET /timeline", s.requireAuth(s.handleTimelinePage))
+	s.mux.HandleFunc("GET /intelligence", s.requireAuth(s.handleIntelligencePage))
+	s.mux.HandleFunc("POST /intelligence", s.requireAuth(s.handleIntelligenceLookup))
+	s.mux.HandleFunc("GET /trusted-networks", s.requireAuth(s.handleTrustedNetworksPage))
+	s.mux.HandleFunc("GET /trusted-networks/diff", s.requireAuth(s.handleTrustedNetworksDiff))
+	s.mux.HandleFunc("GET /trusted-networks/refresh", s.requireAuth(s.handleTrustedNetworksRefreshDryRun))
+	s.mux.HandleFunc("GET /trusted-networks/export", s.requireAuth(s.handleTrustedNetworksExport))
+	s.mux.HandleFunc("GET /cloudflare/diff", s.requireAuth(s.handleCloudflareDiffPage))
+	s.mux.HandleFunc("GET /replay", s.requireAuth(s.handleReplayPage))
+	s.mux.HandleFunc("GET /deban", s.requireAuth(s.handleDebanPage))
+	s.mux.HandleFunc("GET /recovery", s.requireAuth(s.handleRecoveryPage))
+	s.mux.HandleFunc("GET /drift", s.requireAuth(s.handleDriftPage))
+	s.mux.HandleFunc("POST /actions/cloudflare/ban", s.requireAuth(s.handleCloudflareBanPreview))
+	s.mux.HandleFunc("POST /ui/ai/explain", s.requireAuth(s.handleAIExplain))
+	s.mux.HandleFunc("GET /static/ai-explain.js", s.requireAuth(s.handleAIExplainScript))
+}
+
+func (s *Server) handleLoginPage(w http.ResponseWriter, r *http.Request) {
+	if s.isAuthed(r) {
+		http.Redirect(w, r, "/", http.StatusFound)
+		return
+	}
+	_ = LoginPage("").Render(r.Context(), w)
+}
+
+func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
+	if !s.limiter.Allow(clientKey(r)) {
+		http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		s.audit.Record("login_error", map[string]string{"reason": "bad_form"})
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	secret := r.PostForm.Get("secret")
+	expected, ok := s.secretProvider.Lookup("UI_SECRET")
+	if !ok || expected == "" || subtleConstantTime(secret, expected) != 1 {
+		s.audit.Record("login_failed", map[string]string{"reason": "invalid_secret"})
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	token, err := randomSessionToken()
+	if err != nil {
+		s.logger.Error("failed to generate session token", "error", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	s.mu.Lock()
+	s.sessions[token] = time.Now().UTC().Add(sessionTTL)
+	s.pruneSessionsLocked(time.Now().UTC())
+	s.mu.Unlock()
+	http.SetCookie(w, s.sessionCookie(r, token))
+	s.audit.Record("login_success", map[string]string{"actor": "local"})
+	http.Redirect(w, r, "/", http.StatusFound)
+}
+
+func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
+	if cookie, err := r.Cookie(sessionCookieName); err == nil {
+		s.mu.Lock()
+		delete(s.sessions, cookie.Value)
+		s.pruneSessionsLocked(time.Now().UTC())
+		s.mu.Unlock()
+	}
+	http.SetCookie(w, &http.Cookie{
+		Name:     sessionCookieName,
+		Value:    "",
+		Path:     "/",
+		MaxAge:   -1,
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+		Secure:   secureCookie(r),
+	})
+	s.audit.Record("logout", map[string]string{"actor": "local"})
+	http.Redirect(w, r, "/login", http.StatusFound)
+}
+
+func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
+	_ = DashboardConsolePage(s.dashboardConsoleView()).Render(r.Context(), w)
+}
+
+func (s *Server) handleProviders(w http.ResponseWriter, r *http.Request) {
+	view, err := s.providerManagementView()
+	if err != nil {
+		view.Error = err.Error()
+	}
+	_ = ProviderManagementPage(view, s.csrfTokenFromRequest(r)).Render(r.Context(), w)
+}
+
+func (s *Server) handleAboutPage(w http.ResponseWriter, r *http.Request) {
+	_ = AboutPage(r.URL.Path, BuildInfoFromConfig(s.cfg, s.providerHealthViews(), s.audit)).Render(r.Context(), w)
+}
+
+func (s *Server) handleAuditTrailPage(w http.ResponseWriter, r *http.Request) {
+	_ = AuditTrailPage(s.auditTrailView(), s.csrfTokenFromRequest(r)).Render(r.Context(), w)
+}
+
+func (s *Server) handleTimelinePage(w http.ResponseWriter, r *http.Request) {
+	eventID := newUIEventID()
+	defer s.audit.Record("timeline_view", map[string]string{
+		"actor":          "local",
+		"source":         "ui",
+		"target":         "timeline",
+		"result":         "read-only",
+		"correlation_id": eventID,
+		"event_id":       eventID,
+	})
+	view := s.timelineView(r)
+	switch strings.ToLower(strings.TrimSpace(r.URL.Query().Get("format"))) {
+	case "json":
+		renderTimelineJSON(w, view)
+	case "csv":
+		renderTimelineCSV(w, view)
+	default:
+		_ = TimelinePage(view, s.csrfTokenFromRequest(r)).Render(r.Context(), w)
+	}
+}
+
+func (s *Server) handleCloudflareDiffPage(w http.ResponseWriter, r *http.Request) {
+	eventID := newUIEventID()
+	defer s.audit.Record("cloudflare_diff_view", map[string]string{
+		"actor":          "local",
+		"source":         "ui",
+		"target":         "cloudflare-diff",
+		"result":         "read-only",
+		"correlation_id": eventID,
+		"event_id":       eventID,
+	})
+	_ = workflowProjectionPage(s.cloudflareDiffView()).Render(r.Context(), w)
+}
+
+func (s *Server) handleReplayPage(w http.ResponseWriter, r *http.Request) {
+	eventID := newUIEventID()
+	defer s.audit.Record("replay_view", map[string]string{
+		"actor":          "local",
+		"source":         "ui",
+		"target":         "replay",
+		"result":         "read-only",
+		"correlation_id": eventID,
+		"event_id":       eventID,
+	})
+	_ = workflowProjectionPage(s.replayView()).Render(r.Context(), w)
+}
+
+func (s *Server) handleDebanPage(w http.ResponseWriter, r *http.Request) {
+	_ = ComingSoonPage(ComingSoonView{
+		Title:       "Deban",
+		Description: "This route is reserved for preview, dry-run, and future execution of CrowdSec and Cloudflare deban workflows.",
+		Active:      r.URL.Path,
+	}).Render(r.Context(), w)
+}
+
+func (s *Server) handleRecoveryPage(w http.ResponseWriter, r *http.Request) {
+	eventID := newUIEventID()
+	defer s.audit.Record("recovery_view", map[string]string{
+		"actor":          "local",
+		"source":         "ui",
+		"target":         "recovery",
+		"result":         "read-only",
+		"correlation_id": eventID,
+		"event_id":       eventID,
+	})
+	_ = workflowProjectionPage(s.recoveryView()).Render(r.Context(), w)
+}
+
+func (s *Server) handleDriftPage(w http.ResponseWriter, r *http.Request) {
+	eventID := newUIEventID()
+	defer s.audit.Record("drift_view", map[string]string{
+		"actor":          "local",
+		"source":         "ui",
+		"target":         "drift",
+		"result":         "read-only",
+		"correlation_id": eventID,
+		"event_id":       eventID,
+	})
+	_ = workflowProjectionPage(s.driftView()).Render(r.Context(), w)
+}
+
+func (s *Server) handleCloudflareBanPreview(w http.ResponseWriter, r *http.Request) {
+	if !s.cfg.UI.MutationsEnabled {
+		http.Error(w, "ui mutations disabled", http.StatusForbidden)
+		return
+	}
+	if !s.cfg.Cloudflare.MutationsEnabled {
+		http.Error(w, "cloudflare mutations disabled", http.StatusForbidden)
+		return
+	}
+	if !s.validCSRF(r) {
+		http.Error(w, "csrf required", http.StatusForbidden)
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	ip := r.PostForm.Get("ip")
+	s.audit.Record("cloudflare_ban_preview", map[string]string{"ip": ip, "mode": "dry-run"})
+	w.WriteHeader(http.StatusAccepted)
+	_, _ = w.Write([]byte("dry-run"))
+}
+
+type aiExplainRequest struct {
+	SubjectType        string `json:"subject_type"`
+	SubjectID          string `json:"subject_id"`
+	ProviderPreference string `json:"provider_preference"`
+}
+
+func (s *Server) handleAIExplain(w http.ResponseWriter, r *http.Request) {
+	if !s.aiLimiter.Allow(clientKey(r)) {
+		http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
+		return
+	}
+	if !s.validCSRF(r) {
+		http.Error(w, "csrf required", http.StatusForbidden)
+		return
+	}
+	defer r.Body.Close()
+	r.Body = http.MaxBytesReader(w, r.Body, 16<<10)
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	var req aiExplainRequest
+	if err := dec.Decode(&req); err != nil {
+		s.audit.Record("ai_explain_failed", map[string]string{
+			"source":         "ui",
+			"result":         "bad_json",
+			"correlation_id": newUIEventID(),
+		})
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	subjectType := normalizeAISubjectType(req.SubjectType)
+	if subjectType == "" {
+		s.audit.Record("ai_explain_failed", map[string]string{
+			"source":         "ui",
+			"subject_type":   req.SubjectType,
+			"subject_id":     req.SubjectID,
+			"result":         "invalid_subject_type",
+			"correlation_id": newUIEventID(),
+		})
+		http.Error(w, "invalid subject_type", http.StatusBadRequest)
+		return
+	}
+	providerPreference := normalizeAIProviderPreference(req.ProviderPreference)
+	if providerPreference == "" {
+		http.Error(w, "invalid provider_preference", http.StatusBadRequest)
+		return
+	}
+	eventID := newUIEventID()
+	s.audit.Record("ai_explain_requested", map[string]string{
+		"source":         "ui",
+		"subject_type":   subjectType,
+		"subject_id":     req.SubjectID,
+		"provider":       providerPreference,
+		"correlation_id": eventID,
+		"event_id":       eventID,
+	})
+
+	response := ai.ExplainResponse{
+		Provider:    "none",
+		Model:       "",
+		Cached:      false,
+		QuotaState:  "UNKNOWN",
+		Explanation: "AI explain unavailable: no provider is configured",
+		ContextHash: "",
+		AuditID:     eventID,
+	}
+	s.aiMu.RLock()
+	explain := s.aiExplain
+	aiCfg := s.aiConfig
+	s.aiMu.RUnlock()
+	if explain != nil {
+		explainResp, err := explain.Explain(r.Context(), ai.ExplainRequest{
+			SubjectType:        ai.SubjectType(subjectType),
+			SubjectID:          req.SubjectID,
+			ProviderPreference: providerPreference,
+			MaxContextBytes:    aiCfg.MaxContextBytes,
+			MaxOutputTokens:    aiCfg.MaxOutputTokens,
+		})
+		if err != nil {
+			s.audit.Record("ai_explain_failed", map[string]string{
+				"source":         "ui",
+				"subject_type":   subjectType,
+				"subject_id":     req.SubjectID,
+				"provider":       providerPreference,
+				"result":         "gateway_error",
+				"correlation_id": eventID,
+				"event_id":       eventID,
+			})
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		response = explainResp
+		response.AuditID = eventID
+	}
+
+	switch response.Provider {
+	case "", "none":
+		s.audit.Record("ai_provider_skipped", map[string]string{
+			"source":         "ui",
+			"subject_type":   subjectType,
+			"subject_id":     req.SubjectID,
+			"provider":       providerPreference,
+			"result":         "unavailable",
+			"correlation_id": eventID,
+			"event_id":       eventID,
+		})
+		s.audit.Record("ai_explain_unavailable", map[string]string{
+			"source":         "ui",
+			"subject_type":   subjectType,
+			"subject_id":     req.SubjectID,
+			"provider":       providerPreference,
+			"result":         "unavailable",
+			"correlation_id": eventID,
+			"event_id":       eventID,
+		})
+	default:
+		s.audit.Record("ai_provider_selected", map[string]string{
+			"source":         "ui",
+			"subject_type":   subjectType,
+			"subject_id":     req.SubjectID,
+			"provider":       response.Provider,
+			"quota_state":    response.QuotaState,
+			"context_hash":   response.ContextHash,
+			"correlation_id": eventID,
+			"event_id":       eventID,
+		})
+		if strings.Contains(strings.ToLower(response.Explanation), "unavailable") {
+			s.audit.Record("ai_explain_unavailable", map[string]string{
+				"source":         "ui",
+				"subject_type":   subjectType,
+				"subject_id":     req.SubjectID,
+				"provider":       response.Provider,
+				"result":         "unavailable",
+				"correlation_id": eventID,
+				"event_id":       eventID,
+			})
+		} else {
+			s.audit.Record("ai_explain_completed", map[string]string{
+				"source":         "ui",
+				"subject_type":   subjectType,
+				"subject_id":     req.SubjectID,
+				"provider":       response.Provider,
+				"quota_state":    response.QuotaState,
+				"context_hash":   response.ContextHash,
+				"result":         "completed",
+				"correlation_id": eventID,
+				"event_id":       eventID,
+			})
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(response)
+}
+
+func (s *Server) handleAIExplainScript(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	_, _ = io.WriteString(w, aiExplainScript())
+}
+
+func (s *Server) handleForensicPage(w http.ResponseWriter, r *http.Request) {
+	renderForensicPage(r.Context(), w, ForensicView{})
+}
+
+func (s *Server) handleForensicLookup(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		renderForensicPage(r.Context(), w, ForensicView{Error: "bad request"})
+		return
+	}
+	ipStr := strings.TrimSpace(r.PostForm.Get("ip"))
+	view := ForensicView{IP: ipStr}
+
+	ip, err := netip.ParseAddr(ipStr)
+	if err != nil || !ip.IsValid() {
+		view.Error = "invalid IP address"
+		renderForensicPage(r.Context(), w, view)
+		return
+	}
+
+	if s.enrichment == nil {
+		view.Error = "enrichment service not configured"
+		renderForensicPage(r.Context(), w, view)
+		return
+	}
+
+	summary, err := s.enrichment.Enrich(r.Context(), ip, enrichment.LookupOptions{ManualForensics: true})
+	if err != nil {
+		view.Error = fmt.Sprintf("enrichment failed: %v", err)
+		renderForensicPage(r.Context(), w, view)
+		return
+	}
+
+	s.audit.Record("forensic_lookup", map[string]string{"ip": ipStr})
+	view.Summary = summary
+	view.Assess = s.enrichment.Assess(summary)
+	view.HasData = true
+	renderForensicPage(r.Context(), w, view)
+}
+
+func (s *Server) requireAuth(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !s.isAuthed(r) {
+			http.Redirect(w, r, "/login", http.StatusFound)
+			return
+		}
+		next(w, r)
+	}
+}
+
+func (s *Server) isAuthed(r *http.Request) bool {
+	cookie, err := r.Cookie(sessionCookieName)
+	if err != nil {
+		return false
+	}
+	s.mu.Lock()
+	s.pruneSessionsLocked(time.Now().UTC())
+	expiry, ok := s.sessions[cookie.Value]
+	if ok && time.Now().UTC().After(expiry) {
+		delete(s.sessions, cookie.Value)
+		ok = false
+	}
+	s.mu.Unlock()
+	return ok
+}
+
+func (s *Server) sessionCookie(r *http.Request, token string) *http.Cookie {
+	return &http.Cookie{
+		Name:     sessionCookieName,
+		Value:    token,
+		Path:     "/",
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+		Secure:   secureCookie(r),
+	}
+}
+
+func secureCookie(r *http.Request) bool {
+	if r.TLS != nil {
+		return true
+	}
+	if strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
+		return true
+	}
+	return false
+}
+
+func (s *Server) csrfTokenFor(sessionToken string) string {
+	mac := hmac.New(sha256.New, []byte(s.uiSecret))
+	_, _ = mac.Write([]byte(sessionToken))
+	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+}
+
+func (s *Server) validCSRF(r *http.Request) bool {
+	cookie, err := r.Cookie(sessionCookieName)
+	if err != nil {
+		return false
+	}
+	expected := s.csrfTokenFor(cookie.Value)
+	if subtleConstantTime(r.Header.Get(csrfHeaderName), expected) == 1 {
+		return true
+	}
+	return subtleConstantTime(r.FormValue("csrf_token"), expected) == 1
+}
+
+func (s *Server) csrfTokenFromRequest(r *http.Request) string {
+	cookie, err := r.Cookie(sessionCookieName)
+	if err != nil {
+		return ""
+	}
+	return s.csrfTokenFor(cookie.Value)
+}
+
+func (s *Server) pruneSessions() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.pruneSessionsLocked(time.Now().UTC())
+}
+
+func (s *Server) pruneSessionsLocked(now time.Time) {
+	if s == nil {
+		return
+	}
+	if !s.lastSessionSweep.IsZero() && now.Sub(s.lastSessionSweep) < s.sessionSweepEvery && len(s.sessions) <= s.sessionMax {
+		metrics.UISessionEntries.Set(float64(len(s.sessions)))
+		return
+	}
+	removed := 0
+	for token, expiry := range s.sessions {
+		if now.After(expiry) {
+			delete(s.sessions, token)
+			removed++
+		}
+	}
+	if s.sessionMax > 0 && len(s.sessions) > s.sessionMax {
+		type sessionItem struct {
+			token  string
+			expiry time.Time
+		}
+		items := make([]sessionItem, 0, len(s.sessions))
+		for token, expiry := range s.sessions {
+			items = append(items, sessionItem{token: token, expiry: expiry})
+		}
+		sort.Slice(items, func(i, j int) bool {
+			if items[i].expiry.Equal(items[j].expiry) {
+				return items[i].token < items[j].token
+			}
+			return items[i].expiry.Before(items[j].expiry)
+		})
+		for len(s.sessions) > s.sessionMax && len(items) > 0 {
+			victim := items[0]
+			items = items[1:]
+			delete(s.sessions, victim.token)
+			removed++
+		}
+	}
+	s.lastSessionSweep = now
+	metrics.UISessionEntries.Set(float64(len(s.sessions)))
+	if removed > 0 {
+		metrics.UISessionsPrunedTotal.Add(float64(removed))
+	}
+}
+
+func (s *Server) providerViews() []ProviderView {
+	views := []ProviderView{
+		{
+			Name:       "AbuseIPDB",
+			Enabled:    s.cfg.AbuseIPDB.Enabled,
+			Configured: providerConfiguredValue(s.cfg.AbuseIPDB.APIKey, s.secretProvider, "ABUSEIPDB_KEY") != "",
+			MaskedKey:  maskedProviderValue(s.cfg.AbuseIPDB.APIKey, s.secretProvider, "ABUSEIPDB_KEY"),
+			Status:     providerStatus(s.cfg.AbuseIPDB.Enabled, providerConfiguredValue(s.cfg.AbuseIPDB.APIKey, s.secretProvider, "ABUSEIPDB_KEY") != ""),
+		},
+		{
+			Name:       "Spamhaus",
+			Enabled:    s.cfg.Spamhaus.Enabled,
+			Configured: providerConfiguredValue(s.cfg.Spamhaus.APIKey, s.secretProvider, "SPAMHAUS_API_KEY") != "",
+			MaskedKey:  maskedProviderValue(s.cfg.Spamhaus.APIKey, s.secretProvider, "SPAMHAUS_API_KEY"),
+			Status:     providerStatus(s.cfg.Spamhaus.Enabled, providerConfiguredValue(s.cfg.Spamhaus.APIKey, s.secretProvider, "SPAMHAUS_API_KEY") != ""),
+		},
+		{
+			Name:       "VirusTotal",
+			Enabled:    s.cfg.VirusTotal.Enabled,
+			Configured: providerConfiguredValue(s.cfg.VirusTotal.APIKey, s.secretProvider, "VIRUSTOTAL_API_KEY") != "",
+			MaskedKey:  maskedProviderValue(s.cfg.VirusTotal.APIKey, s.secretProvider, "VIRUSTOTAL_API_KEY"),
+			Status:     providerStatus(s.cfg.VirusTotal.Enabled, providerConfiguredValue(s.cfg.VirusTotal.APIKey, s.secretProvider, "VIRUSTOTAL_API_KEY") != ""),
+		},
+	}
+	return views
+}
+
+func (s *Server) providerHealthViews() []ProviderHealth {
+	views := []ProviderHealth{
+		{
+			Name:           "AbuseIPDB",
+			Enabled:        s.cfg.AbuseIPDB.Enabled,
+			Configured:     providerConfiguredValue(s.cfg.AbuseIPDB.APIKey, s.secretProvider, "ABUSEIPDB_KEY") != "",
+			MaskedKey:      maskedProviderValue(s.cfg.AbuseIPDB.APIKey, s.secretProvider, "ABUSEIPDB_KEY"),
+			Status:         providerStatus(s.cfg.AbuseIPDB.Enabled, providerConfiguredValue(s.cfg.AbuseIPDB.APIKey, s.secretProvider, "ABUSEIPDB_KEY") != ""),
+			QuotaRemaining: "quota not exposed",
+			Notes:          []string{"lookup/report split remains explicit"},
+		},
+		{
+			Name:           "Spamhaus",
+			Enabled:        s.cfg.Spamhaus.Enabled,
+			Configured:     providerConfiguredValue(s.cfg.Spamhaus.APIKey, s.secretProvider, "SPAMHAUS_API_KEY") != "",
+			MaskedKey:      maskedProviderValue(s.cfg.Spamhaus.APIKey, s.secretProvider, "SPAMHAUS_API_KEY"),
+			Status:         providerStatus(s.cfg.Spamhaus.Enabled, providerConfiguredValue(s.cfg.Spamhaus.APIKey, s.secretProvider, "SPAMHAUS_API_KEY") != ""),
+			QuotaRemaining: "quota not exposed",
+			Notes:          []string{"lookup/report split remains explicit"},
+		},
+		{
+			Name:           "VirusTotal",
+			Enabled:        s.cfg.VirusTotal.Enabled,
+			Configured:     providerConfiguredValue(s.cfg.VirusTotal.APIKey, s.secretProvider, "VIRUSTOTAL_API_KEY") != "",
+			MaskedKey:      maskedProviderValue(s.cfg.VirusTotal.APIKey, s.secretProvider, "VIRUSTOTAL_API_KEY"),
+			Status:         providerStatus(s.cfg.VirusTotal.Enabled, providerConfiguredValue(s.cfg.VirusTotal.APIKey, s.secretProvider, "VIRUSTOTAL_API_KEY") != ""),
+			QuotaRemaining: "quota not exposed",
+			Notes:          []string{"manual forensic only"},
+		},
+		{
+			Name:           "DNS",
+			Enabled:        s.cfg.Enrichment.DNSEnabled,
+			Configured:     true,
+			MaskedKey:      "local resolver",
+			Status:         providerStatus(s.cfg.Enrichment.DNSEnabled, true),
+			QuotaRemaining: "n/a",
+			Notes:          []string{"net.Resolver", "timeout neutral"},
+		},
+		{
+			Name:           "ASN",
+			Enabled:        s.cfg.Enrichment.ASNEnabled,
+			Configured:     true,
+			MaskedKey:      "local classifier",
+			Status:         providerStatus(s.cfg.Enrichment.ASNEnabled, true),
+			QuotaRemaining: "n/a",
+			Notes:          []string{"protected networks registry"},
+		},
+		{
+			Name:           "Cloudflare",
+			Enabled:        s.cfg.Cloudflare.MutationsEnabled,
+			Configured:     strings.TrimSpace(s.cfg.Cloudflare.APIToken) != "" && strings.TrimSpace(s.cfg.Cloudflare.ZoneID) != "",
+			MaskedKey:      maskedCloudflareValue(s.cfg.Cloudflare.APIToken),
+			Status:         cloudflareHealthStatus(s.cfg.Cloudflare.APIToken, s.cfg.Cloudflare.ZoneID, s.cfg.Cloudflare.MutationsEnabled),
+			QuotaRemaining: "quota not exposed",
+			Notes:          []string{"live mutations remain feature-flagged"},
+		},
+		{
+			Name:           "CrowdSec",
+			Enabled:        true,
+			Configured:     strings.TrimSpace(s.cfg.CrowdSec.APIKey) != "",
+			MaskedKey:      maskedCrowdSecValue(s.cfg.CrowdSec.APIKey),
+			Status:         crowdSecHealthStatus(s.cfg.CrowdSec.DecisionsLog),
+			QuotaRemaining: "n/a",
+			Notes:          []string{"single writer boundary only"},
+		},
+	}
+	for i := range views {
+		if views[i].Status == "" {
+			views[i].Status = "unknown"
+		}
+	}
+	return views
+}
+
+func (s *Server) dashboardConsoleView() DashboardConsoleView {
+	return DashboardConsoleView{
+		Statuses: []StatusItem{
+			{Label: "Runtime", Level: "healthy", Detail: "UI mode active"},
+			{Label: "CrowdSec", Level: statusLevelFromText(crowdSecHealthStatus(s.cfg.CrowdSec.DecisionsLog)), Detail: crowdSecHealthStatus(s.cfg.CrowdSec.DecisionsLog)},
+			{Label: "Cloudflare", Level: statusLevelFromText(cloudflareHealthStatus(s.cfg.Cloudflare.APIToken, s.cfg.Cloudflare.ZoneID, s.cfg.Cloudflare.MutationsEnabled)), Detail: cloudflareHealthStatus(s.cfg.Cloudflare.APIToken, s.cfg.Cloudflare.ZoneID, s.cfg.Cloudflare.MutationsEnabled)},
+			{Label: "OpenResty", Level: statusLevelFromText(openRestyStatus(s.cfg.OpenResty.EventsFile)), Detail: openRestyStatus(s.cfg.OpenResty.EventsFile)},
+			{Label: "Nginx", Level: statusLevelFromText(nginxStatus(s.cfg.CrowdSec.NginxLogDir)), Detail: nginxStatus(s.cfg.CrowdSec.NginxLogDir)},
+			{Label: "SQLite WAL", Level: statusLevelFromText(sqliteWALStatus(s.cfg.StateDir)), Detail: sqliteWALStatus(s.cfg.StateDir)},
+			{Label: "UI", Level: boolStatus(s.cfg.UI.Enabled), Detail: uiStatus(s.cfg.UI.Enabled, s.cfg.UI.Addr)},
+			{Label: "HA / fencing", Level: "warning", Detail: "read-only UI shell"},
+			{Label: "Replay", Level: "warning", Detail: "reserved route"},
+			{Label: "Recovery", Level: "warning", Detail: "reserved route"},
+			{Label: "Ownership", Level: "healthy", Detail: "lineage preserved in runtime"},
+			{Label: "UI mutations", Level: boolStatus(s.cfg.UI.MutationsEnabled), Detail: boolDetail(s.cfg.UI.MutationsEnabled, "enabled", "disabled")},
+			{Label: "Cloudflare mutations", Level: cloudflareLevel(s.cfg.Cloudflare.APIToken, s.cfg.Cloudflare.ZoneID, s.cfg.Cloudflare.MutationsEnabled), Detail: cloudflareHealthStatus(s.cfg.Cloudflare.APIToken, s.cfg.Cloudflare.ZoneID, s.cfg.Cloudflare.MutationsEnabled)},
+			{Label: "Shadow / cutover", Level: "disabled", Detail: "not wired in UI shell"},
+		},
+		AIProviders: s.providerDashboardEntries(),
+	}
+}
+
+func (s *Server) auditTrailView() AuditTrailView {
+	reader, ok := s.audit.(AuditReader)
+	if !ok || reader == nil {
+		return AuditTrailView{}
+	}
+	return AuditTrailView{Entries: reader.Entries()}
+}
+
+func maskedCloudflareValue(token string) string {
+	if strings.TrimSpace(token) == "" {
+		return "missing"
+	}
+	return redactValue(token)
+}
+
+func maskedCrowdSecValue(key string) string {
+	if strings.TrimSpace(key) == "" {
+		return "missing"
+	}
+	return redactValue(key)
+}
+
+func crowdSecHealthStatus(decisionsLog string) string {
+	return crowdSecStatus(decisionsLog)
+}
+
+func cloudflareHealthStatus(token, zoneID string, live bool) string {
+	return cloudflareStatus(token, zoneID, live)
+}
+
+func cloudflareLevel(token, zoneID string, live bool) string {
+	if strings.TrimSpace(token) == "" || strings.TrimSpace(zoneID) == "" {
+		return "disabled"
+	}
+	if live {
+		return "live"
+	}
+	return "dry-run"
+}
+
+func nginxStatus(logDir string) string {
+	if strings.TrimSpace(logDir) == "" {
+		return "Nginx unavailable / nginx log mode"
+	}
+	if _, err := os.Stat(logDir); err != nil {
+		return "Nginx unavailable / nginx log mode"
+	}
+	return "Nginx ready"
+}
+
+func sqliteWALStatus(stateDir string) string {
+	if strings.TrimSpace(stateDir) == "" {
+		return "SQLite WAL unavailable"
+	}
+	if _, err := os.Stat(stateDir); err != nil {
+		return "SQLite WAL unavailable"
+	}
+	return "SQLite WAL available"
+}
+
+func statusLevelFromText(text string) string {
+	lower := strings.ToLower(text)
+	switch {
+	case strings.Contains(lower, "ready"):
+		return "healthy"
+	case strings.Contains(lower, "enabled"):
+		return "live"
+	case strings.Contains(lower, "live mutations"):
+		return "live"
+	case strings.Contains(lower, "configured dry-run"):
+		return "dry-run"
+	case strings.Contains(lower, "unavailable"):
+		return "degraded"
+	case strings.Contains(lower, "disabled"):
+		return "disabled"
+	default:
+		return "warning"
+	}
+}
+
+func providerConfiguredValue(cfgValue string, sp SecretProvider, key string) string {
+	if strings.TrimSpace(cfgValue) != "" {
+		return cfgValue
+	}
+	if sp == nil {
+		return ""
+	}
+	v, ok := sp.Lookup(key)
+	if !ok {
+		return ""
+	}
+	return v
+}
+
+func maskedProviderValue(cfgValue string, sp SecretProvider, key string) string {
+	v := providerConfiguredValue(cfgValue, sp, key)
+	if v == "" {
+		return "missing"
+	}
+	return redactValue(v)
+}
+
+func (s *Server) runtimeStatus() RuntimeStatusView {
+	return RuntimeStatusView{
+		CrowdSec:   crowdSecStatus(s.cfg.CrowdSec.DecisionsLog),
+		OpenResty:  openRestyStatus(s.cfg.OpenResty.EventsFile),
+		Cloudflare: cloudflareStatus(s.cfg.Cloudflare.APIToken, s.cfg.Cloudflare.ZoneID, s.cfg.Cloudflare.MutationsEnabled),
+		UI:         uiStatus(s.cfg.UI.Enabled, s.cfg.UI.Addr),
+	}
+}
+
+func crowdSecStatus(decisionsLog string) string {
+	if strings.TrimSpace(decisionsLog) == "" {
+		return "CrowdSec unavailable / read-only fallback"
+	}
+	if _, err := os.Stat(decisionsLog); err != nil {
+		return "CrowdSec unavailable / read-only fallback"
+	}
+	return "CrowdSec ready"
+}
+
+func openRestyStatus(eventsFile string) string {
+	if strings.TrimSpace(eventsFile) == "" {
+		return "OpenResty unavailable / nginx log mode"
+	}
+	if _, err := os.Stat(eventsFile); err != nil {
+		return "OpenResty unavailable / nginx log mode"
+	}
+	return "OpenResty ready"
+}
+
+func cloudflareStatus(token, zoneID string, live bool) string {
+	if strings.TrimSpace(token) == "" || strings.TrimSpace(zoneID) == "" {
+		return "Cloudflare disabled"
+	}
+	if !live {
+		return "Cloudflare configured dry-run"
+	}
+	return "Cloudflare live mutations enabled"
+}
+
+func uiStatus(enabled bool, addr string) string {
+	if !enabled {
+		return "UI disabled"
+	}
+	if strings.TrimSpace(addr) == "" {
+		return "UI enabled"
+	}
+	return "UI ready on " + addr
+}
+
+func providerStatus(enabled bool, configured bool) string {
+	switch {
+	case !configured:
+		return "missing"
+	case !enabled:
+		return "configured / disabled"
+	default:
+		return "configured / enabled"
+	}
+}
+
+func normalizeAISubjectType(value string) string {
+	switch strings.TrimSpace(strings.ToLower(value)) {
+	case "timeline_event", "audit_event", "provider", "intelligence", "trusted_network", "diff", "replay", "recovery", "drift":
+		return strings.TrimSpace(strings.ToLower(value))
+	default:
+		return ""
+	}
+}
+
+func normalizeAIProviderPreference(value string) string {
+	switch strings.TrimSpace(strings.ToLower(value)) {
+	case "", "auto":
+		return "auto"
+	case "openai", "anthropic", "gemini":
+		return strings.TrimSpace(strings.ToLower(value))
+	default:
+		return ""
+	}
+}
+
+func subtleConstantTime(a, b string) int {
+	if len(a) != len(b) {
+		return 0
+	}
+	var v byte
+	for i := 0; i < len(a); i++ {
+		v |= a[i] ^ b[i]
+	}
+	if v == 0 {
+		return 1
+	}
+	return 0
+}
+
+func clientKey(r *http.Request) string {
+	info := security.GetRequestInfo(r, nil)
+	if info != nil && info.SourceIP != "" {
+		return info.SourceIP
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil || host == "" {
+		return r.RemoteAddr
+	}
+	return host
+}
+
+func randomSessionToken() (string, error) {
+	const letters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	var raw [32]byte
+	if _, err := rand.Read(raw[:]); err != nil {
+		return "", err
+	}
+	var out [32]byte
+	for i := range out {
+		out[i] = letters[int(raw[i])%len(letters)]
+	}
+	return string(out[:]), nil
+}
+
+type rateLimiter struct {
+	mu      sync.Mutex
+	limit   int
+	window  time.Duration
+	clients map[string]*rateBucket
+}
+
+type rateBucket struct {
+	windowStart time.Time
+	count       int
+}
+
+func newRateLimiter(limit int, window time.Duration) *rateLimiter {
+	return &rateLimiter{limit: limit, window: window, clients: make(map[string]*rateBucket)}
+}
+
+func (r *rateLimiter) Allow(key string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	now := time.Now()
+	// Evict stale buckets to prevent unbounded map growth.
+	for k, b := range r.clients {
+		if now.Sub(b.windowStart) > r.window*2 {
+			delete(r.clients, k)
+		}
+	}
+	b := r.clients[key]
+	if b == nil || now.Sub(b.windowStart) > r.window {
+		r.clients[key] = &rateBucket{windowStart: now, count: 1}
+		return true
+	}
+	if b.count >= r.limit {
+		return false
+	}
+	b.count++
+	return true
+}

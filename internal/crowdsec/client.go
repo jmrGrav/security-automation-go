@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"regexp"
 	"strings"
 	"time"
 
@@ -38,10 +39,43 @@ type AllowlistManager interface {
 	AddAllowlistEntry(ctx context.Context, name string, entry models.AllowlistEntry) error
 }
 
-// DecisionManager is the interface for applying CrowdSec decisions via cscli.
-type DecisionManager interface {
+// DecisionWriter is the narrow write boundary for adding CrowdSec decisions.
+// All future replay/UI/deban flows must depend on this interface instead of
+// spawning cscli directly.
+type DecisionWriter interface {
 	AddIPDecision(ctx context.Context, ip, duration, reason string) error
 	AddRangeDecision(ctx context.Context, cidr, duration, reason string) error
+}
+
+// DecisionRemover is the narrow write boundary for removing CrowdSec decisions.
+type DecisionRemover interface {
+	DeleteIPDecision(ctx context.Context, ip string) error
+	DeleteRangeDecision(ctx context.Context, cidr string) error
+}
+
+// DecisionManager is the full decision mutation boundary.
+type DecisionManager interface {
+	DecisionWriter
+	DecisionRemover
+}
+
+// AllowlistReader is the read boundary for CrowdSec allowlists.
+type AllowlistReader interface {
+	ListAllowlist(ctx context.Context, name string) ([]models.AllowlistEntry, error)
+}
+
+// AllowlistWriter is the write boundary for CrowdSec allowlist changes.
+type AllowlistWriter interface {
+	AddAllowlistEntry(ctx context.Context, name string, entry models.AllowlistEntry) error
+	RemoveAllowlistEntry(ctx context.Context, name, value string) error
+}
+
+// CrowdSecAdminWriter is the only supported aggregate write boundary for
+// future local UI, replay, deban, and manual allowlist features.
+type CrowdSecAdminWriter interface {
+	DecisionWriter
+	DecisionRemover
+	AllowlistWriter
 }
 
 // cscliRunner is an injectable subprocess runner for allowlist and decision commands.
@@ -51,6 +85,8 @@ type cscliRunner interface {
 }
 
 type realCscliRunner struct{ timeout time.Duration }
+
+var crowdsecDurationPattern = regexp.MustCompile(`^[0-9]+[smhd]([0-9]+[smhd])*$`)
 
 func (r *realCscliRunner) run(ctx context.Context, bin string, args ...string) ([]byte, error) {
 	opCtx, cancel := context.WithTimeout(ctx, r.timeout)
@@ -126,6 +162,21 @@ func (c *Client) ListActiveBans(ctx context.Context) ([]string, error) {
 		return nil, fmt.Errorf("crowdsec.Client.ListActiveBans: %w", err)
 	}
 	return source.FilterActiveBanIPs(alerts), nil
+}
+
+// ListActiveDecisions returns raw active CrowdSec decisions. This preserves
+// scope details for future UI/replay/deban flows without creating a second
+// write path.
+func (c *Client) ListActiveDecisions(ctx context.Context) ([]source.RawDecision, error) {
+	alerts, err := c.src.ListAlerts(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("crowdsec.Client.ListActiveDecisions: %w", err)
+	}
+	var decisions []source.RawDecision
+	for _, alert := range alerts {
+		decisions = append(decisions, alert.Decisions...)
+	}
+	return decisions, nil
 }
 
 // decisionLogLine is the JSON structure of each line in decisions.log.
@@ -230,6 +281,9 @@ func (c *Client) ListRecentBans(ctx context.Context) ([]models.RecentBan, error)
 // ListAllowlist returns entries in a named CrowdSec allowlist.
 // Mirrors Python's get_crowdsec_allowlist(): cscli allowlists inspect <name> -o json.
 func (c *Client) ListAllowlist(ctx context.Context, name string) ([]models.AllowlistEntry, error) {
+	if err := validateAllowlistName(name); err != nil {
+		return nil, fmt.Errorf("crowdsec.Client.ListAllowlist: %w", err)
+	}
 	out, err := c.runner.run(ctx, c.cscliBin, "allowlists", "inspect", name, "-o", "json")
 	if err != nil {
 		return nil, fmt.Errorf("crowdsec.Client.ListAllowlist: %w", err)
@@ -255,6 +309,12 @@ func (c *Client) ListAllowlist(ctx context.Context, name string) ([]models.Allow
 // AddAllowlistEntry adds an entry to a named CrowdSec allowlist.
 // Mirrors Python's: cscli allowlists add <name> <value> --comment <comment>.
 func (c *Client) AddAllowlistEntry(ctx context.Context, name string, entry models.AllowlistEntry) error {
+	if err := validateAllowlistName(name); err != nil {
+		return fmt.Errorf("crowdsec.Client.AddAllowlistEntry: %w", err)
+	}
+	if err := validateIPOrCIDR(entry.Value); err != nil {
+		return fmt.Errorf("crowdsec.Client.AddAllowlistEntry: %w", err)
+	}
 	args := []string{"allowlists", "add", name, entry.Value}
 	if entry.Comment != "" {
 		args = append(args, "--comment", entry.Comment)
@@ -266,9 +326,30 @@ func (c *Client) AddAllowlistEntry(ctx context.Context, name string, entry model
 	return nil
 }
 
+// RemoveAllowlistEntry removes an IP or CIDR from a named CrowdSec allowlist.
+func (c *Client) RemoveAllowlistEntry(ctx context.Context, name, value string) error {
+	if err := validateAllowlistName(name); err != nil {
+		return fmt.Errorf("crowdsec.Client.RemoveAllowlistEntry: %w", err)
+	}
+	if err := validateIPOrCIDR(value); err != nil {
+		return fmt.Errorf("crowdsec.Client.RemoveAllowlistEntry: %w", err)
+	}
+	_, err := c.runner.run(ctx, c.cscliBin, "allowlists", "remove", name, value)
+	if err != nil {
+		return fmt.Errorf("crowdsec.Client.RemoveAllowlistEntry: %w", err)
+	}
+	return nil
+}
+
 // AddIPDecision adds an IP ban via cscli.
 // Mirrors Python's escalate_ban(): cscli decisions add --ip <ip> --duration <d> --type ban --reason <r>.
 func (c *Client) AddIPDecision(ctx context.Context, ip, duration, reason string) error {
+	if err := validateIP(ip); err != nil {
+		return fmt.Errorf("crowdsec.Client.AddIPDecision: %w", err)
+	}
+	if err := validateDuration(duration); err != nil {
+		return fmt.Errorf("crowdsec.Client.AddIPDecision: %w", err)
+	}
 	_, err := c.runner.run(ctx, c.cscliBin,
 		"decisions", "add", "--ip", ip,
 		"--duration", duration, "--type", "ban", "--reason", reason,
@@ -282,12 +363,92 @@ func (c *Client) AddIPDecision(ctx context.Context, ip, duration, reason string)
 // AddRangeDecision adds a CIDR range ban via cscli.
 // Mirrors Python's: cscli decisions add --range <cidr> ...
 func (c *Client) AddRangeDecision(ctx context.Context, cidr, duration, reason string) error {
+	if err := validateCIDR(cidr); err != nil {
+		return fmt.Errorf("crowdsec.Client.AddRangeDecision: %w", err)
+	}
+	if err := validateDuration(duration); err != nil {
+		return fmt.Errorf("crowdsec.Client.AddRangeDecision: %w", err)
+	}
 	_, err := c.runner.run(ctx, c.cscliBin,
 		"decisions", "add", "--range", cidr,
 		"--duration", duration, "--type", "ban", "--reason", reason,
 	)
 	if err != nil {
 		return fmt.Errorf("crowdsec.Client.AddRangeDecision: %w", err)
+	}
+	return nil
+}
+
+// DeleteIPDecision removes a CrowdSec IP decision via cscli.
+func (c *Client) DeleteIPDecision(ctx context.Context, ip string) error {
+	if err := validateIP(ip); err != nil {
+		return fmt.Errorf("crowdsec.Client.DeleteIPDecision: %w", err)
+	}
+	_, err := c.runner.run(ctx, c.cscliBin, "decisions", "delete", "--ip", ip)
+	if err != nil {
+		return fmt.Errorf("crowdsec.Client.DeleteIPDecision: %w", err)
+	}
+	return nil
+}
+
+// DeleteRangeDecision removes a CrowdSec CIDR range decision via cscli.
+func (c *Client) DeleteRangeDecision(ctx context.Context, cidr string) error {
+	if err := validateCIDR(cidr); err != nil {
+		return fmt.Errorf("crowdsec.Client.DeleteRangeDecision: %w", err)
+	}
+	_, err := c.runner.run(ctx, c.cscliBin, "decisions", "delete", "--range", cidr)
+	if err != nil {
+		return fmt.Errorf("crowdsec.Client.DeleteRangeDecision: %w", err)
+	}
+	return nil
+}
+
+func validateAllowlistName(name string) error {
+	if strings.TrimSpace(name) == "" {
+		return fmt.Errorf("allowlist name is required")
+	}
+	if strings.HasPrefix(name, "-") {
+		return fmt.Errorf("allowlist name must not start with '-'")
+	}
+	return nil
+}
+
+func validateIPOrCIDR(value string) error {
+	if strings.Contains(value, "/") {
+		return validateCIDR(value)
+	}
+	return validateIP(value)
+}
+
+func validateIP(ip string) error {
+	if strings.HasPrefix(ip, "-") {
+		return fmt.Errorf("target must not start with '-'")
+	}
+	if net.ParseIP(ip) == nil {
+		return fmt.Errorf("target is not a valid IP address")
+	}
+	return nil
+}
+
+func validateCIDR(cidr string) error {
+	if strings.HasPrefix(cidr, "-") {
+		return fmt.Errorf("target must not start with '-'")
+	}
+	if _, _, err := net.ParseCIDR(cidr); err != nil {
+		return fmt.Errorf("target is not a valid CIDR range")
+	}
+	return nil
+}
+
+func validateDuration(duration string) error {
+	if duration == "" {
+		return fmt.Errorf("duration is required")
+	}
+	if strings.HasPrefix(duration, "-") {
+		return fmt.Errorf("duration must not start with '-'")
+	}
+	if !crowdsecDurationPattern.MatchString(duration) {
+		return fmt.Errorf("invalid duration format")
 	}
 	return nil
 }

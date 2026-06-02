@@ -200,13 +200,14 @@ func TestReplayWithCheckpointStartsAfterCheckpointSequence(t *testing.T) {
 				ScopeID:       "scope-a",
 				Sequence:      2,
 				EventID:       2,
-				Checksum:      "sha256:test",
 				State:         json.RawMessage(`{"status":"planning"}`),
+				Metadata:      map[string]any{"trigger": "checkpoint"},
 				SchemaVersion: SchemaVersion,
 				CreatedAt:     time.Now().UTC(),
 			},
 		},
 	}
+	store.checkpoints[0].Checksum = checkpointReplayChecksum(store.checkpoints[0].Name, store.checkpoints[0].ScopeID, store.checkpoints[0].Sequence, store.checkpoints[0].EventID, store.checkpoints[0].State, store.checkpoints[0].Metadata, store.checkpoints[0].SchemaVersion, store.checkpoints[0].CreatedAt)
 	state := &replayState{}
 	result, err := ReplayWithOptions(context.Background(), store, "scope-a", state, ReplayOptions{
 		CheckpointName: "runtime-state",
@@ -222,5 +223,152 @@ func TestReplayWithCheckpointStartsAfterCheckpointSequence(t *testing.T) {
 	}
 	if len(state.applied) != 1 || state.applied[0] != 3 {
 		t.Fatalf("expected to apply only sequence 3, got %v", state.applied)
+	}
+}
+
+func TestReplayWithCheckpointFallsBackToEarlierValidCheckpoint(t *testing.T) {
+	valid := Checkpoint{
+		Name:          "runtime-state",
+		ScopeID:       "scope-a",
+		Sequence:      1,
+		EventID:       1,
+		Checksum:      "placeholder",
+		State:         json.RawMessage(`{"status":"idle"}`),
+		Metadata:      map[string]any{"trigger": "good"},
+		SchemaVersion: SchemaVersion,
+		CreatedAt:     time.Date(2026, 5, 31, 10, 0, 0, 0, time.UTC),
+	}
+	valid.Checksum = checkpointReplayChecksum(valid.Name, valid.ScopeID, valid.Sequence, valid.EventID, valid.State, valid.Metadata, valid.SchemaVersion, valid.CreatedAt)
+	invalid := Checkpoint{
+		Name:          "runtime-state",
+		ScopeID:       "scope-a",
+		Sequence:      2,
+		EventID:       2,
+		Checksum:      "broken",
+		State:         json.RawMessage(`{"status":"executing"}`),
+		Metadata:      map[string]any{"trigger": "bad"},
+		SchemaVersion: SchemaVersion,
+		CreatedAt:     time.Date(2026, 5, 31, 11, 0, 0, 0, time.UTC),
+	}
+	store := &memoryStore{
+		events: []Event{
+			{ID: 1, Sequence: 1, ScopeID: "scope-a", Payload: json.RawMessage(`{"n":1}`), Timestamp: time.Date(2026, 5, 31, 10, 0, 0, 0, time.UTC)},
+			{ID: 2, Sequence: 2, ScopeID: "scope-a", Payload: json.RawMessage(`{"n":2}`), Timestamp: time.Date(2026, 5, 31, 11, 0, 0, 0, time.UTC)},
+		},
+		checkpoints: []Checkpoint{valid, invalid},
+	}
+	state := &replayState{}
+	result, err := ReplayWithOptions(context.Background(), store, "scope-a", state, ReplayOptions{
+		CheckpointName: "runtime-state",
+	})
+	if err != nil {
+		t.Fatalf("replay with fallback checkpoint: %v", err)
+	}
+	if !result.UsedCheckpoint || result.StartedAfterSequence != 1 || result.FinalSequence != 2 {
+		t.Fatalf("unexpected replay result: %+v", result)
+	}
+	if len(state.restored) != 1 || state.restored[0].Sequence != 1 {
+		t.Fatalf("expected earlier valid checkpoint to be restored, got %+v", state.restored)
+	}
+	if len(state.applied) != 1 || state.applied[0] != 2 {
+		t.Fatalf("expected replay from sequence 2 only, got %v", state.applied)
+	}
+}
+
+func TestReplayWithInvalidCheckpointCanStartFromGenesisWhenAllowed(t *testing.T) {
+	store := &memoryStore{
+		events: []Event{
+			{ID: 1, Sequence: 1, ScopeID: "scope-a", Payload: json.RawMessage(`{"n":1}`), Timestamp: time.Now().UTC()},
+		},
+		checkpoints: []Checkpoint{
+			{
+				Name:          "runtime-state",
+				ScopeID:       "scope-b",
+				Sequence:      3,
+				EventID:       3,
+				Checksum:      "broken",
+				State:         json.RawMessage(`{"status":"invalid"}`),
+				Metadata:      map[string]any{"trigger": "bad"},
+				SchemaVersion: SchemaVersion,
+				CreatedAt:     time.Now().UTC(),
+			},
+		},
+	}
+	state := &replayState{}
+	result, err := ReplayWithOptions(context.Background(), store, "scope-a", state, ReplayOptions{
+		CheckpointName:                      "runtime-state",
+		AllowGenesisReplayWithoutCheckpoint: true,
+	})
+	if err != nil {
+		t.Fatalf("replay from genesis with invalid checkpoint allowed: %v", err)
+	}
+	if result.UsedCheckpoint {
+		t.Fatalf("expected genesis replay without checkpoint, got %+v", result)
+	}
+	if len(state.applied) != 1 || state.applied[0] != 1 {
+		t.Fatalf("expected genesis replay to apply event 1, got %v", state.applied)
+	}
+}
+
+func TestReplayAfterCheckpointAwareCompactionMatchesFullReplay(t *testing.T) {
+	now := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
+	checkpoint := Checkpoint{
+		Name:          "runtime-state",
+		ScopeID:       "scope-a",
+		Sequence:      2,
+		EventID:       2,
+		State:         json.RawMessage(`{"status":"planning"}`),
+		Metadata:      map[string]any{"trigger": "checkpoint"},
+		SchemaVersion: SchemaVersion,
+		CreatedAt:     now,
+	}
+	checkpoint.Checksum = checkpointReplayChecksum(checkpoint.Name, checkpoint.ScopeID, checkpoint.Sequence, checkpoint.EventID, checkpoint.State, checkpoint.Metadata, checkpoint.SchemaVersion, checkpoint.CreatedAt)
+
+	fullStore := &memoryStore{
+		events: []Event{
+			{ID: 1, Sequence: 1, ScopeID: "scope-a", Payload: json.RawMessage(`{"n":1}`), Timestamp: now},
+			{ID: 2, Sequence: 2, ScopeID: "scope-a", Payload: json.RawMessage(`{"n":2}`), Timestamp: now.Add(time.Second)},
+			{ID: 3, Sequence: 3, ScopeID: "scope-a", Payload: json.RawMessage(`{"n":3}`), Timestamp: now.Add(2 * time.Second)},
+			{ID: 4, Sequence: 4, ScopeID: "scope-a", Payload: json.RawMessage(`{"n":4}`), Timestamp: now.Add(3 * time.Second)},
+		},
+		checkpoints: []Checkpoint{checkpoint},
+	}
+	compactStore := &memoryStore{
+		events: []Event{
+			{ID: 3, Sequence: 3, ScopeID: "scope-a", Payload: json.RawMessage(`{"n":3}`), Timestamp: now.Add(2 * time.Second)},
+			{ID: 4, Sequence: 4, ScopeID: "scope-a", Payload: json.RawMessage(`{"n":4}`), Timestamp: now.Add(3 * time.Second)},
+		},
+		checkpoints: []Checkpoint{checkpoint},
+	}
+
+	fullState := &replayState{}
+	fullResult, err := ReplayWithOptions(context.Background(), fullStore, "scope-a", fullState, ReplayOptions{
+		CheckpointName: "runtime-state",
+	})
+	if err != nil {
+		t.Fatalf("replay full store: %v", err)
+	}
+
+	compactState := &replayState{}
+	compactResult, err := ReplayWithOptions(context.Background(), compactStore, "scope-a", compactState, ReplayOptions{
+		CheckpointName: "runtime-state",
+	})
+	if err != nil {
+		t.Fatalf("replay compact store: %v", err)
+	}
+
+	if !fullResult.UsedCheckpoint || !compactResult.UsedCheckpoint {
+		t.Fatalf("expected checkpoint-backed replay on both paths: full=%+v compact=%+v", fullResult, compactResult)
+	}
+	if fullResult.FinalSequence != compactResult.FinalSequence || fullResult.EventsApplied != compactResult.EventsApplied {
+		t.Fatalf("replay diverged after compaction: full=%+v compact=%+v", fullResult, compactResult)
+	}
+	if len(fullState.applied) != len(compactState.applied) {
+		t.Fatalf("applied length mismatch: full=%v compact=%v", fullState.applied, compactState.applied)
+	}
+	for i := range fullState.applied {
+		if fullState.applied[i] != compactState.applied[i] {
+			t.Fatalf("applied sequence mismatch at %d: full=%v compact=%v", i, fullState.applied, compactState.applied)
+		}
 	}
 }

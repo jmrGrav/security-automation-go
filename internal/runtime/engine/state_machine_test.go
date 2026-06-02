@@ -38,6 +38,8 @@ func TestFSM_ValidTransitions(t *testing.T) {
 		{{models.StatusIdle, models.StatusDiscovering}, {models.StatusDiscovering, models.StatusFailed}, {models.StatusFailed, models.StatusDiscovering}},
 		// Quarantine
 		{{models.StatusIdle, models.StatusDiscovering}, {models.StatusDiscovering, models.StatusPlanning}, {models.StatusPlanning, models.StatusExecuting}, {models.StatusExecuting, models.StatusValidating}, {models.StatusValidating, models.StatusQuarantined}, {models.StatusQuarantined, models.StatusIdle}},
+		// Emergency quarantine from a stable state
+		{{models.StatusIdle, models.StatusQuarantined}},
 		// Pause from idle
 		{{models.StatusIdle, models.StatusPaused}, {models.StatusPaused, models.StatusIdle}},
 	}

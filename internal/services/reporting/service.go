@@ -3,7 +3,6 @@ package reporting
 import (
 	"context"
 	"strings"
-	"sync"
 	"time"
 
 	abexec "github.com/jm/security-automation-go/internal/abuseipdb/executor"
@@ -33,20 +32,18 @@ type Result struct {
 }
 
 type Service struct {
-	reporter           abexec.Executor
-	sink               sinks.Sink
-	trust              *trust.Registry
-	evidenceStore      EvidenceStore
-	reservationStore   ReportReservationStore
-	dedupTTL           time.Duration
-	reportWindow       time.Duration
-	lowConfidence      float64
-	dedupStore         reportdedup.Store
-	failClosedOnStore  bool
-	now                func() time.Time
-	mu                 sync.Mutex
-	recentFingerprints map[string]time.Time
-	ipLocks            map[string]*sync.Mutex
+	reporter          abexec.Executor
+	sink              sinks.Sink
+	trust             *trust.Registry
+	evidenceStore     EvidenceStore
+	reservationStore  ReportReservationStore
+	dedupTTL          time.Duration
+	reportWindow      time.Duration
+	lowConfidence     float64
+	dedupStore        reportdedup.Store
+	failClosedOnStore bool
+	now               func() time.Time
+	gate              *decisionGate
 }
 
 func New(reporter abexec.Executor, sink sinks.Sink, registry *trust.Registry, dedupTTL time.Duration) *Service {
@@ -54,16 +51,15 @@ func New(reporter abexec.Executor, sink sinks.Sink, registry *trust.Registry, de
 		dedupTTL = 15 * time.Minute
 	}
 	return &Service{
-		reporter:           reporter,
-		sink:               sink,
-		trust:              registry,
-		dedupTTL:           dedupTTL,
-		reportWindow:       24 * time.Hour,
-		lowConfidence:      0.70,
-		failClosedOnStore:  true,
-		now:                func() time.Time { return time.Now().UTC() },
-		recentFingerprints: make(map[string]time.Time),
-		ipLocks:            make(map[string]*sync.Mutex),
+		reporter:          reporter,
+		sink:              sink,
+		trust:             registry,
+		dedupTTL:          dedupTTL,
+		reportWindow:      24 * time.Hour,
+		lowConfidence:     0.70,
+		failClosedOnStore: true,
+		now:               func() time.Time { return time.Now().UTC() },
+		gate:              newDecisionGate(dedupTTL, func() time.Time { return time.Now().UTC() }),
 	}
 }
 
@@ -82,6 +78,9 @@ func (s *Service) SetReportReservationStore(store ReportReservationStore) {
 func (s *Service) SetClock(now func() time.Time) {
 	if now != nil {
 		s.now = now
+		if s.gate != nil {
+			s.gate.setClock(now)
+		}
 	}
 }
 
@@ -103,25 +102,10 @@ func (s *Service) Process(ctx context.Context, req Request) (Result, error) {
 
 	suppressionReason := s.suppressionReason(req, cls)
 	if suppressionReason != "" {
-		if req.Source == abuseformat.SourceCloudflareWAF && suppressionReason == "low_confidence" {
-			metrics.CloudflareEventsSuppressedLowConfidenceTotal.Inc()
-		}
-		telemetryEvent.SuppressionReason = suppressionReason
-		evidenceID := s.recordEvidence(ctx, req, cls, comment, telemetryEvent, false, true, suppressionReason)
-		if evidenceID != "" {
-			telemetryEvent.Metadata["evidence_id"] = evidenceID
-		}
-		_ = s.publish(ctx, telemetryEvent)
-		return Result{
-			Classification:    cls,
-			Comment:           comment,
-			Suppressed:        true,
-			SuppressionReason: suppressionReason,
-			TelemetryEvent:    telemetryEvent,
-		}, nil
+		return s.handleSuppressedDecision(ctx, req, cls, comment, telemetryEvent, suppressionReason)
 	}
 
-	unlock := s.lockIP(strings.TrimSpace(req.Event.IP))
+	unlock := s.gate.lockIP(strings.TrimSpace(req.Event.IP))
 	defer unlock()
 
 	if recentResult, handled, err := s.enforceRecentReportWindow(ctx, req, cls, telemetryEvent, comment); handled || err != nil {
@@ -136,6 +120,29 @@ func (s *Service) Process(ctx context.Context, req Request) (Result, error) {
 		return result, err
 	}
 
+	return s.finalizeReportedDecision(ctx, req, cls, comment, telemetryEvent, attempt), nil
+}
+
+func (s *Service) handleSuppressedDecision(ctx context.Context, req Request, cls classifier.Classification, comment string, telemetryEvent tmevents.SecurityEvent, suppressionReason string) (Result, error) {
+	if req.Source == abuseformat.SourceCloudflareWAF && suppressionReason == "low_confidence" {
+		metrics.CloudflareEventsSuppressedLowConfidenceTotal.Inc()
+	}
+	telemetryEvent.SuppressionReason = suppressionReason
+	evidenceID := s.recordEvidence(ctx, req, cls, comment, telemetryEvent, false, true, suppressionReason)
+	if evidenceID != "" {
+		telemetryEvent.Metadata["evidence_id"] = evidenceID
+	}
+	_ = s.publish(ctx, telemetryEvent)
+	return Result{
+		Classification:    cls,
+		Comment:           comment,
+		Suppressed:        true,
+		SuppressionReason: suppressionReason,
+		TelemetryEvent:    telemetryEvent,
+	}, nil
+}
+
+func (s *Service) finalizeReportedDecision(ctx context.Context, req Request, cls classifier.Classification, comment string, telemetryEvent tmevents.SecurityEvent, attempt reportAttempt) Result {
 	recordReportMetrics(req.Source, cls)
 	metrics.AbuseIPDBReportsSentTotal.Inc()
 	telemetryEvent.AbuseIPDBReported = true
@@ -154,12 +161,11 @@ func (s *Service) Process(ctx context.Context, req Request) (Result, error) {
 		_ = s.reservationStore.MarkStatus(ctx, attempt.pendingEvidenceID, ReportStatusReported)
 	}
 	_ = s.publish(ctx, telemetryEvent)
-
 	return Result{
 		Classification: cls,
 		Comment:        comment,
 		Reported:       true,
 		TelemetryEvent: telemetryEvent,
 		Report:         &attempt.report,
-	}, nil
+	}
 }

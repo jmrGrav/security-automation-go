@@ -57,29 +57,6 @@ func (m *LeaseManager) Acquire(ctx context.Context, owner, action string, schedu
 		return nil, nil, apperr.Wrap(op, err)
 	}
 
-	// 1. Check existing lease
-	var activeLease *models.Lease
-	if m.leases != nil {
-		lease, err := m.leases.GetActiveLease(ctx, m.scopeID, action)
-		if err != nil {
-			return nil, nil, apperr.Wrap(op, err)
-		}
-		activeLease = lease
-	} else {
-		if action == "rollback" {
-			activeLease = curState.ActiveRollbackLease
-		} else {
-			activeLease = curState.ActiveLease
-		}
-	}
-
-	if activeLease != nil && !activeLease.IsExpired() {
-		if activeLease.Owner != owner {
-			return nil, nil, apperr.Newf(op, "lease owned by %s (action: %s)", activeLease.Owner, activeLease.Action)
-		}
-		// Same owner, allow re-acquisition/extension (idempotent)
-	}
-
 	// 2. Generation of new epoch
 	newEpoch := models.Epoch{
 		ID:             fmt.Sprintf("ep-%d", time.Now().UnixNano()),
@@ -100,13 +77,18 @@ func (m *LeaseManager) Acquire(ctx context.Context, owner, action string, schedu
 	}
 
 	if m.leases != nil {
-		if activeLease != nil && activeLease.Owner == owner && activeLease.ID != newLease.ID {
-			if err := m.leases.ReleaseLease(ctx, m.scopeID, activeLease.ID, activeLease.Owner); err != nil {
-				return nil, nil, apperr.Wrap(op, err)
-			}
-		}
 		if err := m.leases.AcquireLease(ctx, m.scopeID, *newLease); err != nil {
 			return nil, nil, apperr.Wrap(op, err)
+		}
+	} else {
+		var activeLease *models.Lease
+		if action == "rollback" {
+			activeLease = curState.ActiveRollbackLease
+		} else {
+			activeLease = curState.ActiveLease
+		}
+		if activeLease != nil && !activeLease.IsExpired() && activeLease.Owner != owner {
+			return nil, nil, apperr.Newf(op, "lease owned by %s (action: %s)", activeLease.Owner, activeLease.Action)
 		}
 	}
 

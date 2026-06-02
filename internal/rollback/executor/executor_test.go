@@ -215,14 +215,18 @@ func TestRollbackExecutorShortCircuitsAlreadyCompletedCheckpoint(t *testing.T) {
 		execution.NewOwnershipValidator(resources.NewRegistry()),
 	)
 	store := newMemoryCheckpointStore()
-	store.SaveRollbackCheckpoint(context.Background(), rollbackmodels.RollbackBatch{
+	done := rollbackmodels.RollbackBatch{
 		ID:                 "rb-done",
 		Status:             rollbackmodels.StateCompleted,
 		LastCompletedOpIdx: 1,
 		Operations: []rollbackmodels.CompensationOperation{
-			{OperationID: "op-1", ResourceType: "ip_access_rules"},
+			{OperationID: "op-1", Type: "delete", ResourceType: "ip_access_rules", StableIdentityKey: "cf:ip_access_rules:1"},
 		},
-	})
+	}
+	ensureRollbackPlanIdentity(&done)
+	if err := store.SaveRollbackCheckpoint(context.Background(), done); err != nil {
+		t.Fatalf("seed checkpoint: %v", err)
+	}
 	exec.SetCheckpointStore(store)
 
 	err := exec.ExecuteRollback(context.Background(), rollbackmodels.RollbackBatch{
@@ -236,6 +240,102 @@ func TestRollbackExecutorShortCircuitsAlreadyCompletedCheckpoint(t *testing.T) {
 	}
 	if mutator.calls != 0 {
 		t.Fatalf("expected no mutator call for completed checkpoint, got %d", mutator.calls)
+	}
+}
+
+func TestRollbackExecutorRejectsCheckpointPlanMismatch(t *testing.T) {
+	tests := []struct {
+		name    string
+		current rollbackmodels.RollbackBatch
+		persist rollbackmodels.RollbackBatch
+	}{
+		{
+			name: "reordered operations",
+			current: rollbackmodels.RollbackBatch{
+				ID: "rb-mismatch",
+				Operations: []rollbackmodels.CompensationOperation{
+					{OperationID: "op-2", Type: "delete", ResourceType: "ip_access_rules", StableIdentityKey: "cf:ip_access_rules:2"},
+					{OperationID: "op-1", Type: "delete", ResourceType: "ip_access_rules", StableIdentityKey: "cf:ip_access_rules:1"},
+				},
+			},
+			persist: rollbackmodels.RollbackBatch{
+				ID: "rb-mismatch",
+				Operations: []rollbackmodels.CompensationOperation{
+					{OperationID: "op-1", Type: "delete", ResourceType: "ip_access_rules", StableIdentityKey: "cf:ip_access_rules:1"},
+					{OperationID: "op-2", Type: "delete", ResourceType: "ip_access_rules", StableIdentityKey: "cf:ip_access_rules:2"},
+				},
+			},
+		},
+		{
+			name: "changed payload",
+			current: rollbackmodels.RollbackBatch{
+				ID: "rb-mismatch-payload",
+				Operations: []rollbackmodels.CompensationOperation{
+					{OperationID: "op-1", Type: "delete", ResourceType: "ip_access_rules", StableIdentityKey: "cf:ip_access_rules:1", Payload: map[string]any{"cidr": "10.0.0.0/8"}},
+				},
+			},
+			persist: rollbackmodels.RollbackBatch{
+				ID: "rb-mismatch-payload",
+				Operations: []rollbackmodels.CompensationOperation{
+					{OperationID: "op-1", Type: "delete", ResourceType: "ip_access_rules", StableIdentityKey: "cf:ip_access_rules:1", Payload: map[string]any{"cidr": "192.0.2.0/24"}},
+				},
+			},
+		},
+		{
+			name: "missing operation",
+			current: rollbackmodels.RollbackBatch{
+				ID: "rb-mismatch-missing",
+				Operations: []rollbackmodels.CompensationOperation{
+					{OperationID: "op-1", Type: "delete", ResourceType: "ip_access_rules", StableIdentityKey: "cf:ip_access_rules:1"},
+				},
+			},
+			persist: rollbackmodels.RollbackBatch{
+				ID: "rb-mismatch-missing",
+				Operations: []rollbackmodels.CompensationOperation{
+					{OperationID: "op-1", Type: "delete", ResourceType: "ip_access_rules", StableIdentityKey: "cf:ip_access_rules:1"},
+					{OperationID: "op-2", Type: "delete", ResourceType: "ip_access_rules", StableIdentityKey: "cf:ip_access_rules:2"},
+				},
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			journal := &memoryRollbackJournal{}
+			mutator := &stepMutator{}
+			exec := New(
+				map[string]execution.ProviderMutator{"ip_access_rules": mutator},
+				journal,
+				breaker.New(5, time.Minute, time.Second),
+				execution.NewDriftValidator(),
+				execution.NewOwnershipValidator(resources.NewRegistry()),
+			)
+			store := newMemoryCheckpointStore()
+			ensureRollbackPlanIdentity(&tc.persist)
+			if err := store.SaveRollbackCheckpoint(context.Background(), tc.persist); err != nil {
+				t.Fatalf("seed checkpoint: %v", err)
+			}
+			exec.SetCheckpointStore(store)
+
+			err := exec.ExecuteRollback(context.Background(), tc.current)
+			if err == nil {
+				t.Fatal("expected plan mismatch error")
+			}
+			if mutator.calls != 0 {
+				t.Fatalf("expected no mutator call on plan mismatch, got %d", mutator.calls)
+			}
+			events, _ := journal.List()
+			found := false
+			for _, ev := range events {
+				if ev.Status == "rollback_plan_mismatch" {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Fatalf("expected rollback plan mismatch audit event, got %+v", events)
+			}
+		})
 	}
 }
 

@@ -110,3 +110,7 @@ type CheckpointStore interface {
 	ListCheckpoints(ctx context.Context, scopeID string, name string, limit int) ([]Checkpoint, error)
 	DeleteCheckpoint(ctx context.Context, scopeID string, name string, sequence uint64) error
 }
+
+type RawArchiveCompactor interface {
+	CompactRawArchive(ctx context.Context, scopeID string, checkpointName string, throughSequence uint64) error
+}

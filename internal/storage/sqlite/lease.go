@@ -40,11 +40,55 @@ func (r *LeaseRepository) AcquireLease(ctx context.Context, scopeID string, l mo
 	if err := r.db.ensureWritable(op); err != nil {
 		return err
 	}
-	_, err := r.db.Conn().ExecContext(ctx, `
+	conn := r.db.Conn()
+	if _, err := conn.ExecContext(ctx, `BEGIN IMMEDIATE TRANSACTION`); err != nil {
+		return apperr.Wrap(op, err)
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_, _ = conn.ExecContext(ctx, `ROLLBACK`)
+		}
+	}()
+
+	now := time.Now().UTC()
+	var current models.Lease
+	err := conn.QueryRowContext(ctx, `
+		SELECT lease_id, owner, action, epoch_id, fencing_token, expires_at, created_at
+		FROM leases
+		WHERE scope_id = ? AND action = ? AND expires_at > ?
+		ORDER BY expires_at DESC, created_at DESC
+		LIMIT 1
+	`, scopeID, l.Action, now).Scan(&current.ID, &current.Owner, &current.Action, &current.EpochID, &current.FencingToken, &current.ExpiresAt, &current.CreatedAt)
+	switch {
+	case err == sql.ErrNoRows:
+	case err != nil:
+		return apperr.Wrap(op, err)
+	default:
+		if current.Owner != l.Owner {
+			return apperr.Newf(op, "lease held by %s for %s/%s", current.Owner, scopeID, l.Action)
+		}
+	}
+	if _, err := conn.ExecContext(ctx, `
+		DELETE FROM leases
+		WHERE scope_id = ? AND action = ?
+	`, scopeID, l.Action); err != nil {
+		return apperr.Wrap(op, err)
+	}
+	if _, err := conn.ExecContext(ctx, `
 		INSERT INTO leases (scope_id, lease_id, owner, action, epoch_id, fencing_token, expires_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?)
-	`, scopeID, l.ID, l.Owner, l.Action, l.EpochID, l.FencingToken, l.ExpiresAt)
-	return apperr.Wrap(op, err)
+	`, scopeID, l.ID, l.Owner, l.Action, l.EpochID, l.FencingToken, l.ExpiresAt.UTC()); err != nil {
+		if isSQLiteBusy(err) {
+			return apperr.Wrap(op, err)
+		}
+		return apperr.Wrap(op, err)
+	}
+	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
+		return apperr.Wrap(op, err)
+	}
+	committed = true
+	return nil
 }
 
 func (r *LeaseRepository) RenewLease(ctx context.Context, scopeID string, leaseID string, owner string, epochID string, fencingToken int64, expiresAt time.Time) error {

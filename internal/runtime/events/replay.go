@@ -1,12 +1,18 @@
 package events
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"time"
 
 	"github.com/jm/security-automation-go/internal/apperr"
 )
+
+var ErrInvalidCheckpoint = errors.New("runtime checkpoint invalid")
 
 // StateReplayer can be implemented by components that can reconstruct their state from events.
 type StateReplayer interface {
@@ -19,9 +25,10 @@ type CheckpointReplayer interface {
 }
 
 type ReplayOptions struct {
-	CheckpointName string
-	UntilSequence  uint64
-	UntilTime      time.Time
+	CheckpointName                      string
+	AllowGenesisReplayWithoutCheckpoint bool
+	UntilSequence                       uint64
+	UntilTime                           time.Time
 }
 
 type ReplayResult struct {
@@ -42,18 +49,27 @@ func ReplayWithOptions(ctx context.Context, store EventStore, scopeID string, re
 
 	if opts.CheckpointName != "" {
 		if cps, ok := store.(CheckpointStore); ok {
-			checkpoint, err := cps.LatestCheckpoint(ctx, scopeID, opts.CheckpointName)
+			checkpoint, err := loadValidCheckpoint(ctx, cps, scopeID, opts.CheckpointName)
 			switch {
 			case err == nil:
-				if cr, ok := replayer.(CheckpointReplayer); ok {
-					if err := cr.RestoreCheckpoint(ctx, checkpoint); err != nil {
-						return res, err
-					}
-					seq = checkpoint.Sequence
-					res.StartedAfterSequence = seq
-					res.UsedCheckpoint = true
+				cr, ok := replayer.(CheckpointReplayer)
+				if !ok {
+					return res, apperr.New("events.Replay", "checkpoint replay requested but replayer cannot restore checkpoints")
 				}
-			case err == ErrCheckpointNotFound:
+				if err := cr.RestoreCheckpoint(ctx, checkpoint); err != nil {
+					return res, err
+				}
+				seq = checkpoint.Sequence
+				res.StartedAfterSequence = seq
+				res.UsedCheckpoint = true
+			case errors.Is(err, ErrCheckpointNotFound):
+				if !opts.AllowGenesisReplayWithoutCheckpoint {
+					return res, err
+				}
+			case errors.Is(err, ErrInvalidCheckpoint):
+				if !opts.AllowGenesisReplayWithoutCheckpoint {
+					return res, err
+				}
 			default:
 				return res, err
 			}
@@ -105,6 +121,100 @@ func ReplayWithOptions(ctx context.Context, store EventStore, scopeID string, re
 	}
 	res.FinalSequence = seq
 	return res, nil
+}
+
+func loadValidCheckpoint(ctx context.Context, store CheckpointStore, scopeID string, name string) (Checkpoint, error) {
+	var sawCheckpoint bool
+	var invalidFound bool
+
+	checkpoint, err := store.LatestCheckpoint(ctx, scopeID, name)
+	if err == nil {
+		sawCheckpoint = true
+		if err := validateReplayCheckpoint(scopeID, name, checkpoint); err == nil {
+			return checkpoint, nil
+		} else {
+			invalidFound = true
+		}
+	}
+
+	if listStore, ok := store.(interface {
+		ListCheckpoints(ctx context.Context, scopeID string, name string, limit int) ([]Checkpoint, error)
+	}); ok {
+		checkpoints, listErr := listStore.ListCheckpoints(ctx, scopeID, name, 0)
+		if listErr != nil {
+			return Checkpoint{}, listErr
+		}
+		for _, cp := range checkpoints {
+			sawCheckpoint = true
+			if err := validateReplayCheckpoint(scopeID, name, cp); err == nil {
+				return cp, nil
+			} else {
+				invalidFound = true
+			}
+		}
+	}
+
+	if sawCheckpoint && invalidFound {
+		return Checkpoint{}, apperr.Wrap("events.Replay", ErrInvalidCheckpoint)
+	}
+	return Checkpoint{}, ErrCheckpointNotFound
+}
+
+func validateReplayCheckpoint(expectedScopeID, expectedName string, checkpoint Checkpoint) error {
+	if checkpoint.ScopeID != expectedScopeID {
+		return apperr.Newf("events.Replay", "checkpoint scope mismatch: expected %s got %s", expectedScopeID, checkpoint.ScopeID)
+	}
+	if checkpoint.Name != expectedName {
+		return apperr.Newf("events.Replay", "checkpoint name mismatch: expected %s got %s", expectedName, checkpoint.Name)
+	}
+	if checkpoint.Sequence == 0 {
+		return apperr.New("events.Replay", "checkpoint sequence must be positive")
+	}
+	if checkpoint.EventID <= 0 {
+		return apperr.New("events.Replay", "checkpoint event_id must be positive")
+	}
+	if checkpoint.CreatedAt.IsZero() {
+		return apperr.New("events.Replay", "checkpoint created_at must be set")
+	}
+	if len(checkpoint.State) == 0 || !json.Valid(checkpoint.State) {
+		return apperr.New("events.Replay", "checkpoint state must be valid json")
+	}
+	var compacted bytes.Buffer
+	if err := json.Compact(&compacted, checkpoint.State); err != nil {
+		return apperr.Wrap("events.Replay", err)
+	}
+	if compacted.String() != string(checkpoint.State) {
+		return apperr.New("events.Replay", "checkpoint state must be canonical json")
+	}
+	expected := checkpointReplayChecksum(checkpoint.Name, checkpoint.ScopeID, checkpoint.Sequence, checkpoint.EventID, checkpoint.State, checkpoint.Metadata, checkpoint.SchemaVersion, checkpoint.CreatedAt)
+	if checkpoint.Checksum != expected {
+		return apperr.Newf("events.Replay", "checkpoint checksum mismatch for %s/%s at sequence %d", checkpoint.ScopeID, checkpoint.Name, checkpoint.Sequence)
+	}
+	return nil
+}
+
+func checkpointReplayChecksum(name string, scopeID string, sequence uint64, eventID int64, state json.RawMessage, metadata map[string]any, schemaVersion int, createdAt time.Time) string {
+	payload, _ := json.Marshal(struct {
+		Name          string          `json:"name"`
+		ScopeID       string          `json:"scope_id"`
+		Sequence      uint64          `json:"sequence"`
+		EventID       int64           `json:"event_id"`
+		State         json.RawMessage `json:"state"`
+		Metadata      map[string]any  `json:"metadata,omitempty"`
+		SchemaVersion int             `json:"schema_version"`
+		CreatedAt     string          `json:"created_at"`
+	}{
+		Name:          name,
+		ScopeID:       scopeID,
+		Sequence:      sequence,
+		EventID:       eventID,
+		State:         state,
+		Metadata:      metadata,
+		SchemaVersion: schemaVersion,
+		CreatedAt:     createdAt.UTC().Format(time.RFC3339Nano),
+	})
+	sum := sha256.Sum256(payload)
+	return hex.EncodeToString(sum[:])
 }
 
 // TypedPayload returns the unmarshaled payload of the event.

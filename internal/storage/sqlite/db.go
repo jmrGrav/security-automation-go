@@ -9,15 +9,17 @@ import (
 	"sync/atomic"
 
 	"github.com/jm/security-automation-go/internal/apperr"
+	"github.com/jm/security-automation-go/internal/observability/metrics"
 	"github.com/jm/security-automation-go/internal/storage/manager"
 	_ "modernc.org/sqlite"
 )
 
 // DB manages a scoped SQLite connection with migrations.
 type DB struct {
-	conn     *sql.DB
-	path     string
-	readOnly atomic.Bool
+	conn           *sql.DB
+	path           string
+	readOnly       atomic.Bool
+	integrityCheck func(context.Context) error
 }
 
 func New(dir string) (*DB, error) {
@@ -391,6 +393,9 @@ func (s *DB) Path() string {
 
 func (s *DB) SetReadOnlyDegradedMode(enabled bool) {
 	s.readOnly.Store(enabled)
+	if enabled {
+		metrics.SQLiteDegradedModeTotal.Inc()
+	}
 }
 
 func (s *DB) ReadOnlyDegradedMode() bool {
@@ -410,6 +415,9 @@ func (s *DB) Maintenance(ctx context.Context) error {
 }
 
 func (s *DB) IntegrityCheck(ctx context.Context) error {
+	if s.integrityCheck != nil {
+		return s.integrityCheck(ctx)
+	}
 	m := manager.NewMigrator(s.conn)
 	return m.IntegrityCheck(ctx)
 }
@@ -443,11 +451,13 @@ func (s *DB) QuarantineCorruption(ctx context.Context, quarantineDir string) (st
 		return "", apperr.Wrap(op, err)
 	}
 	target := filepath.Join(quarantineDir, filepath.Base(s.path))
-	if err := copyFile(s.path, target); err != nil {
+	if err := copyFileAtomic(s.path, target); err != nil {
 		return "", apperr.Wrap(op, err)
 	}
-	_ = copyFile(s.path+"-wal", target+"-wal")
-	_ = copyFile(s.path+"-shm", target+"-shm")
+	_ = copyFileAtomic(s.path+"-wal", target+"-wal")
+	_ = copyFileAtomic(s.path+"-shm", target+"-shm")
+	s.SetReadOnlyDegradedMode(true)
+	metrics.SQLiteQuarantineCreatedTotal.Inc()
 	return target, nil
 }
 
@@ -557,4 +567,20 @@ func copyFile(src string, dst string) error {
 	defer destination.Close()
 	_, err = destination.ReadFrom(source)
 	return err
+}
+
+func copyFileAtomic(src string, dst string) error {
+	if _, err := os.Stat(src); err != nil {
+		return err
+	}
+	tmp := dst + ".tmp"
+	if err := copyFile(src, tmp); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	if err := os.Rename(tmp, dst); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	return nil
 }

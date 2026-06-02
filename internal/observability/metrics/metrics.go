@@ -50,6 +50,18 @@ var (
 		Name: "abuseipdb_reports_sent_total",
 		Help: "Total number of AbuseIPDB reports emitted after all reporting guards.",
 	})
+	AbuseIPDBOutboxPendingTotal = promauto.With(Registry).NewCounter(prometheus.CounterOpts{
+		Name: "abuseipdb_outbox_pending_total",
+		Help: "Total number of AbuseIPDB outbox items observed in pending state.",
+	})
+	AbuseIPDBOutboxFailedTotal = promauto.With(Registry).NewCounter(prometheus.CounterOpts{
+		Name: "abuseipdb_outbox_failed_total",
+		Help: "Total number of AbuseIPDB outbox items observed in failed state.",
+	})
+	AbuseIPDBOutboxReportedTotal = promauto.With(Registry).NewCounter(prometheus.CounterOpts{
+		Name: "abuseipdb_outbox_reported_total",
+		Help: "Total number of AbuseIPDB outbox items observed in reported state.",
+	})
 	AbuseIPDBReportsSuppressedRecentTotal = promauto.With(Registry).NewCounter(prometheus.CounterOpts{
 		Name: "abuseipdb_reports_suppressed_recent_total",
 		Help: "Total number of AbuseIPDB reports suppressed because the IP was already reported within 24 hours.",
@@ -58,10 +70,91 @@ var (
 		Name: "abuseipdb_report_dedup_store_errors_total",
 		Help: "Total number of durable dedup store errors while evaluating or marking AbuseIPDB reports.",
 	})
+	EvidenceWriteFailuresTotal = promauto.With(Registry).NewCounter(prometheus.CounterOpts{
+		Name: "evidence_write_failures_total",
+		Help: "Total number of failures while writing forensic evidence.",
+	})
+	TelemetryPublishFailuresTotal = promauto.With(Registry).NewCounter(prometheus.CounterOpts{
+		Name: "telemetry_publish_failures_total",
+		Help: "Total number of non-blocking telemetry publish failures.",
+	})
 	AbuseIPDBRateLimitTotal = promauto.With(Registry).NewCounter(prometheus.CounterOpts{
 		Name: "abuseipdb_rate_limit_total",
 		Help: "Total number of AbuseIPDB 429 rate limit errors.",
 	})
+	ProviderQuotaRemainingPercent = promauto.With(Registry).NewGaugeVec(prometheus.GaugeOpts{
+		Name: "provider_quota_remaining_percent",
+		Help: "Remaining quota percentage observed per provider.",
+	}, []string{"provider"})
+	ProviderQuotaState = promauto.With(Registry).NewGaugeVec(prometheus.GaugeOpts{
+		Name: "provider_quota_state",
+		Help: "Observed quota state per provider encoded as 0=NORMAL, 1=WARNING, 2=THROTTLED, 3=EXHAUSTED, 4=UNKNOWN.",
+	}, []string{"provider"})
+	ProviderQuotaRefreshFailuresTotal = promauto.With(Registry).NewCounterVec(prometheus.CounterOpts{
+		Name: "provider_quota_refresh_failures_total",
+		Help: "Total number of failed quota refresh attempts per provider.",
+	}, []string{"provider"})
+	ProviderAutoThrottleTotal = promauto.With(Registry).NewCounterVec(prometheus.CounterOpts{
+		Name: "provider_auto_throttle_total",
+		Help: "Total number of times a provider was automatically throttled due to low quota.",
+	}, []string{"provider"})
+	ProviderAutoDisableTotal = promauto.With(Registry).NewCounterVec(prometheus.CounterOpts{
+		Name: "provider_auto_disable_total",
+		Help: "Total number of times a provider was automatically disabled due to exhausted quota.",
+	}, []string{"provider"})
+	ProviderAutoReenableTotal = promauto.With(Registry).NewCounterVec(prometheus.CounterOpts{
+		Name: "provider_auto_reenable_total",
+		Help: "Total number of times a provider was automatically re-enabled after quota recovery.",
+	}, []string{"provider"})
+	AIExplainRequestsTotal = promauto.With(Registry).NewCounter(prometheus.CounterOpts{
+		Name: "ai_explain_requests_total",
+		Help: "Total number of AI explain requests received by the gateway.",
+	})
+	AIExplainFailuresTotal = promauto.With(Registry).NewCounter(prometheus.CounterOpts{
+		Name: "ai_explain_failures_total",
+		Help: "Total number of failed AI explain requests.",
+	})
+	AIExplainCachePrunedTotal = promauto.With(Registry).NewCounter(prometheus.CounterOpts{
+		Name: "ai_explain_cache_pruned_total",
+		Help: "Total number of expired or evicted AI explain cache entries removed.",
+	})
+	AIExplainCacheEntries = promauto.With(Registry).NewGauge(prometheus.GaugeOpts{
+		Name: "ai_explain_cache_entries",
+		Help: "Current number of AI explain cache entries in memory.",
+	})
+	AIProviderSelectedTotal = promauto.With(Registry).NewCounterVec(prometheus.CounterOpts{
+		Name: "ai_provider_selected_total",
+		Help: "Total number of selected AI providers.",
+	}, []string{"provider"})
+	AIProviderSkippedTotal = promauto.With(Registry).NewCounterVec(prometheus.CounterOpts{
+		Name: "ai_provider_skipped_total",
+		Help: "Total number of AI providers skipped during routing or fallback.",
+	}, []string{"provider"})
+	AIProviderRateLimitedTotal = promauto.With(Registry).NewCounterVec(prometheus.CounterOpts{
+		Name: "ai_provider_rate_limited_total",
+		Help: "Total number of AI provider calls rate limited or put into cooldown.",
+	}, []string{"provider"})
+	AIProviderTokensUsedTotal = promauto.With(Registry).NewCounterVec(prometheus.CounterOpts{
+		Name: "ai_provider_tokens_used_total",
+		Help: "Total number of AI tokens observed per provider.",
+	}, []string{"provider"})
+	AIProviderQuotaRemainingPercent = promauto.With(Registry).NewGaugeVec(prometheus.GaugeOpts{
+		Name: "ai_provider_quota_remaining_percent",
+		Help: "Observed remaining quota percentage per AI provider.",
+	}, []string{"provider"})
+	AIProviderQuotaState = promauto.With(Registry).NewGaugeVec(prometheus.GaugeOpts{
+		Name: "ai_provider_quota_state",
+		Help: "Observed quota state per AI provider encoded as 0=NORMAL, 1=WARNING, 2=THROTTLED, 3=EXHAUSTED, 4=UNKNOWN, 5=COOLDOWN, 6=DISABLED.",
+	}, []string{"provider"})
+	AIExplainCacheHitsTotal = promauto.With(Registry).NewCounter(prometheus.CounterOpts{
+		Name: "ai_explain_cache_hits_total",
+		Help: "Total number of cached AI explain responses.",
+	})
+	AIExplainLatencySeconds = promauto.With(Registry).NewHistogramVec(prometheus.HistogramOpts{
+		Name:    "ai_explain_latency_seconds",
+		Help:    "Latency of AI explain calls by provider.",
+		Buckets: prometheus.DefBuckets,
+	}, []string{"provider"})
 	AbuseIPDBPreBanChecksTotal = promauto.With(Registry).NewCounter(prometheus.CounterOpts{
 		Name: "abuseipdb_preban_checks_total",
 		Help: "Total number of AbuseIPDB pre-ban check evaluations.",
@@ -97,6 +190,10 @@ var (
 	CloudflareEventsSuppressedLowConfidenceTotal = promauto.With(Registry).NewCounter(prometheus.CounterOpts{
 		Name: "cloudflare_events_suppressed_low_confidence_total",
 		Help: "Total number of Cloudflare replay events suppressed due to low confidence.",
+	})
+	CloudflareWAFMalformedEventsTotal = promauto.With(Registry).NewCounter(prometheus.CounterOpts{
+		Name: "cloudflare_waf_malformed_events_total",
+		Help: "Total number of malformed Cloudflare WAF events observed during replay.",
 	})
 	AbuseIPDBCategoryMappingTotal = promauto.With(Registry).NewCounterVec(prometheus.CounterOpts{
 		Name: "abuseipdb_category_mapping_total",
@@ -153,6 +250,30 @@ var (
 	OrphanResourceTotal = promauto.With(Registry).NewCounter(prometheus.CounterOpts{
 		Name: "orphan_resource_total",
 		Help: "Total number of resources detected without a valid parent reference.",
+	})
+	RuntimeRecoveryDivergencesTotal = promauto.With(Registry).NewCounter(prometheus.CounterOpts{
+		Name: "runtime_recovery_divergences_total",
+		Help: "Total number of recovery runs that detected runtime state divergence.",
+	})
+	RuntimeOwnershipInvariantViolationsTotal = promauto.With(Registry).NewCounter(prometheus.CounterOpts{
+		Name: "runtime_ownership_invariant_violations_total",
+		Help: "Total number of recovery runs that detected ownership invariant violations.",
+	})
+	CloudflareReplayCursorLoadFailuresTotal = promauto.With(Registry).NewCounter(prometheus.CounterOpts{
+		Name: "cloudflare_replay_cursor_load_failures_total",
+		Help: "Total number of failures while loading the Cloudflare replay cursor.",
+	})
+	CloudflareReplayCursorSaveFailuresTotal = promauto.With(Registry).NewCounter(prometheus.CounterOpts{
+		Name: "cloudflare_replay_cursor_save_failures_total",
+		Help: "Total number of failures while saving the Cloudflare replay cursor.",
+	})
+	SQLiteDegradedModeTotal = promauto.With(Registry).NewCounter(prometheus.CounterOpts{
+		Name: "sqlite_degraded_mode_total",
+		Help: "Total number of times SQLite was placed into read-only degraded mode.",
+	})
+	SQLiteQuarantineCreatedTotal = promauto.With(Registry).NewCounter(prometheus.CounterOpts{
+		Name: "sqlite_quarantine_created_total",
+		Help: "Total number of SQLite quarantine artifacts created after corruption detection.",
 	})
 
 	// Histograms
@@ -264,5 +385,73 @@ var (
 	SchedulerCooldownActive = promauto.With(Registry).NewGauge(prometheus.GaugeOpts{
 		Name: "scheduler_cooldown_active",
 		Help: "Whether a cooldown is currently active.",
+	})
+	SchedulerQueueDepth = promauto.With(Registry).NewGauge(prometheus.GaugeOpts{
+		Name: "scheduler_queue_depth",
+		Help: "Current number of queued scheduler work items.",
+	})
+	SchedulerQueueDroppedTotal = promauto.With(Registry).NewCounter(prometheus.CounterOpts{
+		Name: "scheduler_queue_dropped_total",
+		Help: "Total number of scheduler work items dropped by queue backpressure.",
+	})
+	SchedulerQueueCoalescedTotal = promauto.With(Registry).NewCounter(prometheus.CounterOpts{
+		Name: "scheduler_queue_coalesced_total",
+		Help: "Total number of scheduler work items coalesced into an existing queue entry.",
+	})
+	UISessionEntries = promauto.With(Registry).NewGauge(prometheus.GaugeOpts{
+		Name: "ui_session_entries",
+		Help: "Current number of UI sessions tracked in memory.",
+	})
+	UISessionsPrunedTotal = promauto.With(Registry).NewCounter(prometheus.CounterOpts{
+		Name: "ui_sessions_pruned_total",
+		Help: "Total number of UI sessions pruned from memory.",
+	})
+	ReportingEvidencePrunedTotal = promauto.With(Registry).NewCounter(prometheus.CounterOpts{
+		Name: "reporting_evidence_pruned_total",
+		Help: "Total number of reporting evidence rows pruned by retention cleanup.",
+	})
+	ReportOutboxPrunedTotal = promauto.With(Registry).NewCounter(prometheus.CounterOpts{
+		Name: "report_outbox_pruned_total",
+		Help: "Total number of report outbox rows pruned by retention cleanup.",
+	})
+	ReportingDecisionGateEntries = promauto.With(Registry).NewGauge(prometheus.GaugeOpts{
+		Name: "reporting_decision_gate_entries",
+		Help: "Current number of IP lock entries tracked by the reporting decision gate.",
+	})
+	ReportingDecisionGatePrunedTotal = promauto.With(Registry).NewCounter(prometheus.CounterOpts{
+		Name: "reporting_decision_gate_pruned_total",
+		Help: "Total number of decision gate IP lock entries pruned.",
+	})
+	EventArchiveHotEntries = promauto.With(Registry).NewGauge(prometheus.GaugeOpts{
+		Name: "event_archive_hot_entries",
+		Help: "Current number of raw archive events kept hot in the active table after checkpoint-aware compaction.",
+	})
+	EventArchiveWarmEntries = promauto.With(Registry).NewGauge(prometheus.GaugeOpts{
+		Name: "event_archive_warm_entries",
+		Help: "Current number of raw archive events eligible for checkpoint-aware purge.",
+	})
+	EventArchiveColdEntries = promauto.With(Registry).NewGauge(prometheus.GaugeOpts{
+		Name: "event_archive_cold_entries",
+		Help: "Current number of raw archive rows removed by checkpoint-aware compaction in the latest run.",
+	})
+	EventArchiveReplaySafeEntries = promauto.With(Registry).NewGauge(prometheus.GaugeOpts{
+		Name: "event_archive_replay_safe_entries",
+		Help: "Current number of raw archive entries still safe for deterministic replay after compaction.",
+	})
+	EventArchivePurgeCandidates = promauto.With(Registry).NewGauge(prometheus.GaugeOpts{
+		Name: "event_archive_purge_candidates",
+		Help: "Current number of raw archive rows eligible for purge at the active checkpoint boundary.",
+	})
+	EventArchiveCompactionsTotal = promauto.With(Registry).NewCounter(prometheus.CounterOpts{
+		Name: "event_archive_compactions_total",
+		Help: "Total number of checkpoint-aware raw archive compactions performed.",
+	})
+	EventArchiveRotationsTotal = promauto.With(Registry).NewCounter(prometheus.CounterOpts{
+		Name: "event_archive_rotations_total",
+		Help: "Total number of raw archive rotations performed while compacting checkpoint-covered history.",
+	})
+	EventArchiveStorageBytes = promauto.With(Registry).NewGauge(prometheus.GaugeOpts{
+		Name: "event_archive_storage_bytes",
+		Help: "Current SQLite storage footprint for the raw event archive and sidecar WAL/SHM files.",
 	})
 )

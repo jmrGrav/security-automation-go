@@ -75,13 +75,21 @@ func (s *Scheduler) Start(ctx context.Context, zoneID string) error {
 			return nil
 		case <-ticker.C:
 			metrics.SchedulerRunsTotal.Inc()
-			// Enqueue a simple tick for now (Phase 4 integration)
-			// In production, we'd list all active scopes and enqueue them
-			s.queue.Push(models.WorkItem{
-				Scope:    s.deriveCurrentScope(zoneID), // Helper
-				Priority: models.PriorityNormal,
-				Type:     "reconcile",
-			})
+			scopes, err := s.store.ListScopes()
+			if err != nil {
+				s.logger.Warn("failed to list scheduler scopes", "error", err)
+				scopes = []string{zoneID}
+			}
+			if len(scopes) == 0 {
+				scopes = []string{zoneID}
+			}
+			for _, scopedID := range scopes {
+				s.queue.Push(models.WorkItem{
+					Scope:    s.scopeForID(zoneID, scopedID),
+					Priority: models.PriorityNormal,
+					Type:     "reconcile",
+				})
+			}
 		}
 	}
 }
@@ -164,10 +172,17 @@ func (s *Scheduler) executeRun(ctx models.RuntimeContext) error {
 	return nil
 }
 
-func (s *Scheduler) deriveCurrentScope(zoneID string) scope.RuntimeScope {
-	// Placeholder for tenant derivation
+func (s *Scheduler) scopeForID(zoneID string, scopeID string) scope.RuntimeScope {
+	if scopeID == "" {
+		return scope.RuntimeScope{
+			Tenant:      "default",
+			ZoneID:      zoneID,
+			Environment: "prod",
+		}
+	}
 	return scope.RuntimeScope{
 		Tenant:      "default",
+		AccountID:   scopeID,
 		ZoneID:      zoneID,
 		Environment: "prod",
 	}

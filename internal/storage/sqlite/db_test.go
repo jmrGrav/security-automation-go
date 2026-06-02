@@ -5,6 +5,9 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
+
+	"github.com/jm/security-automation-go/internal/runtime/events"
 )
 
 func TestDBHardeningHelpers(t *testing.T) {
@@ -13,10 +16,12 @@ func TestDBHardeningHelpers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new db: %v", err)
 	}
-	defer db.Close()
 
 	if err := db.VerifySchema(context.Background()); err != nil {
 		t.Fatalf("verify schema: %v", err)
+	}
+	if db.Path() == "" {
+		t.Fatal("expected database path")
 	}
 	if err := db.WALCheckpoint(context.Background(), "TRUNCATE"); err != nil {
 		t.Fatalf("wal checkpoint: %v", err)
@@ -44,5 +49,81 @@ func TestDBHardeningHelpers(t *testing.T) {
 	}
 	if err := db.VerifySchema(context.Background()); err != nil {
 		t.Fatalf("verify schema after reopen: %v", err)
+	}
+
+	backup1 := filepath.Join(backupDir, "b1.db")
+	backup2 := filepath.Join(backupDir, "b2.db")
+	if err := os.WriteFile(backup1, []byte("1"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(10 * time.Millisecond)
+	if err := os.WriteFile(backup2, []byte("2"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.RotateBackups(backupDir, 1); err != nil {
+		t.Fatalf("rotate backups: %v", err)
+	}
+	if _, err := os.Stat(backup2); err != nil {
+		t.Fatalf("expected newest backup to remain: %v", err)
+	}
+	if _, err := os.Stat(backup1); !os.IsNotExist(err) {
+		t.Fatalf("expected oldest backup removed, got err=%v", err)
+	}
+
+	quarantineDir := filepath.Join(tmpDir, "quarantine")
+	if path, err := db.QuarantineCorruption(context.Background(), quarantineDir); err != nil {
+		t.Fatalf("quarantine corruption on healthy db: %v", err)
+	} else if path != "" {
+		t.Fatalf("expected no quarantine path for healthy db, got %q", path)
+	}
+
+	if err := db.Close(); err != nil {
+		t.Fatalf("close db: %v", err)
+	}
+}
+
+func TestDBQuarantineCorruptionCopiesFilesOnIntegrityFailure(t *testing.T) {
+	tmpDir := t.TempDir()
+	db, err := New(tmpDir)
+	if err != nil {
+		t.Fatalf("new db: %v", err)
+	}
+	defer db.Close()
+
+	db.integrityCheck = func(context.Context) error {
+		return context.Canceled
+	}
+
+	quarantineDir := filepath.Join(tmpDir, "quarantine")
+	path, err := db.QuarantineCorruption(context.Background(), quarantineDir)
+	if err != nil {
+		t.Fatalf("quarantine corruption: %v", err)
+	}
+	if path == "" {
+		t.Fatal("expected quarantine path on integrity failure")
+	}
+	if !db.ReadOnlyDegradedMode() {
+		t.Fatal("expected degraded mode after corruption quarantine")
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("expected quarantine artifact: %v", err)
+	}
+	if _, err := os.Stat(path + "-wal"); err != nil && !os.IsNotExist(err) {
+		t.Fatalf("unexpected wal stat error: %v", err)
+	}
+	if _, err := os.Stat(path + "-shm"); err != nil && !os.IsNotExist(err) {
+		t.Fatalf("unexpected shm stat error: %v", err)
+	}
+	repo := NewEventRepository(db)
+	if err := repo.Append(context.Background(), &events.Event{
+		Timestamp:     time.Now().UTC(),
+		Category:      events.CategoryLifecycle,
+		Type:          "write.after.quarantine",
+		CorrelationID: "corr",
+		Actor:         "tester",
+		ScopeID:       "scope-a",
+		Payload:       []byte(`{"blocked":true}`),
+	}); err == nil {
+		t.Fatal("expected writes to fail closed in degraded mode")
 	}
 }

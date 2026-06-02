@@ -24,18 +24,49 @@ type Manager struct {
 	sequences SequenceSource
 	logger    *slog.Logger
 	retention int
+	archive   ArchiveCompactor
 }
 
-func NewManager(store events.CheckpointStore, sequences SequenceSource, logger *slog.Logger, retention int) *Manager {
+type Option func(*Manager)
+
+type ArchiveCompactor interface {
+	CompactRawArchive(ctx context.Context, scopeID string, checkpointName string, throughSequence uint64) (ArchiveCompactionStats, error)
+}
+
+type ArchiveCompactionStats struct {
+	SafeSequence      uint64
+	HotEntries        int64
+	WarmEntries       int64
+	ColdEntries       int64
+	ReplaySafeEntries int64
+	PurgeCandidates   int64
+	Compactions       int64
+	Rotations         int64
+	StorageBytes      int64
+}
+
+func WithArchiveCompactor(compactor ArchiveCompactor) Option {
+	return func(m *Manager) {
+		m.archive = compactor
+	}
+}
+
+func NewManager(store events.CheckpointStore, sequences SequenceSource, logger *slog.Logger, retention int, opts ...Option) *Manager {
 	if retention <= 0 {
 		retention = 10
 	}
-	return &Manager{
+	m := &Manager{
 		store:     store,
 		sequences: sequences,
 		logger:    logger,
 		retention: retention,
 	}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(m)
+		}
+	}
+	return m
 }
 
 func (m *Manager) SaveRuntimeState(ctx context.Context, scopeID string, trigger string, event events.Event, state models.RuntimeState) (events.Checkpoint, error) {
@@ -85,6 +116,9 @@ func (m *Manager) SaveNamedRuntimeState(ctx context.Context, name string, scopeI
 		return events.Checkpoint{}, apperr.Wrap(op, err)
 	}
 	if err := m.compact(ctx, scopeID, name); err != nil {
+		return events.Checkpoint{}, apperr.Wrap(op, err)
+	}
+	if _, err := m.compactArchive(ctx, scopeID, name); err != nil {
 		return events.Checkpoint{}, apperr.Wrap(op, err)
 	}
 
@@ -199,10 +233,52 @@ func (m *Manager) compact(ctx context.Context, scopeID string, name string) erro
 	if len(checkpoints) <= m.retention {
 		return nil
 	}
+
+	retained := checkpoints[:m.retention]
+	for _, checkpoint := range retained {
+		if err := ValidateCheckpoint(checkpoint); err != nil {
+			return err
+		}
+	}
+
 	for _, checkpoint := range checkpoints[m.retention:] {
 		if err := m.store.DeleteCheckpoint(ctx, scopeID, name, checkpoint.Sequence); err != nil {
 			return err
 		}
 	}
+
+	if compactor, ok := m.store.(events.RawArchiveCompactor); ok {
+		if err := compactor.CompactRawArchive(ctx, scopeID, name, retained[len(retained)-1].Sequence); err != nil {
+			return err
+		}
+	}
 	return nil
+}
+
+func (m *Manager) compactArchive(ctx context.Context, scopeID string, name string) (ArchiveCompactionStats, error) {
+	if m == nil || m.archive == nil {
+		return ArchiveCompactionStats{}, nil
+	}
+	safeSequence, ok, err := m.safeArchiveSequence(ctx, scopeID, name)
+	if err != nil {
+		return ArchiveCompactionStats{}, err
+	}
+	if !ok || safeSequence == 0 {
+		return ArchiveCompactionStats{}, nil
+	}
+	return m.archive.CompactRawArchive(ctx, scopeID, name, safeSequence)
+}
+
+func (m *Manager) safeArchiveSequence(ctx context.Context, scopeID string, name string) (uint64, bool, error) {
+	checkpoints, err := m.store.ListCheckpoints(ctx, scopeID, name, 0)
+	if err != nil {
+		return 0, false, err
+	}
+	for i := len(checkpoints) - 1; i >= 0; i-- {
+		checkpoint := checkpoints[i]
+		if err := ValidateCheckpoint(checkpoint); err == nil {
+			return checkpoint.Sequence, true, nil
+		}
+	}
+	return 0, false, nil
 }

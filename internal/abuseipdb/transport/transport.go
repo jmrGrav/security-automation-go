@@ -11,6 +11,7 @@ import (
 	"github.com/jm/security-automation-go/internal/abuseipdb/models"
 	"github.com/jm/security-automation-go/internal/apperr"
 	"github.com/jm/security-automation-go/internal/httpclient"
+	"github.com/jm/security-automation-go/internal/security/quota"
 )
 
 const (
@@ -53,6 +54,7 @@ func (t *Transport) Report(ctx context.Context, report models.ReportRequest) (*m
 		return nil, apperr.Wrap(op, err)
 	}
 	defer resp.Body.Close()
+	quota.DefaultRegistry().Record(quota.ParseAbuseIPDBHeaders(resp.Header))
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -96,6 +98,7 @@ func (t *Transport) Check(ctx context.Context, ip string) (*models.CheckResponse
 		return nil, apperr.Wrap(op, err)
 	}
 	defer resp.Body.Close()
+	quota.DefaultRegistry().Record(quota.ParseAbuseIPDBHeaders(resp.Header))
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
