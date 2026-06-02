@@ -1,45 +1,84 @@
 package lock
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 )
 
-func TestFileLock(t *testing.T) {
-	dir := t.TempDir()
-	lock1 := NewFileLock(dir)
-	lock2 := NewFileLock(dir)
+func TestAcquireLock_FirstInstance(t *testing.T) {
+	tmpDir := t.TempDir()
+	lockFile := filepath.Join(tmpDir, "app.pid")
 
-	// 1. Acquire lock 1
-	acquired, err := lock1.Acquire()
+	locker, err := NewFileLock(lockFile)
 	if err != nil {
-		t.Fatalf("failed to acquire lock 1: %v", err)
-	}
-	if !acquired {
-		t.Fatal("lock 1 should be acquired")
+		t.Fatalf("NewFileLock failed: %v", err)
 	}
 
-	// 2. Try to acquire lock 2 (should fail)
-	acquired, err = lock2.Acquire()
+	if err := locker.Acquire(); err != nil {
+		t.Fatalf("Acquire failed: %v", err)
+	}
+	defer locker.Release()
+
+	// Verify lock file exists
+	if _, err := os.Stat(lockFile); err != nil {
+		t.Errorf("lock file not created")
+	}
+}
+
+func TestAcquireLock_SecondInstanceFails(t *testing.T) {
+	tmpDir := t.TempDir()
+	lockFile := filepath.Join(tmpDir, "app.pid")
+
+	locker1, _ := NewFileLock(lockFile)
+	locker1.Acquire()
+	defer locker1.Release()
+
+	locker2, _ := NewFileLock(lockFile)
+	err := locker2.Acquire()
+	if err == nil {
+		t.Errorf("expected error for second instance, got nil")
+	}
+	if !IsPIDLocked(err) {
+		t.Errorf("error should be PIDLockedError")
+	}
+}
+
+func TestGetLockingPID(t *testing.T) {
+	tmpDir := t.TempDir()
+	lockFile := filepath.Join(tmpDir, "app.pid")
+
+	locker, _ := NewFileLock(lockFile)
+	locker.Acquire()
+	defer locker.Release()
+
+	locker2, _ := NewFileLock(lockFile)
+	err := locker2.Acquire()
+
 	if err != nil {
-		t.Fatalf("error acquiring lock 2: %v", err)
+		pidErr, ok := err.(PIDLockedError)
+		if !ok {
+			t.Errorf("error is not PIDLockedError")
+		}
+		if pidErr.PID <= 0 {
+			t.Errorf("invalid PID: %d", pidErr.PID)
+		}
 	}
-	if acquired {
-		t.Fatal("lock 2 should not be acquired while lock 1 is held")
-	}
+}
 
-	// 3. Release lock 1
-	if err := lock1.Release(); err != nil {
-		t.Fatalf("failed to release lock 1: %v", err)
-	}
+func TestReleaseLock(t *testing.T) {
+	tmpDir := t.TempDir()
+	lockFile := filepath.Join(tmpDir, "app.pid")
 
-	// 4. Try to acquire lock 2 (should succeed now)
-	acquired, err = lock2.Acquire()
+	locker1, _ := NewFileLock(lockFile)
+	locker1.Acquire()
+	locker1.Release()
+
+	// Second instance should now succeed
+	locker2, _ := NewFileLock(lockFile)
+	err := locker2.Acquire()
 	if err != nil {
-		t.Fatalf("failed to acquire lock 2 after release: %v", err)
+		t.Errorf("Acquire after release failed: %v", err)
 	}
-	if !acquired {
-		t.Fatal("lock 2 should be acquired after lock 1 release")
-	}
-
-	_ = lock2.Release()
+	locker2.Release()
 }
