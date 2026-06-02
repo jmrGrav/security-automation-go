@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-
-	"github.com/jm/security-automation-go/internal/ui"
 )
 
 // InitializeBootstrapPassword generates and persists the bootstrap password once.
@@ -37,7 +35,7 @@ func InitializeBootstrapPassword(secretFile string) (string, error) {
 		return "", fmt.Errorf("hash password: %w", err)
 	}
 
-	state := ui.BootstrapState{
+	state := BootstrapState{
 		IsBootstrap:  true,
 		Password:     password,
 		PasswordHash: hash,
@@ -57,15 +55,15 @@ func InitializeBootstrapPassword(secretFile string) (string, error) {
 }
 
 // GetBootstrapState loads the bootstrap state from the secret file.
-func GetBootstrapState(secretFile string) (ui.BootstrapState, error) {
+func GetBootstrapState(secretFile string) (BootstrapState, error) {
 	data, err := os.ReadFile(secretFile)
 	if err != nil {
-		return ui.BootstrapState{}, fmt.Errorf("read secret file: %w", err)
+		return BootstrapState{}, fmt.Errorf("read secret file: %w", err)
 	}
 
-	var state ui.BootstrapState
+	var state BootstrapState
 	if err := json.Unmarshal(data, &state); err != nil {
-		return ui.BootstrapState{}, fmt.Errorf("unmarshal state: %w", err)
+		return BootstrapState{}, fmt.Errorf("unmarshal state: %w", err)
 	}
 
 	return state, nil

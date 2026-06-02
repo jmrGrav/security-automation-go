@@ -145,9 +145,3 @@ type DashboardView struct {
 	Runtime   RuntimeStatusView
 	Providers []ProviderView
 }
-
-type BootstrapState struct {
-	IsBootstrap  bool   `json:"is_bootstrap"`
-	Password     string `json:"password"`
-	PasswordHash string `json:"password_hash"`
-}

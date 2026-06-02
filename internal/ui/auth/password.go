@@ -11,6 +11,14 @@ const (
 	bcryptCost              = 12
 )
 
+// BootstrapState holds the bootstrap password state: whether bootstrap is active,
+// the plaintext password (only in memory), and the bcrypt hash for verification.
+type BootstrapState struct {
+	IsBootstrap  bool   `json:"is_bootstrap"`
+	Password     string `json:"password"`
+	PasswordHash string `json:"password_hash"`
+}
+
 // GenerateBootstrapPassword generates a cryptographically secure random password.
 // Returns a 32-character alphanumeric password suitable for first-boot setup.
 func GenerateBootstrapPassword() string {
