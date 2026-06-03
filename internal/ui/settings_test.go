@@ -40,6 +40,7 @@ func TestChangePassword_ValidFlow(t *testing.T) {
 	server := &Server{
 		cfg:      testConfig(passwordFile),
 		sessions: make(map[string]time.Time),
+		uiSecret: "test-secret",
 	}
 
 	// Create valid session
@@ -59,6 +60,7 @@ func TestChangePassword_ValidFlow(t *testing.T) {
 		Name:  sessionCookieName,
 		Value: sessionToken,
 	})
+	req.Header.Set("X-CSRF-Token", server.csrfTokenFor(sessionToken))
 	w := httptest.NewRecorder()
 
 	server.handleChangePassword(w, req)
@@ -82,6 +84,7 @@ func TestChangePassword_MismatchedPasswords(t *testing.T) {
 	server := &Server{
 		cfg:      testConfig(passwordFile),
 		sessions: make(map[string]time.Time),
+		uiSecret: "test-secret",
 	}
 
 	sessionToken := generateSessionToken()
@@ -96,6 +99,7 @@ func TestChangePassword_MismatchedPasswords(t *testing.T) {
 	}`
 	req := httptest.NewRequest("POST", "/ui/settings/password/change", strings.NewReader(body))
 	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: sessionToken})
+	req.Header.Set("X-CSRF-Token", server.csrfTokenFor(sessionToken))
 	w := httptest.NewRecorder()
 
 	server.handleChangePassword(w, req)
@@ -113,6 +117,7 @@ func TestChangePassword_WeakPassword(t *testing.T) {
 	server := &Server{
 		cfg:      testConfig(passwordFile),
 		sessions: make(map[string]time.Time),
+		uiSecret: "test-secret",
 	}
 
 	sessionToken := generateSessionToken()
@@ -127,6 +132,7 @@ func TestChangePassword_WeakPassword(t *testing.T) {
 	}`
 	req := httptest.NewRequest("POST", "/ui/settings/password/change", strings.NewReader(body))
 	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: sessionToken})
+	req.Header.Set("X-CSRF-Token", server.csrfTokenFor(sessionToken))
 	w := httptest.NewRecorder()
 
 	server.handleChangePassword(w, req)
@@ -169,6 +175,7 @@ func TestChangePassword_IncorrectCurrentPassword(t *testing.T) {
 	server := &Server{
 		cfg:      testConfig(passwordFile),
 		sessions: make(map[string]time.Time),
+		uiSecret: "test-secret",
 	}
 
 	sessionToken := generateSessionToken()
@@ -183,6 +190,7 @@ func TestChangePassword_IncorrectCurrentPassword(t *testing.T) {
 	}`
 	req := httptest.NewRequest("POST", "/ui/settings/password/change", strings.NewReader(body))
 	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: sessionToken})
+	req.Header.Set("X-CSRF-Token", server.csrfTokenFor(sessionToken))
 	w := httptest.NewRecorder()
 
 	server.handleChangePassword(w, req)
@@ -200,6 +208,7 @@ func TestChangePassword_PasswordTooShort(t *testing.T) {
 	server := &Server{
 		cfg:      testConfig(passwordFile),
 		sessions: make(map[string]time.Time),
+		uiSecret: "test-secret",
 	}
 
 	sessionToken := generateSessionToken()
@@ -215,6 +224,7 @@ func TestChangePassword_PasswordTooShort(t *testing.T) {
 	}`
 	req := httptest.NewRequest("POST", "/ui/settings/password/change", strings.NewReader(body))
 	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: sessionToken})
+	req.Header.Set("X-CSRF-Token", server.csrfTokenFor(sessionToken))
 	w := httptest.NewRecorder()
 
 	server.handleChangePassword(w, req)
@@ -232,6 +242,7 @@ func TestChangePassword_MissingComplexity(t *testing.T) {
 	server := &Server{
 		cfg:      testConfig(passwordFile),
 		sessions: make(map[string]time.Time),
+		uiSecret: "test-secret",
 	}
 
 	sessionToken := generateSessionToken()
@@ -247,6 +258,7 @@ func TestChangePassword_MissingComplexity(t *testing.T) {
 	}`
 	req := httptest.NewRequest("POST", "/ui/settings/password/change", strings.NewReader(body))
 	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: sessionToken})
+	req.Header.Set("X-CSRF-Token", server.csrfTokenFor(sessionToken))
 	w := httptest.NewRecorder()
 
 	server.handleChangePassword(w, req)
@@ -264,6 +276,7 @@ func TestChangePassword_InvalidJSON(t *testing.T) {
 	server := &Server{
 		cfg:      testConfig(passwordFile),
 		sessions: make(map[string]time.Time),
+		uiSecret: "test-secret",
 	}
 
 	sessionToken := generateSessionToken()
@@ -274,6 +287,7 @@ func TestChangePassword_InvalidJSON(t *testing.T) {
 	req := httptest.NewRequest("POST", "/ui/settings/password/change", strings.NewReader("not json"))
 	req.Header.Set("Content-Type", "application/json")
 	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: sessionToken})
+	req.Header.Set("X-CSRF-Token", server.csrfTokenFor(sessionToken))
 	w := httptest.NewRecorder()
 
 	server.handleChangePassword(w, req)
@@ -311,6 +325,7 @@ func TestChangePassword_ValidResponseFormat(t *testing.T) {
 	server := &Server{
 		cfg:      testConfig(passwordFile),
 		sessions: make(map[string]time.Time),
+		uiSecret: "test-secret",
 	}
 
 	sessionToken := generateSessionToken()
@@ -326,6 +341,7 @@ func TestChangePassword_ValidResponseFormat(t *testing.T) {
 	req := httptest.NewRequest("POST", "/ui/settings/password/change", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: sessionToken})
+	req.Header.Set("X-CSRF-Token", server.csrfTokenFor(sessionToken))
 	w := httptest.NewRecorder()
 
 	server.handleChangePassword(w, req)
@@ -371,5 +387,92 @@ func TestHasPasswordComplexity(t *testing.T) {
 				t.Errorf("hasPasswordComplexity(%q) = %v, want %v", tc.password, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestChangePassword_MissingCSRF(t *testing.T) {
+	tmpDir := t.TempDir()
+	passwordFile := filepath.Join(tmpDir, "admin_password")
+	oldPwd, _ := initTestBootstrap(passwordFile)
+
+	server := &Server{
+		cfg:      testConfig(passwordFile),
+		sessions: make(map[string]time.Time),
+		uiSecret: "test-secret",
+	}
+
+	sessionToken := generateSessionToken()
+	server.mu.Lock()
+	server.sessions[sessionToken] = time.Now().Add(sessionTTL)
+	server.mu.Unlock()
+
+	body := `{"current_password":"` + oldPwd + `","new_password":"NewPassword123!@#Secure","confirm_password":"NewPassword123!@#Secure"}`
+	req := httptest.NewRequest("POST", "/ui/settings/password/change", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: sessionToken})
+	// No X-CSRF-Token header
+	w := httptest.NewRecorder()
+	server.handleChangePassword(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Errorf("expected 403 for missing CSRF, got %d", w.Code)
+	}
+}
+
+func TestChangePassword_InvalidCSRF(t *testing.T) {
+	tmpDir := t.TempDir()
+	passwordFile := filepath.Join(tmpDir, "admin_password")
+	oldPwd, _ := initTestBootstrap(passwordFile)
+
+	server := &Server{
+		cfg:      testConfig(passwordFile),
+		sessions: make(map[string]time.Time),
+		uiSecret: "test-secret",
+	}
+
+	sessionToken := generateSessionToken()
+	server.mu.Lock()
+	server.sessions[sessionToken] = time.Now().Add(sessionTTL)
+	server.mu.Unlock()
+
+	body := `{"current_password":"` + oldPwd + `","new_password":"NewPassword123!@#Secure","confirm_password":"NewPassword123!@#Secure"}`
+	req := httptest.NewRequest("POST", "/ui/settings/password/change", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: sessionToken})
+	req.Header.Set("X-CSRF-Token", "wrong-token")
+	w := httptest.NewRecorder()
+	server.handleChangePassword(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Errorf("expected 403 for invalid CSRF, got %d", w.Code)
+	}
+}
+
+// TestChangePassword_ValidCSRF verifies that a correct X-CSRF-Token header
+// is accepted and the request proceeds. It does not test the full flow —
+// see TestChangePassword_ValidFlow for that.
+func TestChangePassword_ValidCSRF(t *testing.T) {
+	tmpDir := t.TempDir()
+	passwordFile := filepath.Join(tmpDir, "admin_password")
+	oldPwd, _ := initTestBootstrap(passwordFile)
+
+	server := &Server{
+		cfg:      testConfig(passwordFile),
+		sessions: make(map[string]time.Time),
+		uiSecret: "test-secret",
+	}
+
+	sessionToken := generateSessionToken()
+	server.mu.Lock()
+	server.sessions[sessionToken] = time.Now().Add(sessionTTL)
+	server.mu.Unlock()
+
+	body := `{"current_password":"` + oldPwd + `","new_password":"NewPassword123!@#Secure","confirm_password":"NewPassword123!@#Secure"}`
+	req := httptest.NewRequest("POST", "/ui/settings/password/change", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: sessionToken})
+	req.Header.Set("X-CSRF-Token", server.csrfTokenFor(sessionToken))
+	w := httptest.NewRecorder()
+	server.handleChangePassword(w, req)
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200 for valid CSRF, got %d: %s", w.Code, w.Body.String())
 	}
 }

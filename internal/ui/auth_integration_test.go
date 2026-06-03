@@ -42,6 +42,7 @@ func TestFullAuthenticationFlow(t *testing.T) {
 	server := &Server{
 		cfg:      testConfig(passwordFile),
 		sessions: make(map[string]time.Time),
+		uiSecret: "test-secret",
 	}
 
 	// Step 1: Login with bootstrap password via JSON
@@ -85,6 +86,7 @@ func TestFullAuthenticationFlow(t *testing.T) {
 		Name:  sessionCookieName,
 		Value: sessionToken,
 	})
+	req.Header.Set("X-CSRF-Token", server.csrfTokenFor(sessionToken))
 	w = httptest.NewRecorder()
 	server.handleChangePassword(w, req)
 
@@ -291,6 +293,7 @@ func TestPasswordChangeValidation(t *testing.T) {
 	server := &Server{
 		cfg:      testConfig(passwordFile),
 		sessions: make(map[string]time.Time),
+		uiSecret: "test-secret",
 	}
 
 	sessionToken := generateSessionToken()
@@ -386,6 +389,7 @@ func TestPasswordChangeValidation(t *testing.T) {
 				Name:  sessionCookieName,
 				Value: sessionToken,
 			})
+			req.Header.Set("X-CSRF-Token", server.csrfTokenFor(sessionToken))
 			w := httptest.NewRecorder()
 			server.handleChangePassword(w, req)
 

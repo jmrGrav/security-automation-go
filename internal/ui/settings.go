@@ -25,6 +25,11 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if !s.validCSRF(r) {
+		http.Error(w, "csrf required", http.StatusForbidden)
+		return
+	}
+
 	var req struct {
 		CurrentPassword string `json:"current_password"`
 		NewPassword     string `json:"new_password"`
