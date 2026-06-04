@@ -77,10 +77,10 @@ func (p *Planner) generateCompensation(forward execution.MutationOperation) (mod
 		comp.Type = reconciliation.OpCreate
 		comp.Payload = forward.Payload // Re-create with original attributes
 	case reconciliation.OpUpdate:
-		// Undo update by reverting to previous state
-		comp.Type = reconciliation.OpUpdate
-		comp.Payload = forward.Payload // TODO: Ensure this is the PREVIOUS state
-		comp.ExpectedETag = forward.ExpectedETag
+		// Cannot generate correct compensation: MutationOperation only carries the
+		// forward payload, not the previous state. Return an error until PreviousPayload
+		// is added to MutationOperation.
+		return comp, apperr.New(op, "rollback for OpUpdate requires PreviousPayload which is not yet supported")
 	default:
 		return comp, apperr.Newf(op, "unsupported forward operation type for rollback: %s", forward.Type)
 	}
