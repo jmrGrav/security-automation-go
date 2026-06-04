@@ -212,7 +212,7 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 		Path:     "/",
 		MaxAge:   -1,
 		HttpOnly: true,
-		SameSite: http.SameSiteLaxMode,
+		SameSite: http.SameSiteStrictMode,
 		Secure:   secureCookie(r),
 	})
 	s.audit.Record("logout", map[string]string{"actor": "local"})
@@ -592,7 +592,7 @@ func (s *Server) sessionCookie(r *http.Request, token string) *http.Cookie {
 		Value:    token,
 		Path:     "/",
 		HttpOnly: true,
-		SameSite: http.SameSiteLaxMode,
+		SameSite: http.SameSiteStrictMode,
 		Secure:   secureCookie(r),
 	}
 }

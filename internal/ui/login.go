@@ -80,7 +80,7 @@ func (s *Server) handleLoginJSON(w http.ResponseWriter, r *http.Request) {
 		Value:    sessionToken,
 		MaxAge:   int(sessionTTL.Seconds()),
 		HttpOnly: true,
-		SameSite: http.SameSiteLaxMode,
+		SameSite: http.SameSiteStrictMode,
 		Path:     "/",
 	})
 
