@@ -57,8 +57,8 @@ func TestServer_LoginSetsHttpOnlyCookie(t *testing.T) {
 	if !c.HttpOnly {
 		t.Fatal("session cookie must be HttpOnly")
 	}
-	if c.SameSite != http.SameSiteLaxMode {
-		t.Fatalf("expected SameSite=Lax, got %v", c.SameSite)
+	if c.SameSite != http.SameSiteStrictMode {
+		t.Fatalf("expected SameSite=Strict, got %v", c.SameSite)
 	}
 	if c.Secure {
 		t.Fatal("session cookie must not be Secure on plain HTTP")
