@@ -3,11 +3,13 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -43,9 +45,13 @@ type cursorStateStore interface {
 	Save(ctx context.Context, name string, value time.Time) error
 }
 
-func newAuthenticator() *auth.Authenticator {
+func newAuthenticator() (*auth.Authenticator, error) {
+	token := strings.TrimSpace(os.Getenv("CF_SYNC_API_TOKEN"))
+	if token == "" {
+		return nil, fmt.Errorf("CF_SYNC_API_TOKEN environment variable is required in daemon mode")
+	}
 	authTokens := map[string]auth.Identity{
-		"admin-token": {
+		token: {
 			OperatorID: "admin",
 			Scopes: []auth.Scope{
 				auth.ScopeRuntimeRead,
@@ -56,10 +62,14 @@ func newAuthenticator() *auth.Authenticator {
 			},
 		},
 	}
-	return auth.NewAuthenticator(authTokens)
+	return auth.NewAuthenticator(authTokens), nil
 }
 
-func startAPIServer(logger *slog.Logger, collector *status.Collector, j journal.JournalStore, qStore *quarantine.Store, orch *pipeline.Orchestrator, p *pool.Pool, sm *engine.StateMachine, dm *memory.Store, rec *recorder.Recorder, br *registry.Registry, am *activation.Manager, fr *federation.Resolver, adm *admission.Controller, evidence reporting.EvidenceStore, ownershipLineage *ownership.LineageQueryService, metricsAddr string) *http.Server {
+func startAPIServer(logger *slog.Logger, collector *status.Collector, j journal.JournalStore, qStore *quarantine.Store, orch *pipeline.Orchestrator, p *pool.Pool, sm *engine.StateMachine, dm *memory.Store, rec *recorder.Recorder, br *registry.Registry, am *activation.Manager, fr *federation.Resolver, adm *admission.Controller, evidence reporting.EvidenceStore, ownershipLineage *ownership.LineageQueryService, metricsAddr string) (*http.Server, error) {
+	authenticator, err := newAuthenticator()
+	if err != nil {
+		return nil, err
+	}
 	apiSrv := server.New(
 		logger,
 		collector,
@@ -77,7 +87,7 @@ func startAPIServer(logger *slog.Logger, collector *status.Collector, j journal.
 		adm,
 		evidence,
 		ownershipLineage,
-		newAuthenticator(),
+		authenticator,
 	)
 
 	mux := http.NewServeMux()
@@ -98,7 +108,7 @@ func startAPIServer(logger *slog.Logger, collector *status.Collector, j journal.
 			logger.Error("metrics server failed", "error", err)
 		}
 	}()
-	return srv
+	return srv, nil
 }
 
 func newDaemonContext(ctx context.Context, logger *slog.Logger, srv *http.Server) (context.Context, context.CancelFunc) {
@@ -215,7 +225,11 @@ func runDaemon(ctx context.Context, logger *slog.Logger, orch *pipeline.Orchestr
 	if ownershipRepo != nil {
 		ownershipLineage = ownership.NewLineageQueryService(ownershipRepo)
 	}
-	srv := startAPIServer(logger, collector, j, qStore, orch, p, sm, dm, rec, br, am, fr, adm, evidence, ownershipLineage, metricsAddr)
+	srv, err := startAPIServer(logger, collector, j, qStore, orch, p, sm, dm, rec, br, am, fr, adm, evidence, ownershipLineage, metricsAddr)
+	if err != nil {
+		logger.Error("failed to start API server", "error", err)
+		return
+	}
 
 	// Acquire daemon lock
 	lockFile := filepath.Join(stateDir, "security-automation-go.pid")
