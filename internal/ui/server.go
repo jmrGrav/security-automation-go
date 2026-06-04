@@ -191,8 +191,11 @@ func (s *Server) handleLoginPage(w http.ResponseWriter, r *http.Request) {
 	_ = LoginPage("").Render(r.Context(), w)
 }
 
-
 func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
+	if !s.validCSRF(r) {
+		http.Error(w, "csrf required", http.StatusForbidden)
+		return
+	}
 	if cookie, err := r.Cookie(sessionCookieName); err == nil {
 		s.mu.Lock()
 		delete(s.sessions, cookie.Value)
@@ -502,6 +505,10 @@ func (s *Server) handleForensicPage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleForensicLookup(w http.ResponseWriter, r *http.Request) {
+	if !s.validCSRF(r) {
+		http.Error(w, "csrf required", http.StatusForbidden)
+		return
+	}
 	if err := r.ParseForm(); err != nil {
 		renderForensicPage(r.Context(), w, ForensicView{Error: "bad request"})
 		return
