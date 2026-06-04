@@ -11,6 +11,7 @@ func isSensitiveAuditKey(key string) bool {
 	switch {
 	case strings.Contains(k, "secret"),
 		strings.Contains(k, "token"),
+		strings.Contains(k, "bearer"),
 		strings.Contains(k, "authorization"),
 		strings.Contains(k, "auth_code"),
 		strings.Contains(k, "code_verifier"),

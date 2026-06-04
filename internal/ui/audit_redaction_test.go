@@ -69,3 +69,25 @@ func TestIsSensitiveAuditKeyExpandedCoverage(t *testing.T) {
 		t.Fatal("expected source to remain non-sensitive")
 	}
 }
+
+func TestIsSensitiveAuditKey_Bearer(t *testing.T) {
+	cases := []struct {
+		key  string
+		want bool
+	}{
+		{"bearer", true},
+		{"Bearer", true},
+		{"BEARER", true},
+		{"x-bearer", true},
+		{"normal_field", false},
+		{"ip", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.key, func(t *testing.T) {
+			got := isSensitiveAuditKey(tc.key)
+			if got != tc.want {
+				t.Errorf("isSensitiveAuditKey(%q) = %v, want %v", tc.key, got, tc.want)
+			}
+		})
+	}
+}
