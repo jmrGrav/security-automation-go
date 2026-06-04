@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jm/security-automation-go/internal/crowdsec/models"
 	"github.com/jm/security-automation-go/internal/crowdsec/source"
@@ -315,6 +316,9 @@ func (c *Client) AddAllowlistEntry(ctx context.Context, name string, entry model
 	if err := validateIPOrCIDR(entry.Value); err != nil {
 		return fmt.Errorf("crowdsec.Client.AddAllowlistEntry: %w", err)
 	}
+	if err := validateComment(entry.Comment); err != nil {
+		return fmt.Errorf("crowdsec.Client.AddAllowlistEntry: %w", err)
+	}
 	args := []string{"allowlists", "add", name, entry.Value}
 	if entry.Comment != "" {
 		args = append(args, "--comment", entry.Comment)
@@ -449,6 +453,23 @@ func validateDuration(duration string) error {
 	}
 	if !crowdsecDurationPattern.MatchString(duration) {
 		return fmt.Errorf("invalid duration format")
+	}
+	return nil
+}
+
+// validateComment rejects comment strings containing null bytes, control
+// characters, or invalid UTF-8. An empty comment is always valid.
+func validateComment(comment string) error {
+	if comment == "" {
+		return nil
+	}
+	if !utf8.ValidString(comment) {
+		return fmt.Errorf("comment contains invalid UTF-8")
+	}
+	for _, r := range comment {
+		if r < 0x20 || r == 0x7F {
+			return fmt.Errorf("comment contains control character: %U", r)
+		}
 	}
 	return nil
 }
