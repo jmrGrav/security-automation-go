@@ -193,6 +193,10 @@ func (s *Server) handleLoginPage(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	if !s.validCSRF(r) {
+		s.audit.Record("logout", map[string]string{
+			"actor":  "local",
+			"result": "csrf_rejected",
+		})
 		http.Error(w, "csrf required", http.StatusForbidden)
 		return
 	}
@@ -506,6 +510,9 @@ func (s *Server) handleForensicPage(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleForensicLookup(w http.ResponseWriter, r *http.Request) {
 	if !s.validCSRF(r) {
+		s.audit.Record("forensic_lookup", map[string]string{
+			"result": "csrf_rejected",
+		})
 		http.Error(w, "csrf required", http.StatusForbidden)
 		return
 	}
