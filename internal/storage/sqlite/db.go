@@ -14,6 +14,31 @@ import (
 	_ "modernc.org/sqlite"
 )
 
+var walCheckpointModes = map[string]struct{}{
+	"PASSIVE":  {},
+	"FULL":     {},
+	"RESTART":  {},
+	"TRUNCATE": {},
+}
+
+var knownTables = map[string]struct{}{
+	"schema_migrations":            {},
+	"runtime_state":                {},
+	"leases":                       {},
+	"ownership_claims":             {},
+	"ownership_lineage":            {},
+	"governance_evidence":          {},
+	"events":                       {},
+	"event_sequences":              {},
+	"event_checkpoints":            {},
+	"abuseipdb_report_dedup":       {},
+	"runtime_cursors":              {},
+	"abuseipdb_reporting_evidence": {},
+	"abuseipdb_report_outbox":      {},
+	"approval_execution_evidence":  {},
+	"rollback_checkpoints":         {},
+}
+
 // DB manages a scoped SQLite connection with migrations.
 type DB struct {
 	conn           *sql.DB
@@ -427,16 +452,29 @@ func (s *DB) WALCheckpoint(ctx context.Context, mode string) error {
 	if mode == "" {
 		mode = "TRUNCATE"
 	}
+	if _, ok := walCheckpointModes[mode]; !ok {
+		return apperr.Newf(op, "invalid checkpoint mode: %q", mode)
+	}
 	_, err := s.conn.ExecContext(ctx, "PRAGMA wal_checkpoint("+mode+");")
 	return apperr.Wrap(op, err)
 }
 
 func (s *DB) ExportHotSnapshot(ctx context.Context, targetPath string) error {
 	const op = "storage.sqlite.DB.ExportHotSnapshot"
-	if err := os.MkdirAll(filepath.Dir(targetPath), 0755); err != nil {
+	if targetPath == "" {
+		return apperr.New(op, "targetPath must not be empty")
+	}
+	if !filepath.IsAbs(targetPath) {
+		return apperr.Newf(op, "targetPath must be absolute, got %q", targetPath)
+	}
+	clean := filepath.Clean(targetPath)
+	if clean != targetPath {
+		return apperr.Newf(op, "targetPath contains traversal, got %q", targetPath)
+	}
+	if err := os.MkdirAll(filepath.Dir(clean), 0755); err != nil {
 		return apperr.Wrap(op, err)
 	}
-	if _, err := s.conn.ExecContext(ctx, "VACUUM INTO '"+targetPath+"'"); err != nil {
+	if _, err := s.conn.ExecContext(ctx, "VACUUM INTO '"+clean+"'"); err != nil {
 		return apperr.Wrap(op, err)
 	}
 	return nil
@@ -531,6 +569,9 @@ func (s *DB) VerifySchema(ctx context.Context) error {
 }
 
 func (s *DB) requireColumn(ctx context.Context, table string, column string) error {
+	if _, ok := knownTables[table]; !ok {
+		return apperr.Newf("storage.sqlite.DB.requireColumn", "unknown table: %q", table)
+	}
 	rows, err := s.conn.QueryContext(ctx, "PRAGMA table_info("+table+")")
 	if err != nil {
 		return err

@@ -127,3 +127,54 @@ func TestDBQuarantineCorruptionCopiesFilesOnIntegrityFailure(t *testing.T) {
 		t.Fatal("expected writes to fail closed in degraded mode")
 	}
 }
+
+func TestWALCheckpoint_RejectsUnknownMode(t *testing.T) {
+	tmpDir := t.TempDir()
+	db, err := New(tmpDir)
+	if err != nil {
+		t.Fatalf("new db: %v", err)
+	}
+	defer db.Close()
+
+	cases := []string{"DROP", "'; DROP TABLE events; --", "INVALIDMODE", "passive; DROP TABLE events"}
+	for _, mode := range cases {
+		if err := db.WALCheckpoint(context.Background(), mode); err == nil {
+			t.Errorf("WALCheckpoint(%q) should have been rejected", mode)
+		}
+	}
+}
+
+func TestWALCheckpoint_AcceptsValidModes(t *testing.T) {
+	tmpDir := t.TempDir()
+	db, err := New(tmpDir)
+	if err != nil {
+		t.Fatalf("new db: %v", err)
+	}
+	defer db.Close()
+
+	for _, mode := range []string{"PASSIVE", "FULL", "RESTART", "TRUNCATE", ""} {
+		if err := db.WALCheckpoint(context.Background(), mode); err != nil {
+			t.Errorf("WALCheckpoint(%q) should have been accepted: %v", mode, err)
+		}
+	}
+}
+
+func TestExportHotSnapshot_RejectsInvalidPaths(t *testing.T) {
+	tmpDir := t.TempDir()
+	db, err := New(tmpDir)
+	if err != nil {
+		t.Fatalf("new db: %v", err)
+	}
+	defer db.Close()
+
+	cases := []string{
+		"",
+		"relative/path/db",
+		"/tmp/../etc/passwd",
+	}
+	for _, p := range cases {
+		if err := db.ExportHotSnapshot(context.Background(), p); err == nil {
+			t.Errorf("ExportHotSnapshot(%q) should have been rejected", p)
+		}
+	}
+}
