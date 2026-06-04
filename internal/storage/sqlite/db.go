@@ -516,8 +516,14 @@ func (s *DB) RotateBackups(backupDir string, keep int) error {
 		jj, _ := entries[j].Info()
 		return ii.ModTime().After(jj.ModTime())
 	})
+	var errs []error
 	for _, entry := range entries[keep:] {
-		_ = os.Remove(filepath.Join(backupDir, entry.Name()))
+		if err := os.Remove(filepath.Join(backupDir, entry.Name())); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if len(errs) > 0 {
+		return apperr.Newf(op, "failed to remove %d backup(s): %v", len(errs), errs[0])
 	}
 	return nil
 }

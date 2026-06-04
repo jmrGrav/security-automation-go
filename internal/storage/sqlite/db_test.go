@@ -178,3 +178,33 @@ func TestExportHotSnapshot_RejectsInvalidPaths(t *testing.T) {
 		}
 	}
 }
+
+func TestRotateBackups_ReturnsErrorOnReadOnly(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("root bypasses file permissions")
+	}
+	backupDir := t.TempDir()
+	tmpDir := t.TempDir()
+	db, err := New(tmpDir)
+	if err != nil {
+		t.Fatalf("new db: %v", err)
+	}
+
+	// Create 3 backup files
+	for _, name := range []string{"a.db", "b.db", "c.db"} {
+		if err := os.WriteFile(filepath.Join(backupDir, name), []byte("x"), 0444); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Make dir read-only so Remove will fail
+	if err := os.Chmod(backupDir, 0555); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chmod(backupDir, 0755) // restore for cleanup
+
+	// keep=1 means try to delete 2 oldest
+	err = db.RotateBackups(backupDir, 1)
+	if err == nil {
+		t.Error("expected error rotating backups on read-only dir")
+	}
+}
