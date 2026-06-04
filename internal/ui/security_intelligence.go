@@ -49,6 +49,16 @@ func (s *Server) handleIntelligencePage(w http.ResponseWriter, r *http.Request) 
 
 func (s *Server) handleIntelligenceLookup(w http.ResponseWriter, r *http.Request) {
 	eventID := newUIEventID()
+	if !s.validCSRF(r) {
+		s.audit.Record("security_intelligence_lookup", map[string]string{
+			"source":         "ui",
+			"result":         "csrf_rejected",
+			"correlation_id": eventID,
+			"event_id":       eventID,
+		})
+		http.Error(w, "csrf required", http.StatusForbidden)
+		return
+	}
 	if err := r.ParseForm(); err != nil {
 		s.audit.Record("security_intelligence_lookup", map[string]string{
 			"source":         "ui",
