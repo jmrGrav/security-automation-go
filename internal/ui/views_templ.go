@@ -8,7 +8,7 @@ package ui
 import "github.com/a-h/templ"
 import templruntime "github.com/a-h/templ/runtime"
 
-func Layout(title string) templ.Component {
+func Layout(title string, csrfToken string) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
@@ -42,7 +42,20 @@ func Layout(title string) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("</title><style>\n\t\t\t\tbody { font-family: system-ui, sans-serif; margin: 0; background: #f5f7fb; color: #10243e; }\n\t\t\t\theader { padding: 1rem 1.25rem; background: #10243e; color: white; }\n\t\t\t\tmain { padding: 1.25rem; }\n\t\t\t\t.nav { display: flex; gap: 1rem; flex-wrap: wrap; margin-top: 0.75rem; }\n\t\t\t\t.nav a { color: #dce8ff; text-decoration: none; }\n\t\t\t\t.panel { background: white; border: 1px solid #d8e1ef; border-radius: 8px; padding: 1rem; margin-bottom: 1rem; box-shadow: 0 1px 2px rgba(16,36,62,.06); }\n\t\t\t\t.grid { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }\n\t\t\t\t.kv { display: grid; gap: .4rem; }\n\t\t\t\t.row { display: flex; justify-content: space-between; gap: 1rem; border-top: 1px solid #eef2f8; padding: .5rem 0; }\n\t\t\t\t.row:first-child { border-top: 0; padding-top: 0; }\n\t\t\t\t.badge { display: inline-block; padding: .15rem .5rem; border-radius: 999px; font-size: .8rem; background: #eef4ff; color: #234; }\n\t\t\t\t.muted { color: #5f6b7a; }\n\t\t\t\t.error { color: #9b1c1c; }\n\t\t\t\tlabel { display: block; margin: .5rem 0 .25rem; }\n\t\t\t\tinput[type=\"password\"], input[type=\"text\"] { width: 100%; box-sizing: border-box; padding: .7rem .8rem; border: 1px solid #c9d5e5; border-radius: 6px; }\n\t\t\t\tbutton { margin-top: .75rem; padding: .65rem .9rem; border: 0; border-radius: 6px; background: #185adb; color: white; }\n\t\t\t\tcode, pre { background: #f4f7fb; border-radius: 6px; padding: .75rem; display: block; overflow: auto; }\n\t\t\t</style></head><body><header><strong>Operator UI</strong><div class=\"nav\"><a href=\"/\">Dashboard</a> <a href=\"/providers\">Providers</a> <a href=\"/forensic\">Forensic</a><form action=\"/logout\" method=\"post\" style=\"display:inline\"><button type=\"submit\">Logout</button></form></div></header><main>")
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("</title><style>\n\t\t\t\tbody { font-family: system-ui, sans-serif; margin: 0; background: #f5f7fb; color: #10243e; }\n\t\t\t\theader { padding: 1rem 1.25rem; background: #10243e; color: white; }\n\t\t\t\tmain { padding: 1.25rem; }\n\t\t\t\t.nav { display: flex; gap: 1rem; flex-wrap: wrap; margin-top: 0.75rem; }\n\t\t\t\t.nav a { color: #dce8ff; text-decoration: none; }\n\t\t\t\t.panel { background: white; border: 1px solid #d8e1ef; border-radius: 8px; padding: 1rem; margin-bottom: 1rem; box-shadow: 0 1px 2px rgba(16,36,62,.06); }\n\t\t\t\t.grid { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }\n\t\t\t\t.kv { display: grid; gap: .4rem; }\n\t\t\t\t.row { display: flex; justify-content: space-between; gap: 1rem; border-top: 1px solid #eef2f8; padding: .5rem 0; }\n\t\t\t\t.row:first-child { border-top: 0; padding-top: 0; }\n\t\t\t\t.badge { display: inline-block; padding: .15rem .5rem; border-radius: 999px; font-size: .8rem; background: #eef4ff; color: #234; }\n\t\t\t\t.muted { color: #5f6b7a; }\n\t\t\t\t.error { color: #9b1c1c; }\n\t\t\t\tlabel { display: block; margin: .5rem 0 .25rem; }\n\t\t\t\tinput[type=\"password\"], input[type=\"text\"] { width: 100%; box-sizing: border-box; padding: .7rem .8rem; border: 1px solid #c9d5e5; border-radius: 6px; }\n\t\t\t\tbutton { margin-top: .75rem; padding: .65rem .9rem; border: 0; border-radius: 6px; background: #185adb; color: white; }\n\t\t\t\tcode, pre { background: #f4f7fb; border-radius: 6px; padding: .75rem; display: block; overflow: auto; }\n\t\t\t</style></head><body><header><strong>Operator UI</strong><div class=\"nav\"><a href=\"/\">Dashboard</a> <a href=\"/providers\">Providers</a> <a href=\"/forensic\">Forensic</a><form action=\"/logout\" method=\"post\" style=\"display:inline\"><input type=\"hidden\" name=\"csrf_token\" value=\"")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var3 string
+		templ_7745c5c3_Var3, templ_7745c5c3_Err = templ.JoinStringErrs(csrfToken)
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/views.templ`, Line: 38, Col: 62}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var3))
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\"> <button type=\"submit\">Logout</button></form></div></header><main>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -74,9 +87,9 @@ func LoginPage(errorText string) templ.Component {
 			}()
 		}
 		ctx = templ.InitializeContext(ctx)
-		templ_7745c5c3_Var3 := templ.GetChildren(ctx)
-		if templ_7745c5c3_Var3 == nil {
-			templ_7745c5c3_Var3 = templ.NopComponent
+		templ_7745c5c3_Var4 := templ.GetChildren(ctx)
+		if templ_7745c5c3_Var4 == nil {
+			templ_7745c5c3_Var4 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>Operator Login</title><style>\n\t\t\t\tbody { font-family: system-ui, sans-serif; margin: 0; background: #f5f7fb; color: #10243e; }\n\t\t\t\tmain { max-width: 28rem; margin: 8vh auto; background: white; border: 1px solid #d8e1ef; border-radius: 8px; padding: 1.25rem; box-shadow: 0 1px 2px rgba(16,36,62,.06); }\n\t\t\t\tlabel { display: block; margin: .5rem 0 .25rem; }\n\t\t\t\tinput { width: 100%; box-sizing: border-box; padding: .7rem .8rem; border: 1px solid #c9d5e5; border-radius: 6px; }\n\t\t\t\tbutton { margin-top: .75rem; padding: .65rem .9rem; border: 0; border-radius: 6px; background: #185adb; color: white; }\n\t\t\t\t.error { color: #9b1c1c; }\n\t\t\t</style></head><body><main><h1>Local operator access</h1>")
@@ -88,12 +101,12 @@ func LoginPage(errorText string) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var4 string
-			templ_7745c5c3_Var4, templ_7745c5c3_Err = templ.JoinStringErrs(errorText)
+			var templ_7745c5c3_Var5 string
+			templ_7745c5c3_Var5, templ_7745c5c3_Err = templ.JoinStringErrs(errorText)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/views.templ`, Line: 69, Col: 33}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/views.templ`, Line: 70, Col: 33}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var4))
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var5))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -110,7 +123,7 @@ func LoginPage(errorText string) templ.Component {
 	})
 }
 
-func DashboardPage(view DashboardView) templ.Component {
+func DashboardPage(view DashboardView, csrfToken string) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
@@ -126,12 +139,12 @@ func DashboardPage(view DashboardView) templ.Component {
 			}()
 		}
 		ctx = templ.InitializeContext(ctx)
-		templ_7745c5c3_Var5 := templ.GetChildren(ctx)
-		if templ_7745c5c3_Var5 == nil {
-			templ_7745c5c3_Var5 = templ.NopComponent
+		templ_7745c5c3_Var6 := templ.GetChildren(ctx)
+		if templ_7745c5c3_Var6 == nil {
+			templ_7745c5c3_Var6 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Var6 := templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
+		templ_7745c5c3_Var7 := templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 			templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 			templ_7745c5c3_Buffer, templ_7745c5c3_IsBuffer := templruntime.GetBuffer(templ_7745c5c3_W)
 			if !templ_7745c5c3_IsBuffer {
@@ -147,12 +160,12 @@ func DashboardPage(view DashboardView) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var7 string
-			templ_7745c5c3_Var7, templ_7745c5c3_Err = templ.JoinStringErrs(view.Runtime.CrowdSec)
+			var templ_7745c5c3_Var8 string
+			templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.JoinStringErrs(view.Runtime.CrowdSec)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/views.templ`, Line: 87, Col: 86}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/views.templ`, Line: 88, Col: 86}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var7))
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var8))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -160,12 +173,12 @@ func DashboardPage(view DashboardView) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var8 string
-			templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.JoinStringErrs(view.Runtime.OpenResty)
+			var templ_7745c5c3_Var9 string
+			templ_7745c5c3_Var9, templ_7745c5c3_Err = templ.JoinStringErrs(view.Runtime.OpenResty)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/views.templ`, Line: 88, Col: 88}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/views.templ`, Line: 89, Col: 88}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var8))
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var9))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -173,12 +186,12 @@ func DashboardPage(view DashboardView) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var9 string
-			templ_7745c5c3_Var9, templ_7745c5c3_Err = templ.JoinStringErrs(view.Runtime.Cloudflare)
+			var templ_7745c5c3_Var10 string
+			templ_7745c5c3_Var10, templ_7745c5c3_Err = templ.JoinStringErrs(view.Runtime.Cloudflare)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/views.templ`, Line: 89, Col: 90}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/views.templ`, Line: 90, Col: 90}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var9))
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var10))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -186,12 +199,12 @@ func DashboardPage(view DashboardView) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var10 string
-			templ_7745c5c3_Var10, templ_7745c5c3_Err = templ.JoinStringErrs(view.Runtime.UI)
+			var templ_7745c5c3_Var11 string
+			templ_7745c5c3_Var11, templ_7745c5c3_Err = templ.JoinStringErrs(view.Runtime.UI)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/views.templ`, Line: 90, Col: 74}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/views.templ`, Line: 91, Col: 74}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var10))
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var11))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -204,12 +217,12 @@ func DashboardPage(view DashboardView) templ.Component {
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var11 string
-				templ_7745c5c3_Var11, templ_7745c5c3_Err = templ.JoinStringErrs(provider.Name)
+				var templ_7745c5c3_Var12 string
+				templ_7745c5c3_Var12, templ_7745c5c3_Err = templ.JoinStringErrs(provider.Name)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/views.templ`, Line: 98, Col: 28}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/views.templ`, Line: 99, Col: 28}
 				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var11))
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var12))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -217,12 +230,12 @@ func DashboardPage(view DashboardView) templ.Component {
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var12 string
-				templ_7745c5c3_Var12, templ_7745c5c3_Err = templ.JoinStringErrs(provider.Status)
+				var templ_7745c5c3_Var13 string
+				templ_7745c5c3_Var13, templ_7745c5c3_Err = templ.JoinStringErrs(provider.Status)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/views.templ`, Line: 99, Col: 44}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/views.templ`, Line: 100, Col: 44}
 				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var12))
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var13))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -237,7 +250,7 @@ func DashboardPage(view DashboardView) templ.Component {
 			}
 			return templ_7745c5c3_Err
 		})
-		templ_7745c5c3_Err = Layout("Operator Dashboard").Render(templ.WithChildren(ctx, templ_7745c5c3_Var6), templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = Layout("Operator Dashboard", csrfToken).Render(templ.WithChildren(ctx, templ_7745c5c3_Var7), templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -245,7 +258,7 @@ func DashboardPage(view DashboardView) templ.Component {
 	})
 }
 
-func ProvidersPage(providers []ProviderView) templ.Component {
+func ProvidersPage(providers []ProviderView, csrfToken string) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
@@ -261,12 +274,12 @@ func ProvidersPage(providers []ProviderView) templ.Component {
 			}()
 		}
 		ctx = templ.InitializeContext(ctx)
-		templ_7745c5c3_Var13 := templ.GetChildren(ctx)
-		if templ_7745c5c3_Var13 == nil {
-			templ_7745c5c3_Var13 = templ.NopComponent
+		templ_7745c5c3_Var14 := templ.GetChildren(ctx)
+		if templ_7745c5c3_Var14 == nil {
+			templ_7745c5c3_Var14 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Var14 := templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
+		templ_7745c5c3_Var15 := templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 			templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 			templ_7745c5c3_Buffer, templ_7745c5c3_IsBuffer := templruntime.GetBuffer(templ_7745c5c3_W)
 			if !templ_7745c5c3_IsBuffer {
@@ -287,12 +300,12 @@ func ProvidersPage(providers []ProviderView) templ.Component {
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var15 string
-				templ_7745c5c3_Var15, templ_7745c5c3_Err = templ.JoinStringErrs(provider.Name)
+				var templ_7745c5c3_Var16 string
+				templ_7745c5c3_Var16, templ_7745c5c3_Err = templ.JoinStringErrs(provider.Name)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/views.templ`, Line: 117, Col: 30}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/views.templ`, Line: 118, Col: 30}
 				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var15))
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var16))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -300,12 +313,12 @@ func ProvidersPage(providers []ProviderView) templ.Component {
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var16 string
-				templ_7745c5c3_Var16, templ_7745c5c3_Err = templ.JoinStringErrs(provider.MaskedKey)
+				var templ_7745c5c3_Var17 string
+				templ_7745c5c3_Var17, templ_7745c5c3_Err = templ.JoinStringErrs(provider.MaskedKey)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/views.templ`, Line: 118, Col: 47}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/views.templ`, Line: 119, Col: 47}
 				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var16))
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var17))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -313,12 +326,12 @@ func ProvidersPage(providers []ProviderView) templ.Component {
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var17 string
-				templ_7745c5c3_Var17, templ_7745c5c3_Err = templ.JoinStringErrs(provider.Status)
+				var templ_7745c5c3_Var18 string
+				templ_7745c5c3_Var18, templ_7745c5c3_Err = templ.JoinStringErrs(provider.Status)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/views.templ`, Line: 120, Col: 43}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/ui/views.templ`, Line: 121, Col: 43}
 				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var17))
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var18))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -333,7 +346,7 @@ func ProvidersPage(providers []ProviderView) templ.Component {
 			}
 			return templ_7745c5c3_Err
 		})
-		templ_7745c5c3_Err = Layout("Providers").Render(templ.WithChildren(ctx, templ_7745c5c3_Var14), templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = Layout("Providers", csrfToken).Render(templ.WithChildren(ctx, templ_7745c5c3_Var15), templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

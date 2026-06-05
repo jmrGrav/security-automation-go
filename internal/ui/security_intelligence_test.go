@@ -57,6 +57,7 @@ func TestSecurityIntelligence_InvalidIPRejected(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/intelligence", strings.NewReader("ip=not-an-ip"))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.AddCookie(cookie)
+	req.Header.Set("X-CSRF-Token", srv.csrfTokenFor(cookie.Value))
 	rr := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rr, req)
 
@@ -79,6 +80,7 @@ func TestSecurityIntelligence_CleanIPNeutral(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/intelligence", strings.NewReader("ip=203.0.113.4"))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.AddCookie(cookie)
+	req.Header.Set("X-CSRF-Token", srv.csrfTokenFor(cookie.Value))
 	rr := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rr, req)
 
@@ -109,6 +111,7 @@ func TestSecurityIntelligence_ProtectedIPNoHardBan(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/intelligence", strings.NewReader("ip=104.16.0.1"))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.AddCookie(cookie)
+	req.Header.Set("X-CSRF-Token", srv.csrfTokenFor(cookie.Value))
 	rr := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rr, req)
 
@@ -145,6 +148,7 @@ func TestSecurityIntelligence_ExternalSignalAloneCannotHardBan(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/intelligence", strings.NewReader("ip=203.0.113.7"))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.AddCookie(cookie)
+	req.Header.Set("X-CSRF-Token", srv.csrfTokenFor(cookie.Value))
 	rr := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rr, req)
 
@@ -170,6 +174,7 @@ func TestSecurityIntelligence_ProviderDisabledStateVisible(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/intelligence", strings.NewReader("ip=203.0.113.8"))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.AddCookie(cookie)
+	req.Header.Set("X-CSRF-Token", srv.csrfTokenFor(cookie.Value))
 	rr := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rr, req)
 
@@ -188,6 +193,7 @@ func TestSecurityIntelligence_AuditLogWritten(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/intelligence", strings.NewReader("ip=203.0.113.9"))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.AddCookie(cookie)
+	req.Header.Set("X-CSRF-Token", srv.csrfTokenFor(cookie.Value))
 	rr := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rr, req)
 
@@ -212,6 +218,7 @@ func TestSecurityIntelligence_NoSecretRendered(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/intelligence", strings.NewReader("ip=203.0.113.10"))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.AddCookie(cookie)
+	req.Header.Set("X-CSRF-Token", srv.csrfTokenFor(cookie.Value))
 	rr := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rr, req)
 

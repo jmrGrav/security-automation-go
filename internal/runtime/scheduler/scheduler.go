@@ -34,13 +34,14 @@ func (s *DaemonScheduler) Start(ctx context.Context, task Task) error {
 	s.logger.Info("starting daemon loop", "interval", s.interval)
 
 	// 1. Acquire single-flight lock
-	acquired, err := s.lock.Acquire()
+	err := s.lock.Acquire()
 	if err != nil {
+		// Check if another instance holds the lock
+		if lock.IsPIDLocked(err) {
+			s.logger.Error("failed to acquire daemon lock: another instance is already running", "err", err)
+			return nil
+		}
 		return err
-	}
-	if !acquired {
-		s.logger.Error("failed to acquire daemon lock: another instance is already running")
-		return nil
 	}
 	defer s.lock.Release()
 

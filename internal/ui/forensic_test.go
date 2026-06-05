@@ -91,6 +91,7 @@ func TestForensic_InvalidIPShowsError(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/forensic", strings.NewReader("ip=not-an-ip"))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.AddCookie(cookie)
+	req.Header.Set("X-CSRF-Token", srv.csrfTokenFor(cookie.Value))
 	rr := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rr, req)
 
@@ -109,6 +110,7 @@ func TestForensic_ValidIPShowsResult(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/forensic", strings.NewReader("ip=203.0.113.5"))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.AddCookie(cookie)
+	req.Header.Set("X-CSRF-Token", srv.csrfTokenFor(cookie.Value))
 	rr := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rr, req)
 
@@ -135,6 +137,7 @@ func TestForensic_ProtectedNetworkShowsBadge(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/forensic", strings.NewReader("ip=104.16.0.1"))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.AddCookie(cookie)
+	req.Header.Set("X-CSRF-Token", srv.csrfTokenFor(cookie.Value))
 	rr := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rr, req)
 
@@ -152,6 +155,7 @@ func TestForensic_NoEnrichmentServiceShowsError(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/forensic", strings.NewReader("ip=203.0.113.1"))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.AddCookie(cookie)
+	req.Header.Set("X-CSRF-Token", srv.csrfTokenFor(cookie.Value))
 	rr := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rr, req)
 
@@ -169,6 +173,7 @@ func TestForensic_AuditLogWrittenOnLookup(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/forensic", strings.NewReader("ip=203.0.113.1"))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.AddCookie(cookie)
+	req.Header.Set("X-CSRF-Token", srv.csrfTokenFor(cookie.Value))
 	rr := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rr, req)
 
@@ -190,6 +195,7 @@ func TestForensic_SecretNotInBody(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/forensic", strings.NewReader("ip=203.0.113.1"))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.AddCookie(cookie)
+	req.Header.Set("X-CSRF-Token", srv.csrfTokenFor(cookie.Value))
 	rr := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rr, req)
 
@@ -212,6 +218,7 @@ func TestForensic_NoCscliSpawn(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/forensic", strings.NewReader("ip=203.0.113.2"))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.AddCookie(cookie)
+	req.Header.Set("X-CSRF-Token", srv.csrfTokenFor(cookie.Value))
 	rr := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rr, req)
 
