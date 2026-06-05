@@ -24,6 +24,7 @@ import (
 	"github.com/jm/security-automation-go/internal/runtime/lock"
 	"github.com/jm/security-automation-go/internal/startupcheck"
 	"github.com/jm/security-automation-go/internal/ui"
+	uiauth "github.com/jm/security-automation-go/internal/ui/auth"
 )
 
 func runUI(ctx context.Context, logger *slog.Logger, cfg *config.Config) error {
@@ -66,6 +67,10 @@ func runUI(ctx context.Context, logger *slog.Logger, cfg *config.Config) error {
 	defer locker.Release()
 
 	logger.Info("instance lock acquired", "lock_file", lockFile)
+
+	if err := uiauth.InitializeFromPassword(cfg.UI.AdminPasswordFile, os.Getenv("SECURITY_AUTOMATION_INITIAL_ADMIN_PASSWORD")); err != nil {
+		return fmt.Errorf("bootstrap admin password: %w", err)
+	}
 
 	auditSink, err := ui.NewFileAuditSink(filepath.Join(cfg.StateDir, "ui-audit.log"))
 	if err != nil {
