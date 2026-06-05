@@ -56,6 +56,9 @@ import (
 )
 
 func runCFSync(configPath, mode string, dryRun bool, format string, metricsAddr string, args []string) {
+	if err := config.LoadEnvFile(config.DefaultEnvFile); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: could not read %s: %v\n", config.DefaultEnvFile, err)
+	}
 	cfg, err := config.Load(configPath)
 	if err != nil {
 		if configPath != "" {
