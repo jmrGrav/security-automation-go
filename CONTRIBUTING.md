@@ -6,8 +6,8 @@ reversibility, and operational safety take priority over new features.
 ## Ground rules
 
 1. **Do not change business behaviour** without a corresponding entry in
-   [DECISIONS.md](DECISIONS.md) and an update to
-   [COMPATIBILITY_CHECKLIST.md](COMPATIBILITY_CHECKLIST.md).
+   [docs/archive/DECISIONS.md](docs/archive/DECISIONS.md) and an update to
+   [docs/archive/COMPATIBILITY_CHECKLIST.md](docs/archive/COMPATIBILITY_CHECKLIST.md).
 2. **Python remains the production source of truth** until parity is proven and a
    formal GO is recorded. Do not enable Go mutations by default.
 3. **No secrets in commits.** Use `*.env.example` templates only.
@@ -37,5 +37,5 @@ CI (`.github/workflows/ci.yml`) runs the same set on every push and pull request
 
 New or changed logic at an external-effect boundary (Cloudflare mutate/transport,
 cscli adapter, rollback, state/journal) must ship with tests. See
-[TEST_GAP_REPORT.md](TEST_GAP_REPORT.md) for the current coverage debt and the
+[docs/archive/TEST_GAP_REPORT.md](docs/archive/TEST_GAP_REPORT.md) for the current coverage debt and the
 packages that most need tests before go-live.
