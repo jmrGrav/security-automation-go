@@ -11,7 +11,7 @@ import (
 
 func TestMutationSurface_CSRFAndMethodEnforcement(t *testing.T) {
 	srv, _, _ := newTestServer(t, map[string]string{"UI_SECRET": "test-secret"})
-	
+
 	// Initialize admin password file so it doesn't force change
 	passwordFile := srv.cfg.UI.AdminPasswordFile
 	if _, err := auth.InitializeBootstrapPassword(passwordFile); err != nil {

@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -34,11 +35,13 @@ type TracingConfig struct {
 }
 
 type GlobalConfig struct {
-	AppEnv      string        `yaml:"app_env"`
-	ServiceName string        `yaml:"service_name"`
-	Log         LogConfig     `yaml:"log"`
-	HTTP        HTTPConfig    `yaml:"http"`
-	Tracing     TracingConfig `yaml:"tracing"`
+	AppEnv         string        `yaml:"app_env"`
+	ServiceName    string        `yaml:"service_name"`
+	AdminToken     string        `yaml:"admin_token"`
+	AdminTokenFile string        `yaml:"admin_token_file"`
+	Log            LogConfig     `yaml:"log"`
+	HTTP           HTTPConfig    `yaml:"http"`
+	Tracing        TracingConfig `yaml:"tracing"`
 }
 
 const (
@@ -93,13 +96,13 @@ type VirusTotalConfig struct {
 }
 
 type UIBoolConfig struct {
-	Enabled             bool   `yaml:"enabled"`
-	Addr                string `yaml:"addr"`
-	Port                int    `yaml:"port"` // extracted from Addr; deprecated
-	MutationsEnabled    bool   `yaml:"mutations_enabled"`
-	SecretFile          string `yaml:"secret_file"`
-	ProviderStateFile   string `yaml:"provider_state_file"`
-	AdminPasswordFile   string `yaml:"admin_password_file"` // New: path to admin password hash
+	Enabled           bool   `yaml:"enabled"`
+	Addr              string `yaml:"addr"`
+	Port              int    `yaml:"port"` // extracted from Addr; deprecated
+	MutationsEnabled  bool   `yaml:"mutations_enabled"`
+	SecretFile        string `yaml:"secret_file"`
+	ProviderStateFile string `yaml:"provider_state_file"`
+	AdminPasswordFile string `yaml:"admin_password_file"` // New: path to admin password hash
 }
 
 type EnrichmentConfig struct {
@@ -153,8 +156,9 @@ func DefaultConfig() *Config {
 	return &Config{
 		Version: SchemaVersion,
 		Global: GlobalConfig{
-			AppEnv:      "production",
-			ServiceName: "cf-sync",
+			AppEnv:         "production",
+			ServiceName:    "cf-sync",
+			AdminTokenFile: "/etc/security-automation/secrets/admin_token",
 			Log: LogConfig{
 				Level:  "info",
 				Format: "json",
@@ -242,6 +246,12 @@ func Load(path string) (*Config, error) {
 }
 
 func applyEnvOverrides(cfg *Config) {
+	if v := os.Getenv("CF_SYNC_API_TOKEN"); v != "" {
+		cfg.Global.AdminToken = v
+	}
+	if v := os.Getenv("CF_SYNC_API_TOKEN_FILE"); v != "" {
+		cfg.Global.AdminTokenFile = v
+	}
 	if v := os.Getenv("CF_API_TOKEN"); v != "" {
 		cfg.Cloudflare.APIToken = v
 	}
@@ -389,12 +399,13 @@ func (c *Config) MaskedString() string {
 		maskedToken = c.Cloudflare.APIToken[:4] + "..." + c.Cloudflare.APIToken[len(c.Cloudflare.APIToken)-4:]
 	}
 	return fmt.Sprintf(
-		"version=%s env=%s service=%s zone=%s token=%s abuseipdb=%t spamhaus=%t virustotal=%t ui=%t ui_addr=%s ui_secret_file=%s ui_provider_state_file=%s state=%s interval=%s",
+		"version=%s env=%s service=%s zone=%s token=%s admin_token_file=%s abuseipdb=%t spamhaus=%t virustotal=%t ui=%t ui_addr=%s ui_secret_file=%s ui_provider_state_file=%s state=%s interval=%s",
 		c.Version,
 		c.Global.AppEnv,
 		c.Global.ServiceName,
 		c.Cloudflare.ZoneID,
 		maskedToken,
+		c.Global.AdminTokenFile,
 		c.AbuseIPDB.Enabled,
 		c.Spamhaus.Enabled,
 		c.VirusTotal.Enabled,
@@ -405,4 +416,18 @@ func (c *Config) MaskedString() string {
 		c.StateDir,
 		c.Interval,
 	)
+}
+
+// GetAdminToken returns the administrative token from environment/config or file.
+func (c *Config) GetAdminToken() string {
+	if c.Global.AdminToken != "" {
+		return c.Global.AdminToken
+	}
+	if c.Global.AdminTokenFile != "" {
+		b, err := os.ReadFile(c.Global.AdminTokenFile)
+		if err == nil {
+			return strings.TrimSpace(string(b))
+		}
+	}
+	return ""
 }

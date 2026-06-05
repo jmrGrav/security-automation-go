@@ -174,3 +174,29 @@ func TestRunWAFReplayIterationDoesNotAdvanceCursorOnSaveFailure(t *testing.T) {
 		t.Fatalf("expected cursor to stay put on save failure, got=%s want=%s", got, since)
 	}
 }
+
+func TestNewAuthenticator(t *testing.T) {
+	t.Run("with token", func(t *testing.T) {
+		token := "test-token"
+		t.Setenv("CF_SYNC_API_TOKEN", token)
+		a, err := newAuthenticator()
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		id, err := a.Authenticate(token)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if id.OperatorID != "admin" {
+			t.Errorf("expected operator ID 'admin', got %q", id.OperatorID)
+		}
+	})
+
+	t.Run("empty token", func(t *testing.T) {
+		t.Setenv("CF_SYNC_API_TOKEN", "")
+		_, err := newAuthenticator()
+		if err == nil {
+			t.Fatal("expected error for missing CF_SYNC_API_TOKEN, got nil")
+		}
+	})
+}
