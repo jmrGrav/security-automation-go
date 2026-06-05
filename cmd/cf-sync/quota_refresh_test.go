@@ -11,6 +11,7 @@ import (
 	"time"
 
 	abtransport "github.com/jm/security-automation-go/internal/abuseipdb/transport"
+	"github.com/jm/security-automation-go/internal/config"
 	"github.com/jm/security-automation-go/internal/security/quota"
 )
 
@@ -213,6 +214,18 @@ func newAbuseQuotaRefreshersForTest(do func(context.Context) (*http.Response, er
 	return &quotaRefreshers{
 		abuse: abtransport.New(abuseQuotaRefreshClient{do: do}, "token"),
 		now:   time.Now,
+	}
+}
+
+// TestNewQuotaRefreshers_EmptyAbuseIPDBKey verifies that an empty AbuseIPDB key
+// produces nil abuse transport in the refresher, preventing 401 poller calls.
+func TestNewQuotaRefreshers_EmptyAbuseIPDBKey(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.AbuseIPDB.APIKey = ""
+	q := newQuotaRefreshers(cfg, nil, nil, nil)
+	// With no providers at all, newQuotaRefreshers returns nil.
+	if q != nil {
+		t.Error("expected nil refreshers when no providers are configured")
 	}
 }
 

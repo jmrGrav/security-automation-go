@@ -174,9 +174,15 @@ func runCFSync(configPath, mode string, dryRun bool, format string, metricsAddr 
 
 	cfTransport := transport.New(hc, cfg.Cloudflare.APIToken)
 	govExec := execution.NewGovernedExecutor(jsonlJournal, cb, reg)
-	preBanTransport := abtransport.New(hc, cfg.AbuseIPDB.APIKey)
+	var preBanTransport *abtransport.Transport
+	if cfg.AbuseIPDB.APIKey != "" {
+		preBanTransport = abtransport.New(hc, cfg.AbuseIPDB.APIKey)
+	}
 	trustRegistry := sectrust.DefaultRegistry()
-	preBanChecker := abadapter.NewChecker(preBanTransport, abadapter.Config{TTL: cfg.AbuseIPDB.CacheTTL, Timeout: cfg.AbuseIPDB.RequestTimeout})
+	var preBanChecker *abadapter.Checker
+	if preBanTransport != nil {
+		preBanChecker = abadapter.NewChecker(preBanTransport, abadapter.Config{TTL: cfg.AbuseIPDB.CacheTTL, Timeout: cfg.AbuseIPDB.RequestTimeout})
+	}
 	securityTelemetry := newSecurityTelemetry(cfg, betterClient)
 	quotaRefreshers := newQuotaRefreshers(cfg, hc, cf, preBanTransport)
 	var outboxWorker *reporting.OutboxWorker
