@@ -105,7 +105,7 @@ type ResponseEnvelope[T any] struct {
 	Result     T                      `json:"result"`
 	Success    bool                   `json:"success"`
 	Errors     []models.ResponseError `json:"errors"`
-	Messages   []string               `json:"messages"`
+	Messages   json.RawMessage        `json:"messages,omitempty"`
 	ResultInfo *models.ResultInfo     `json:"result_info,omitempty"`
 }
 
