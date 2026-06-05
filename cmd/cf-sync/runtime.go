@@ -52,6 +52,7 @@ import (
 	"github.com/jm/security-automation-go/internal/runtime/timeline"
 	sectrust "github.com/jm/security-automation-go/internal/security/trust"
 	"github.com/jm/security-automation-go/internal/services/reporting"
+	"github.com/jm/security-automation-go/internal/startuplog"
 	"github.com/jm/security-automation-go/internal/storage/sqlite"
 )
 
@@ -82,6 +83,18 @@ func runCFSync(configPath, mode string, dryRun bool, format string, metricsAddr 
 		fmt.Printf("Warning: Failed to initialize tracing: %v\n", err)
 	}
 	defer otelShutdown(ctx)
+
+	startLogger, startLogErr := startuplog.New(startuplog.DefaultLogDir)
+	if startLogErr != nil {
+		fmt.Fprintf(os.Stderr, "Warning: startup logging unavailable: %v\n", startLogErr)
+	}
+	defer startLogger.Close()
+	startLogger.WriteStartup(startuplog.StartupInfo{
+		Mode:       mode,
+		ConfigFile: configPath,
+		DBPath:     cfg.StateDir,
+		DryRun:     dryRun,
+	})
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: mapLogLevel(cfg.Global.Log.Level)}))
 	if mode == "ui" {
