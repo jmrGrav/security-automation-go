@@ -1,0 +1,14 @@
+/var/log/security-automation/*.log {
+    daily
+    rotate 14
+    compress
+    delaycompress
+    missingok
+    notifempty
+    create 0640 root root
+    sharedscripts
+    postrotate
+        # Signal the daemon to reopen log files if it holds them open.
+        systemctl kill --kill-who=main --signal=SIGUSR1 cf-sync.service 2>/dev/null || true
+    endscript
+}
