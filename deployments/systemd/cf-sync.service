@@ -27,8 +27,7 @@ RuntimeDirectory=cf-sync
 WorkingDirectory=/var/lib/cf-sync
 
 # Execution
-Environment=CF_API_TOKEN=
-Environment=CF_ZONE_ID=
+EnvironmentFile=-/etc/security-automation/security-automation.env
 Environment=STATE_DIR=/var/lib/cf-sync
 ExecStart=/usr/local/bin/cf-sync -mode daemon -interval 1m
 
