@@ -288,5 +288,32 @@ func (c *redirectingClient) Do(ctx context.Context, req *http.Request) (*http.Re
 	return c.inner.Do(req.WithContext(ctx))
 }
 
+// TestTransport_ExecuteAndDecode_MessagesAsObjects verifies that the Cloudflare
+// messages field is accepted when the API returns objects instead of strings.
+func TestTransport_ExecuteAndDecode_MessagesAsObjects(t *testing.T) {
+	payload := `{"result":{"id":"abc","status":"active"},"success":true,"errors":[],"messages":[{"code":0,"message":"info"}]}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(payload))
+	}))
+	defer srv.Close()
+
+	redirectClient := &redirectingClient{base: srv.URL, inner: srv.Client()}
+	tr := transport.New(redirectClient, "test-tok")
+
+	type tokenResult struct {
+		ID     string `json:"id"`
+		Status string `json:"status"`
+	}
+	res, _, err := transport.ExecuteAndDecode[tokenResult](context.Background(), tr, http.MethodGet, "/test", nil, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if res.ID != "abc" {
+		t.Errorf("expected id=abc, got %s", res.ID)
+	}
+}
+
 // Ensure redirectingClient implements httpclient.Client.
 var _ httpclient.Client = (*redirectingClient)(nil)
