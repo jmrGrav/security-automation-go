@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"strconv"
 	"strings"
@@ -313,6 +314,18 @@ func applyEnvOverrides(cfg *Config) {
 	if v := os.Getenv("UI_ADDR"); v != "" {
 		cfg.UI.Addr = v
 	}
+	bindAddr := os.Getenv("SECURITY_AUTOMATION_BIND_ADDR")
+	webPort := os.Getenv("SECURITY_AUTOMATION_WEB_PORT")
+	if bindAddr != "" || webPort != "" {
+		host, portStr, _ := net.SplitHostPort(cfg.UI.Addr)
+		if bindAddr != "" {
+			host = bindAddr
+		}
+		if webPort != "" {
+			portStr = webPort
+		}
+		cfg.UI.Addr = net.JoinHostPort(host, portStr)
+	}
 	if v := os.Getenv("UI_MUTATIONS_ENABLED"); v != "" {
 		if enabled, err := strconv.ParseBool(v); err == nil {
 			cfg.UI.MutationsEnabled = enabled
@@ -378,6 +391,17 @@ func validate(cfg *Config) error {
 	}
 	if cfg.UI.Enabled && cfg.UI.Addr == "" {
 		return errors.New("ui.addr is required when UI is enabled (set UI_ADDR or ui.addr in the config file)")
+	}
+	if v := os.Getenv("SECURITY_AUTOMATION_BIND_ADDR"); v != "" {
+		if net.ParseIP(v) == nil {
+			return fmt.Errorf("SECURITY_AUTOMATION_BIND_ADDR %q is not a valid IP address", v)
+		}
+	}
+	if v := os.Getenv("SECURITY_AUTOMATION_WEB_PORT"); v != "" {
+		p, err := strconv.Atoi(v)
+		if err != nil || p < 1 || p > 65535 {
+			return fmt.Errorf("SECURITY_AUTOMATION_WEB_PORT %q is not a valid port (1-65535)", v)
+		}
 	}
 	if cfg.Interval <= 0 {
 		return errors.New("interval must be positive (set global.interval or interval in the config file)")
