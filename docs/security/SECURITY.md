@@ -16,7 +16,7 @@ traffic, treat it as a control-plane asset.
 
 Report privately. Do **not** open a public issue for a security defect.
 
-- Email: rohmerjeanmarcel@gmail.com
+- Email: security@arleo.eu
 - Use GitHub private security advisories on this repository.
 
 Expect an acknowledgement within 72 hours.
