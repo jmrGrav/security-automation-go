@@ -8,7 +8,7 @@ authority** — see [Current status](#current-status).
 
 > **Status: pre-cutover.** Python remains the source of truth. Go runs in
 > observe-only / dry-run. Do not enable Go mutations in production until a formal
-> GO is recorded against [GO_LIVE_CHECKLIST.md](GO_LIVE_CHECKLIST.md).
+> GO is recorded against [docs/runbooks/RELEASE_CUTOVER_CHECKLIST.md](docs/runbooks/RELEASE_CUTOVER_CHECKLIST.md).
 
 ## What it replaces
 
@@ -40,7 +40,7 @@ cmd/{crowdsec-sync, cf-allowlist-sync, cf-cleanup}   LEGACY Phase-0 entrypoints 
 > and `internal/app` are Phase-0 scaffolding wired to stub clients
 > (`internal/crowdsec/client.go`, `internal/cidrban`, `internal/modsecurity`,
 > `internal/recidive` return `ErrNotImplemented`). They are retained for history
-> and must not be deployed. See [TEST_GAP_REPORT.md](TEST_GAP_REPORT.md).
+> and must not be deployed. See [docs/archive/TEST_GAP_REPORT.md](docs/archive/TEST_GAP_REPORT.md).
 
 ## Current status
 
@@ -50,7 +50,7 @@ cmd/{crowdsec-sync, cf-allowlist-sync, cf-cleanup}   LEGACY Phase-0 entrypoints 
   `internal/crowdsec/adapter` (cscli bans) — currently have **no tests**.
 - Several Python responsibilities are **not yet ported** to the runnable path:
   recidivist escalation, `/24` auto-ban, ModSecurity-log-based bans, and the
-  allowlist-sync / cleanup flows. See [TEST_GAP_REPORT.md](TEST_GAP_REPORT.md)
+  allowlist-sync / cleanup flows. See [docs/archive/TEST_GAP_REPORT.md](docs/archive/TEST_GAP_REPORT.md)
   for the authoritative Python ↔ Go gap analysis.
 
 ## Build & verify
@@ -73,20 +73,21 @@ sensitive is committed.
 
 ## Deployment
 
-Observe-only first. See [DEPLOYMENT_PLAN.md](DEPLOYMENT_PLAN.md) and the systemd
+Observe-only first. See [docs/runbooks/RUNBOOK.md](docs/runbooks/RUNBOOK.md) and the systemd
 examples in [deployments/systemd](deployments/systemd/).
 
 ## Documentation
 
 | Doc | Purpose |
 |---|---|
-| [DEPLOYMENT_PLAN.md](DEPLOYMENT_PLAN.md) | Phased Python→Go migration, rollback, monitoring, exit criteria |
-| [GO_LIVE_CHECKLIST.md](GO_LIVE_CHECKLIST.md) | Mandatory pre-cutover validation gate |
-| [TEST_GAP_REPORT.md](TEST_GAP_REPORT.md) | Python ↔ Go gap analysis + untested critical packages |
-| [ARCHITECTURE.md](ARCHITECTURE.md) | Module layout |
-| [COMPATIBILITY_CHECKLIST.md](COMPATIBILITY_CHECKLIST.md) | Behaviour parity invariants |
-| [RISK_ANALYSIS.md](RISK_ANALYSIS.md) | Migration risk register |
-| [SECURITY.md](SECURITY.md) | Reporting + operational safety |
+| [docs/architecture/ARCHITECTURE.md](docs/architecture/ARCHITECTURE.md) | Module layout |
+| [docs/runbooks/CUTOVER_RUNBOOK.md](docs/runbooks/CUTOVER_RUNBOOK.md) | Primary operational guide for the Go-Live transition |
+| [docs/security/SECURITY.md](docs/security/SECURITY.md) | Reporting + operational safety |
+| [docs/testing/TESTING.md](docs/testing/TESTING.md) | Guide for running and writing tests |
+| [docs/archive/TEST_GAP_REPORT.md](docs/archive/TEST_GAP_REPORT.md) | Python ↔ Go gap analysis (Historical) |
+| [docs/archive/MIGRATION_PLAN.md](docs/archive/MIGRATION_PLAN.md) | Migration strategy (Historical) |
+| [docs/archive/RISK_ANALYSIS.md](docs/archive/RISK_ANALYSIS.md) | Migration risk register (Historical) |
+
 
 ## License
 
