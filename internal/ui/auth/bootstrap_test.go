@@ -6,6 +6,62 @@ import (
 	"testing"
 )
 
+func TestInitializeFromPassword_CreatesFileWithHash(t *testing.T) {
+	tmpDir := t.TempDir()
+	secretFile := filepath.Join(tmpDir, "admin_password")
+
+	if err := InitializeFromPassword(secretFile, "s3cret!"); err != nil {
+		t.Fatalf("InitializeFromPassword: %v", err)
+	}
+
+	stat, err := os.Stat(secretFile)
+	if err != nil {
+		t.Fatalf("secret file not created: %v", err)
+	}
+	if stat.Mode().Perm() != 0o600 {
+		t.Errorf("wrong permissions: %o", stat.Mode().Perm())
+	}
+
+	state, err := GetBootstrapState(secretFile)
+	if err != nil {
+		t.Fatalf("GetBootstrapState: %v", err)
+	}
+	if !state.IsBootstrap {
+		t.Error("IsBootstrap should be true")
+	}
+	if !VerifyPassword(state.PasswordHash, "s3cret!") {
+		t.Error("stored hash does not verify with supplied password")
+	}
+}
+
+func TestInitializeFromPassword_NoOpWhenFileExists(t *testing.T) {
+	tmpDir := t.TempDir()
+	secretFile := filepath.Join(tmpDir, "admin_password")
+
+	// Create file first
+	if err := InitializeFromPassword(secretFile, "first"); err != nil {
+		t.Fatalf("first call: %v", err)
+	}
+	// Second call with different password must be a no-op
+	if err := InitializeFromPassword(secretFile, "second"); err != nil {
+		t.Fatalf("second call: %v", err)
+	}
+
+	state, _ := GetBootstrapState(secretFile)
+	if VerifyPassword(state.PasswordHash, "second") {
+		t.Error("file was overwritten on second call")
+	}
+}
+
+func TestInitializeFromPassword_EmptyPasswordNoFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	secretFile := filepath.Join(tmpDir, "admin_password")
+
+	if err := InitializeFromPassword(secretFile, ""); err == nil {
+		t.Error("expected error when password is empty and file does not exist")
+	}
+}
+
 func TestInitializeBootstrapPassword(t *testing.T) {
 	tmpDir := t.TempDir()
 	secretFile := filepath.Join(tmpDir, "admin_password")

@@ -54,6 +54,32 @@ func InitializeBootstrapPassword(secretFile string) (string, error) {
 	return password, nil
 }
 
+// InitializeFromPassword writes a bootstrap state file using the supplied
+// plaintext password. If the secret file already exists the call is a no-op.
+// Returns an error if the password is empty and no credential file exists yet.
+func InitializeFromPassword(secretFile, password string) error {
+	if _, err := os.Stat(secretFile); err == nil {
+		return nil // already bootstrapped
+	}
+	if password == "" {
+		return fmt.Errorf("SECURITY_AUTOMATION_INITIAL_ADMIN_PASSWORD is empty and no admin credential exists at %s", secretFile)
+	}
+	dir := filepath.Dir(secretFile)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("create secret dir: %w", err)
+	}
+	hash, err := HashPassword(password)
+	if err != nil {
+		return fmt.Errorf("hash initial password: %w", err)
+	}
+	state := BootstrapState{IsBootstrap: true, PasswordHash: hash}
+	data, err := json.Marshal(state)
+	if err != nil {
+		return fmt.Errorf("marshal bootstrap state: %w", err)
+	}
+	return os.WriteFile(secretFile, data, 0o600)
+}
+
 // GetBootstrapState loads the bootstrap state from the secret file.
 func GetBootstrapState(secretFile string) (BootstrapState, error) {
 	data, err := os.ReadFile(secretFile)
