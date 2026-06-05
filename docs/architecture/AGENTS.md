@@ -99,10 +99,10 @@ Adapter responsibilities:
 When resuming work on Python 3.6.0 migration:
 
 1. Identify the current legacy Python artifact(s).
-2. Produce or update `docs/migration/python36-gap-analysis.md`.
+2. Produce or update [docs/archive/python36-gap-analysis.md](../archive/python36-gap-analysis.md).
 3. Implement only the next safe slice.
 4. Validate fully before stopping.
 
 ## Reference
 
-Read `ACCURACY_POLICY.md`, `SESSION_STATUS.md`, `MIGRATION_PROGRESS.md`, and `DECISIONS.md` before making substantial changes.
+Read [docs/testing/ACCURACY_POLICY.md](../testing/ACCURACY_POLICY.md), [docs/archive/SESSION_STATUS.md](../archive/SESSION_STATUS.md), [docs/archive/MIGRATION_PROGRESS.md](../archive/MIGRATION_PROGRESS.md), and [docs/archive/DECISIONS.md](../archive/DECISIONS.md) before making substantial changes.

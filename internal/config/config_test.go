@@ -156,3 +156,40 @@ runtime:
 		t.Fatalf("expected unsupported runtime profile error, got %v", err)
 	}
 }
+
+func TestConfig_GetAdminToken(t *testing.T) {
+	t.Run("from memory", func(t *testing.T) {
+		cfg := DefaultConfig()
+		cfg.Global.AdminToken = "mem-token"
+		if got := cfg.GetAdminToken(); got != "mem-token" {
+			t.Errorf("expected mem-token, got %s", got)
+		}
+	})
+
+	t.Run("from file", func(t *testing.T) {
+		tmpfile, _ := os.CreateTemp("", "token*")
+		defer os.Remove(tmpfile.Name())
+		tmpfile.Write([]byte("file-token\n"))
+		tmpfile.Close()
+
+		cfg := DefaultConfig()
+		cfg.Global.AdminTokenFile = tmpfile.Name()
+		if got := cfg.GetAdminToken(); got != "file-token" {
+			t.Errorf("expected file-token, got %s", got)
+		}
+	})
+
+	t.Run("memory overrides file", func(t *testing.T) {
+		tmpfile, _ := os.CreateTemp("", "token*")
+		defer os.Remove(tmpfile.Name())
+		tmpfile.Write([]byte("file-token"))
+		tmpfile.Close()
+
+		cfg := DefaultConfig()
+		cfg.Global.AdminToken = "mem-token"
+		cfg.Global.AdminTokenFile = tmpfile.Name()
+		if got := cfg.GetAdminToken(); got != "mem-token" {
+			t.Errorf("expected mem-token (override), got %s", got)
+		}
+	})
+}

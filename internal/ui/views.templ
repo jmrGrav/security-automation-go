@@ -1,6 +1,6 @@
 package ui
 
-templ Layout(title string) {
+templ Layout(title string, csrfToken string) {
 	<!DOCTYPE html>
 	<html lang="en">
 		<head>
@@ -35,6 +35,7 @@ templ Layout(title string) {
 					<a href="/providers">Providers</a>
 					<a href="/forensic">Forensic</a>
 					<form action="/logout" method="post" style="display:inline">
+						<input type="hidden" name="csrf_token" value={ csrfToken }/>
 						<button type="submit">Logout</button>
 					</form>
 				</div>
@@ -78,8 +79,8 @@ templ LoginPage(errorText string) {
 	</html>
 }
 
-templ DashboardPage(view DashboardView) {
-	@Layout("Operator Dashboard") {
+templ DashboardPage(view DashboardView, csrfToken string) {
+	@Layout("Operator Dashboard", csrfToken) {
 		<section class="grid">
 			<div class="panel">
 				<h2>Runtime status</h2>
@@ -105,8 +106,8 @@ templ DashboardPage(view DashboardView) {
 	}
 }
 
-templ ProvidersPage(providers []ProviderView) {
-	@Layout("Providers") {
+templ ProvidersPage(providers []ProviderView, csrfToken string) {
+	@Layout("Providers", csrfToken) {
 		<section class="panel">
 			<h2>Providers</h2>
 			<p class="muted">Configured state is local-only. Keys are masked and never rendered in full.</p>
