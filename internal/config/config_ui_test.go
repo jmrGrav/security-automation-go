@@ -11,7 +11,7 @@ func TestConfig_UIAndProviderEnvOverrides(t *testing.T) {
 	t.Setenv("UI_ENABLED", "1")
 	t.Setenv("UI_ADDR", "127.0.0.1:9090")
 	t.Setenv("UI_MUTATIONS_ENABLED", "0")
-	t.Setenv("UI_SECRET_FILE", "/var/lib/cf-sync/secrets.local")
+	t.Setenv("UI_SECRET_FILE", "/var/lib/security-automation-go/secrets.local")
 	t.Setenv("ENRICHMENT_ENABLED", "1")
 	t.Setenv("ENRICHMENT_DNS_ENABLED", "1")
 	t.Setenv("ENRICHMENT_ASN_ENABLED", "1")
@@ -33,7 +33,7 @@ func TestConfig_UIAndProviderEnvOverrides(t *testing.T) {
 	if !cfg.UI.Enabled || cfg.UI.Addr != "127.0.0.1:9090" || cfg.UI.MutationsEnabled {
 		t.Fatalf("unexpected UI config: %+v", cfg.UI)
 	}
-	if cfg.UI.SecretFile != "/var/lib/cf-sync/secrets.local" {
+	if cfg.UI.SecretFile != "/var/lib/security-automation-go/secrets.local" {
 		t.Fatalf("unexpected UI secret file: %s", cfg.UI.SecretFile)
 	}
 	if !cfg.Enrichment.Enabled || !cfg.Enrichment.DNSEnabled || !cfg.Enrichment.ASNEnabled {

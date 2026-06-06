@@ -18,7 +18,7 @@ The canonical layout for a fresh installation:
 │   └── initial-admin-password       # One-time setup password (0600, invalidated after setup)
 └── backups/                         # Reserved for config backups
 
-/var/lib/cf-sync/                    # State directory (StateDirectory= in systemd unit)
+/var/lib/security-automation-go/     # State directory (StateDirectory= in systemd unit)
 └── <scope-id>/
     ├── runtime.db                   # SQLite: state, settings, wizard progress
     ├── security-automation-go.pid   # Instance lock
@@ -52,5 +52,5 @@ Never chmod these files to world-readable.
 | `/etc/security-automation-go/` | 0755 | Config root |
 | `/etc/security-automation-go/secrets/` | 0700 (recommended) | Secret files |
 | `/etc/security-automation-go/runtime/` | 0700 (recommended) | Transient runtime files |
-| `/var/lib/cf-sync/` | 0750 | SQLite + state |
+| `/var/lib/security-automation-go/` | 0750 | SQLite + state |
 | `/var/log/security-automation/` | 0750 | Logs |

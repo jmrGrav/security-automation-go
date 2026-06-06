@@ -60,7 +60,7 @@ sudo systemctl stop cf-sync
 sudo rm /etc/security-automation-go/runtime/initial-admin-password
 sudo rm /etc/security-automation-go/secrets/admin_password
 # Remove the SQLite DB to reset setup state:
-sudo rm -f /var/lib/cf-sync/<scope-dir>/runtime.db
+sudo rm -f /var/lib/security-automation-go/<scope-dir>/runtime.db
 sudo systemctl start cf-sync
 ```
 

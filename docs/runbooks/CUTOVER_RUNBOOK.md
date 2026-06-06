@@ -73,7 +73,7 @@ Run all checks on the production host before starting.
 ### 1. Shadow criterion verified
 
 ```bash
-cat /var/lib/cf-sync/shadow/SHADOW_MODE_REPORT.md | grep "7-day agreement\|Status\|in_sync"
+cat /var/lib/security-automation-go/shadow/SHADOW_MODE_REPORT.md | grep "7-day agreement\|Status\|in_sync"
 # Expected: 7-day agreement ≥99.9% OR "PENDING" with ≥6 days data and current avg ≥99.9%
 ```
 
@@ -151,7 +151,7 @@ CF_ZONE_ID=<YOUR_ZONE_ID>
 ABUSEIPDB_KEY=<YOUR_ABUSEIPDB_KEY>
 ABUSEIPDB_REPORTING_ENABLED=true
 BETTERSTACK_SOURCE_TOKEN=<YOUR_BETTERSTACK_TOKEN>
-STATE_DIR=/var/lib/cf-sync
+STATE_DIR=/var/lib/security-automation-go
 DECISIONS_LOG=/var/log/crowdsec/decisions.log
 NGINX_LOG_DIR=/var/log/nginx
 EOF
@@ -177,7 +177,7 @@ crowdsec:
   timeout: 15s
   allowlist_name: my_allowlist
 interval: 60s
-state_dir: /var/lib/cf-sync
+state_dir: /var/lib/security-automation-go
 EOF
 ```
 
@@ -223,13 +223,13 @@ RestrictNamespaces=yes
 RestrictRealtime=yes
 MemoryDenyWriteExecute=yes
 LockPersonality=yes
-StateDirectory=cf-sync
-RuntimeDirectory=cf-sync
+StateDirectory=security-automation-go
+RuntimeDirectory=security-automation-go
 LogsDirectory=security-automation
 LogsDirectoryMode=0750
-WorkingDirectory=/var/lib/cf-sync
+WorkingDirectory=/var/lib/security-automation-go
 EnvironmentFile=-/etc/security-automation-go/security-automation.env
-Environment=STATE_DIR=/var/lib/cf-sync
+Environment=STATE_DIR=/var/lib/security-automation-go
 ExecStart=/usr/local/bin/cf-sync -mode daemon -interval 1m
 Restart=always
 RestartSec=30
@@ -364,7 +364,7 @@ sudo journalctl -u cf-sync --since "30 minutes ago" --no-pager \
 # Normal: small number proportional to actual CS decisions
 
 # 3. AbuseIPDB outbox is processing
-sudo ls -la /var/lib/cf-sync/*.db 2>/dev/null
+sudo ls -la /var/lib/security-automation-go/*.db 2>/dev/null
 sudo journalctl -u cf-sync --since "30 minutes ago" --no-pager \
   | grep "abuseipdb\|reporting"
 
