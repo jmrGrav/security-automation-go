@@ -91,3 +91,38 @@ func TestNew_NonExistentParentDir(t *testing.T) {
 	}
 	defer l.Close()
 }
+
+// TestLogger_CopyTruncate_WritesAfterTruncate proves that Logger opened with
+// O_APPEND correctly writes to position 0 after the file is truncated in place
+// by logrotate's copytruncate strategy — no SIGUSR1 or file reopen required.
+func TestLogger_CopyTruncate_WritesAfterTruncate(t *testing.T) {
+	dir := t.TempDir()
+	l, err := New(dir)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	l.WriteStartup(StartupInfo{Mode: "before-rotate"})
+
+	// Simulate copytruncate: truncate the file to zero while the Logger
+	// still holds its fd open. O_APPEND must seek to end (== 0) before writing.
+	startupPath := filepath.Join(dir, "startup.log")
+	if err := os.Truncate(startupPath, 0); err != nil {
+		t.Fatalf("truncate: %v", err)
+	}
+
+	l.WriteStartup(StartupInfo{Mode: "after-rotate"})
+	l.Close()
+
+	data, err := os.ReadFile(startupPath)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	got := string(data)
+	if !strings.Contains(got, "mode=after-rotate") {
+		t.Errorf("expected post-truncate write in file, got: %q", got)
+	}
+	if strings.Contains(got, "mode=before-rotate") {
+		t.Errorf("truncated content should be gone, still present: %q", got)
+	}
+}
