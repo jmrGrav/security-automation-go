@@ -214,7 +214,7 @@ func DefaultConfig() *Config {
 		OpenResty: OpenRestyConfig{
 			EventsFile: "/run/crowdsec-lua/events.jsonl",
 		},
-		StateDir: "/var/lib/cf-sync",
+		StateDir: "/var/lib/security-automation-go",
 		Interval: 60 * time.Second,
 	}
 }

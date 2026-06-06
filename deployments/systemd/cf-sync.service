@@ -25,20 +25,20 @@ MemoryDenyWriteExecute=yes
 LockPersonality=yes
 
 # Paths
-StateDirectory=cf-sync
-RuntimeDirectory=cf-sync
+StateDirectory=security-automation-go
+RuntimeDirectory=security-automation-go
 LogsDirectory=security-automation
 LogsDirectoryMode=0750
-WorkingDirectory=/var/lib/cf-sync
+WorkingDirectory=/var/lib/security-automation-go
 
 # Execution
 EnvironmentFile=/etc/security-automation-go/secrets/cloudflare_api_token
 EnvironmentFile=-/etc/security-automation-go/security-automation.env
-Environment=STATE_DIR=/var/lib/cf-sync
+Environment=STATE_DIR=/var/lib/security-automation-go
 ExecStart=/usr/local/bin/cf-sync -mode daemon -interval 1m
 
 # Paths (writable)
-ReadWritePaths=/var/lib/cf-sync /var/log/crowdsec /var/log/security-automation /etc/security-automation-go/secrets /etc/security-automation-go/runtime
+ReadWritePaths=/var/lib/security-automation-go /var/log/crowdsec /var/log/security-automation /etc/security-automation-go/secrets /etc/security-automation-go/runtime
 
 # Reliability
 Restart=always

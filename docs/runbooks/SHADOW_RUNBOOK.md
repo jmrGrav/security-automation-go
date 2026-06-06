@@ -31,7 +31,7 @@ mutation paths, and no new shadow-status runtime mode.
   the host uses the installed cleanup unit.
 - `/etc/security-automation-go/cf-allowlist-sync.env` - environment for the
   allowlist sync service, if the host uses the installed timer/service pair.
-- `/var/lib/cf-sync/secrets.local` - UI secret file used by `cf-sync -mode ui`.
+- `/var/lib/security-automation-go/secrets.local` - UI secret file used by `cf-sync -mode ui`.
 
 Provider-specific AI config is environment-only and fail-closed:
 
@@ -108,7 +108,7 @@ a deployment issue and restore the legacy authority path first.
 systemctl status cf-shadow.service --no-pager
 journalctl -u cf-shadow.service --no-pager -n 100
 grep -E '^(CF_API_TOKEN|CF_ZONE_ID|STATE_DIR|CLOUDFLARE_MUTATIONS_ENABLED|AI_EXPLAIN_ENABLED|AI_PROVIDER_.*_ENABLED)=' /etc/security-automation-go/cf-shadow.env
-test -f /var/lib/cf-sync/shadow/SHADOW_MODE_REPORT.md && tail -n 20 /var/lib/cf-sync/shadow/SHADOW_MODE_REPORT.md
+test -f /var/lib/security-automation-go/shadow/SHADOW_MODE_REPORT.md && tail -n 20 /var/lib/security-automation-go/shadow/SHADOW_MODE_REPORT.md
 ```
 
 Expected posture:
@@ -223,10 +223,10 @@ Expected result:
 - `journalctl -u crowdsec-sync.service`
 - `journalctl -u cf-allowlist-sync.timer`
 - `journalctl -u cf-cleanup.service`
-- `/var/lib/cf-sync/shadow/SHADOW_MODE_REPORT.md`
-- `/var/lib/cf-sync/shadow/PYTHON_GO_PARITY_REPORT.md`
-- `/var/lib/cf-sync/shadow/SHADOW_DRIFT_ANALYSIS.md` if present
-- `du -sh /var/lib/cf-sync /var/lib/cf-sync/shadow`
+- `/var/lib/security-automation-go/shadow/SHADOW_MODE_REPORT.md`
+- `/var/lib/security-automation-go/shadow/PYTHON_GO_PARITY_REPORT.md`
+- `/var/lib/security-automation-go/shadow/SHADOW_DRIFT_ANALYSIS.md` if present
+- `du -sh /var/lib/security-automation-go /var/lib/security-automation-go/shadow`
 
 Watch for:
 
@@ -243,8 +243,8 @@ Watch for:
 - `journalctl -u cf-cleanup.service --no-pager -n 100`
 - `journalctl -u cf-allowlist-sync.service --no-pager -n 100` if the host uses
   a service unit instead of a timer
-- `/var/lib/cf-sync/shadow/SHADOW_MODE_REPORT.md`
-- `/var/lib/cf-sync/shadow/PYTHON_GO_PARITY_REPORT.md`
+- `/var/lib/security-automation-go/shadow/SHADOW_MODE_REPORT.md`
+- `/var/lib/security-automation-go/shadow/PYTHON_GO_PARITY_REPORT.md`
 
 ## Rollback Procedure
 

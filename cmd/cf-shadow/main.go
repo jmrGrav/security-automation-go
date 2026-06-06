@@ -4,7 +4,7 @@
 //
 // Usage:
 //
-//	cf-shadow [--config /path/to/config.yaml] [--report-dir /var/lib/cf-sync]
+//	cf-shadow [--config /path/to/config.yaml] [--report-dir /var/lib/security-automation-go]
 //
 // Environment:
 //

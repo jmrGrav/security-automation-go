@@ -7,7 +7,7 @@ set -euo pipefail
 BINARY_SRC="${1:-./bin/cf-shadow}"
 INSTALL_DIR="/opt/security-automation-go"
 CONFIG_DIR="/etc/security-automation-go"
-STATE_DIR="/var/lib/cf-sync/shadow"
+STATE_DIR="/var/lib/security-automation-go/shadow"
 SERVICE_FILE="/etc/systemd/system/cf-shadow.service"
 
 echo "=== cf-shadow shadow mode installer ==="

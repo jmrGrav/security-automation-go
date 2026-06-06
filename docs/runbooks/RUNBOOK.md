@@ -27,7 +27,7 @@
    - `UI_ADDR=127.0.0.1:9090`
    - `UI_MUTATIONS_ENABLED=0` unless the operator has explicitly enabled
      mutations
-   - `UI_SECRET_FILE=/var/lib/cf-sync/secrets.local`
+   - `UI_SECRET_FILE=/var/lib/security-automation-go/secrets.local`
 2. Confirm the local secret file exists or can be created by the service user
    and is `0600`.
 3. Confirm provider keys are configured only through env or the local secret
