@@ -37,6 +37,8 @@ var knownTables = map[string]struct{}{
 	"abuseipdb_report_outbox":      {},
 	"approval_execution_evidence":  {},
 	"rollback_checkpoints":         {},
+	"setup_state":                  {},
+	"ui_settings":                  {},
 }
 
 // DB manages a scoped SQLite connection with migrations.
@@ -348,6 +350,25 @@ func (s *DB) runMigrations() error {
 				ON rollback_checkpoints(scope_id, updated_at DESC);
 			`,
 		},
+		{
+			Version:     15,
+			Description: "Setup wizard state and UI settings",
+			SQL: `
+				CREATE TABLE IF NOT EXISTS setup_state (
+					id INTEGER PRIMARY KEY CHECK (id = 1),
+					current_step INTEGER NOT NULL DEFAULT 1,
+					completed_at TIMESTAMP,
+					updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+				);
+				INSERT OR IGNORE INTO setup_state (id, current_step) VALUES (1, 1);
+
+				CREATE TABLE IF NOT EXISTS ui_settings (
+					key TEXT PRIMARY KEY,
+					value TEXT NOT NULL,
+					updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+				);
+			`,
+		},
 	}
 
 	return m.Migrate(context.Background(), migrations)
@@ -546,6 +567,8 @@ func (s *DB) VerifySchema(ctx context.Context) error {
 		"abuseipdb_report_outbox",
 		"approval_execution_evidence",
 		"rollback_checkpoints",
+		"setup_state",
+		"ui_settings",
 	}
 	for _, table := range requiredTables {
 		var exists int
