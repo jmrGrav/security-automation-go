@@ -24,11 +24,11 @@
 
 ## Token Storage
 
-- Cloudflare API token: stored in env-file format at `/etc/security-automation/secrets/cloudflare_api_token` (0600)
+- Cloudflare API token: stored in env-file format at `/etc/security-automation-go/secrets/cloudflare_api_token` (0600)
 - Loaded by the daemon at startup via `EnvironmentFile=` in the systemd unit — never in memory beyond what the daemon requires
 - The setup wizard validates the token against the CF API before writing it — an invalid token is rejected before it reaches disk
 
 ## Minimal Footprint
 
 - The wizard only stores secrets the operator explicitly provides — optional steps (AbuseIPDB, BetterStack, AI) write nothing if skipped
-- `/etc/security-automation/runtime/initial-admin-password` is truncated (not deleted) after step 2 to preserve the file's inode for auditing
+- `/etc/security-automation-go/runtime/initial-admin-password` is truncated (not deleted) after step 2 to preserve the file's inode for auditing

@@ -228,7 +228,7 @@ RuntimeDirectory=cf-sync
 LogsDirectory=security-automation
 LogsDirectoryMode=0750
 WorkingDirectory=/var/lib/cf-sync
-EnvironmentFile=-/etc/security-automation/security-automation.env
+EnvironmentFile=-/etc/security-automation-go/security-automation.env
 Environment=STATE_DIR=/var/lib/cf-sync
 ExecStart=/usr/local/bin/cf-sync -mode daemon -interval 1m
 Restart=always

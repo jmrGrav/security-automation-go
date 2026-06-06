@@ -288,14 +288,15 @@ func (s *Server) handleSetupStep3Post(w http.ResponseWriter, r *http.Request) {
 	}
 	http.Redirect(w, r, "/setup/step/4", http.StatusFound)
 }
-const cfTokenSecretPath = "/etc/security-automation/secrets/cf_sync_api_token.env"
+
+const cfTokenSecretPath = "/etc/security-automation-go/secrets/cloudflare_api_token"
 
 const (
-	abuseIPDBSecretPath   = "/etc/security-automation/secrets/abuseipdb_api_key"
-	betterStackSecretPath = "/etc/security-automation/secrets/betterstack_source_token"
-	openAISecretPath      = "/etc/security-automation/secrets/openai_api_key"
-	anthropicSecretPath   = "/etc/security-automation/secrets/anthropic_api_key"
-	geminiSecretPath      = "/etc/security-automation/secrets/gemini_api_key"
+	abuseIPDBSecretPath   = "/etc/security-automation-go/secrets/abuseipdb_api_key"
+	betterStackSecretPath = "/etc/security-automation-go/secrets/betterstack_source_token"
+	openAISecretPath      = "/etc/security-automation-go/secrets/openai_api_key"
+	anthropicSecretPath   = "/etc/security-automation-go/secrets/anthropic_api_key"
+	geminiSecretPath      = "/etc/security-automation-go/secrets/gemini_api_key"
 )
 
 // validateCFToken verifies the token is active and can list zones.

@@ -19,9 +19,9 @@ type fakeSetupStore struct {
 }
 
 func (f *fakeSetupStore) GetCurrentStep(_ context.Context) (int, error) { return f.step, nil }
-func (f *fakeSetupStore) SetCurrentStep(_ context.Context, s int) error  { f.step = s; return nil }
-func (f *fakeSetupStore) IsComplete(_ context.Context) (bool, error)     { return f.complete, nil }
-func (f *fakeSetupStore) MarkComplete(_ context.Context) error           { f.complete = true; return nil }
+func (f *fakeSetupStore) SetCurrentStep(_ context.Context, s int) error { f.step = s; return nil }
+func (f *fakeSetupStore) IsComplete(_ context.Context) (bool, error)    { return f.complete, nil }
+func (f *fakeSetupStore) MarkComplete(_ context.Context) error          { f.complete = true; return nil }
 func (f *fakeSetupStore) GetSetting(_ context.Context, k string) (string, bool, error) {
 	v, ok := f.settings[k]
 	return v, ok, nil

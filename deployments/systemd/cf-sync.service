@@ -32,13 +32,13 @@ LogsDirectoryMode=0750
 WorkingDirectory=/var/lib/cf-sync
 
 # Execution
-EnvironmentFile=/etc/security-automation/secrets/cf_sync_api_token.env
-EnvironmentFile=-/etc/security-automation/security-automation.env
+EnvironmentFile=/etc/security-automation-go/secrets/cloudflare_api_token
+EnvironmentFile=-/etc/security-automation-go/security-automation.env
 Environment=STATE_DIR=/var/lib/cf-sync
 ExecStart=/usr/local/bin/cf-sync -mode daemon -interval 1m
 
 # Paths (writable)
-ReadWritePaths=/var/lib/cf-sync /var/log/crowdsec /var/log/security-automation /etc/security-automation/secrets /etc/security-automation/runtime
+ReadWritePaths=/var/lib/cf-sync /var/log/crowdsec /var/log/security-automation /etc/security-automation-go/secrets /etc/security-automation-go/runtime
 
 # Reliability
 Restart=always

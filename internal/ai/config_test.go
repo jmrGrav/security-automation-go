@@ -19,22 +19,22 @@ func TestFromEnvDefaultsKeepProvidersDisabled(t *testing.T) {
 func TestFromEnvReadsFileBackedProviderConfig(t *testing.T) {
 	t.Setenv("AI_PROVIDER_OPENAI_ENABLED", "true")
 	t.Setenv("AI_PROVIDER_OPENAI_MODEL", "gpt-4.1-mini")
-	t.Setenv("AI_PROVIDER_OPENAI_API_KEY_FILE", "/etc/security-automation/secrets/openai_api_key")
+	t.Setenv("AI_PROVIDER_OPENAI_API_KEY_FILE", "/etc/security-automation-go/secrets/openai_api_key")
 	t.Setenv("AI_PROVIDER_ANTHROPIC_ENABLED", "true")
 	t.Setenv("AI_PROVIDER_ANTHROPIC_MODEL", "claude-3-5-sonnet-latest")
-	t.Setenv("AI_PROVIDER_ANTHROPIC_API_KEY_FILE", "/etc/security-automation/secrets/anthropic_api_key")
+	t.Setenv("AI_PROVIDER_ANTHROPIC_API_KEY_FILE", "/etc/security-automation-go/secrets/anthropic_api_key")
 	t.Setenv("AI_PROVIDER_GEMINI_ENABLED", "true")
 	t.Setenv("AI_PROVIDER_GEMINI_MODEL", "gemini-1.5-pro")
-	t.Setenv("AI_PROVIDER_GEMINI_API_KEY_FILE", "/etc/security-automation/secrets/gemini_api_key")
+	t.Setenv("AI_PROVIDER_GEMINI_API_KEY_FILE", "/etc/security-automation-go/secrets/gemini_api_key")
 
 	cfg := FromEnv()
-	if !cfg.OpenAI.Enabled || cfg.OpenAI.Model != "gpt-4.1-mini" || cfg.OpenAI.APIKeyFile != "/etc/security-automation/secrets/openai_api_key" {
+	if !cfg.OpenAI.Enabled || cfg.OpenAI.Model != "gpt-4.1-mini" || cfg.OpenAI.APIKeyFile != "/etc/security-automation-go/secrets/openai_api_key" {
 		t.Fatalf("unexpected openai config: %+v", cfg.OpenAI)
 	}
-	if !cfg.Anthropic.Enabled || cfg.Anthropic.Model != "claude-3-5-sonnet-latest" || cfg.Anthropic.APIKeyFile != "/etc/security-automation/secrets/anthropic_api_key" {
+	if !cfg.Anthropic.Enabled || cfg.Anthropic.Model != "claude-3-5-sonnet-latest" || cfg.Anthropic.APIKeyFile != "/etc/security-automation-go/secrets/anthropic_api_key" {
 		t.Fatalf("unexpected anthropic config: %+v", cfg.Anthropic)
 	}
-	if !cfg.Gemini.Enabled || cfg.Gemini.Model != "gemini-1.5-pro" || cfg.Gemini.APIKeyFile != "/etc/security-automation/secrets/gemini_api_key" {
+	if !cfg.Gemini.Enabled || cfg.Gemini.Model != "gemini-1.5-pro" || cfg.Gemini.APIKeyFile != "/etc/security-automation-go/secrets/gemini_api_key" {
 		t.Fatalf("unexpected gemini config: %+v", cfg.Gemini)
 	}
 }

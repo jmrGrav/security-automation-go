@@ -19,17 +19,17 @@ The runtime is fail-closed:
 
    ```bash
    sudo install -d -m 755 -o root -g root /etc/security-automation
-   sudo install -d -m 755 -o root -g root /etc/security-automation/providers
-   sudo install -m 640 -o root -g security-automation /dev/null /etc/security-automation/providers/ai-providers.env
+   sudo install -d -m 755 -o root -g root /etc/security-automation-go/providers
+   sudo install -m 640 -o root -g security-automation /dev/null /etc/security-automation-go/providers/ai-providers.env
    ```
 
 2. Create the provider secret files:
 
    ```bash
-   sudo install -d -m 700 -o root -g root /etc/security-automation/secrets
-   sudo install -m 600 -o root -g root /dev/null /etc/security-automation/secrets/openai_api_key
-   sudo install -m 600 -o root -g root /dev/null /etc/security-automation/secrets/anthropic_api_key
-   sudo install -m 600 -o root -g root /dev/null /etc/security-automation/secrets/gemini_api_key
+   sudo install -d -m 700 -o root -g root /etc/security-automation-go/secrets
+   sudo install -m 600 -o root -g root /dev/null /etc/security-automation-go/secrets/openai_api_key
+   sudo install -m 600 -o root -g root /dev/null /etc/security-automation-go/secrets/anthropic_api_key
+   sudo install -m 600 -o root -g root /dev/null /etc/security-automation-go/secrets/gemini_api_key
    ```
 
 3. Write the key into the matching file with an editor such as `sudoedit`.
@@ -39,13 +39,13 @@ The runtime is fail-closed:
    - `AI_EXPLAIN_ENABLED=true`
    - `AI_PROVIDER_OPENAI_ENABLED=true|false`
    - `AI_PROVIDER_OPENAI_MODEL=...`
-   - `AI_PROVIDER_OPENAI_API_KEY_FILE=/etc/security-automation/secrets/openai_api_key`
+   - `AI_PROVIDER_OPENAI_API_KEY_FILE=/etc/security-automation-go/secrets/openai_api_key`
    - `AI_PROVIDER_ANTHROPIC_ENABLED=true|false`
    - `AI_PROVIDER_ANTHROPIC_MODEL=...`
-   - `AI_PROVIDER_ANTHROPIC_API_KEY_FILE=/etc/security-automation/secrets/anthropic_api_key`
+   - `AI_PROVIDER_ANTHROPIC_API_KEY_FILE=/etc/security-automation-go/secrets/anthropic_api_key`
    - `AI_PROVIDER_GEMINI_ENABLED=true|false`
    - `AI_PROVIDER_GEMINI_MODEL=...`
-   - `AI_PROVIDER_GEMINI_API_KEY_FILE=/etc/security-automation/secrets/gemini_api_key`
+   - `AI_PROVIDER_GEMINI_API_KEY_FILE=/etc/security-automation-go/secrets/gemini_api_key`
 
 5. Restart the `cmd/cf-sync -mode ui` process.
 
@@ -63,13 +63,13 @@ The UI never pre-fills a secret and never returns the raw key in HTML or JSON.
 ## Validation
 
 - OpenAI: READY once `AI_EXPLAIN_ENABLED=true`, the OpenAI provider is enabled
-  in `/etc/security-automation/providers/ai-providers.env`, the model is set,
+  in `/etc/security-automation-go/providers/ai-providers.env`, the model is set,
   and the secret file is readable.
 - Anthropic: READY once `AI_EXPLAIN_ENABLED=true`, the Anthropic provider is
-  enabled in `/etc/security-automation/providers/ai-providers.env`, the model is
+  enabled in `/etc/security-automation-go/providers/ai-providers.env`, the model is
   set, and the secret file is readable.
 - Gemini: READY once `AI_EXPLAIN_ENABLED=true`, the Gemini provider is enabled
-  in `/etc/security-automation/providers/ai-providers.env`, the model is set,
+  in `/etc/security-automation-go/providers/ai-providers.env`, the model is set,
   and the secret file is readable.
 
 ## Security constraints

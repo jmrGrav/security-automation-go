@@ -8,13 +8,13 @@ environment.
 
 Secrets:
 
-- `/etc/security-automation/secrets/openai_api_key`
-- `/etc/security-automation/secrets/anthropic_api_key`
-- `/etc/security-automation/secrets/gemini_api_key`
+- `/etc/security-automation-go/secrets/openai_api_key`
+- `/etc/security-automation-go/secrets/anthropic_api_key`
+- `/etc/security-automation-go/secrets/gemini_api_key`
 
 State:
 
-- `/etc/security-automation/providers/ai-providers.env`
+- `/etc/security-automation-go/providers/ai-providers.env`
 
 Environment source:
 
@@ -82,12 +82,12 @@ Recommended operator setup:
 
 ```bash
 sudo install -d -m 755 -o root -g root /etc/security-automation
-sudo install -d -m 755 -o root -g root /etc/security-automation/providers
-sudo install -d -m 700 -o root -g root /etc/security-automation/secrets
-sudo install -m 640 -o root -g security-automation /dev/null /etc/security-automation/providers/ai-providers.env
-sudo install -m 600 -o root -g root /dev/null /etc/security-automation/secrets/openai_api_key
-sudo install -m 600 -o root -g root /dev/null /etc/security-automation/secrets/anthropic_api_key
-sudo install -m 600 -o root -g root /dev/null /etc/security-automation/secrets/gemini_api_key
+sudo install -d -m 755 -o root -g root /etc/security-automation-go/providers
+sudo install -d -m 700 -o root -g root /etc/security-automation-go/secrets
+sudo install -m 640 -o root -g security-automation /dev/null /etc/security-automation-go/providers/ai-providers.env
+sudo install -m 600 -o root -g root /dev/null /etc/security-automation-go/secrets/openai_api_key
+sudo install -m 600 -o root -g root /dev/null /etc/security-automation-go/secrets/anthropic_api_key
+sudo install -m 600 -o root -g root /dev/null /etc/security-automation-go/secrets/gemini_api_key
 ```
 
 If the process cannot write to the state or secret paths, do not bypass the
@@ -110,7 +110,7 @@ privileges.
 ## Validation
 
 1. Set the explicit `AI_EXPLAIN_*` and `AI_PROVIDER_*` environment variables.
-2. Create the secret files under `/etc/security-automation/secrets`.
+2. Create the secret files under `/etc/security-automation-go/secrets`.
 3. Start the UI runtime (`cmd/cf-sync -mode ui`).
 4. Open `/providers` and verify the management cards show status and redacted
    paths only.
