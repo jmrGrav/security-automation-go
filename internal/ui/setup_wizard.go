@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"net"
 	"net/http"
 	"strings"
 
@@ -216,6 +217,12 @@ func (s *Server) handleSetupStep3(w http.ResponseWriter, r *http.Request) {
 			currentAddr = v
 		}
 	}
+	currentHost := s.cfg.UI.Addr
+	currentPort := fmt.Sprintf("%d", s.cfg.UI.Port)
+	if h, p, err := net.SplitHostPort(currentAddr); err == nil {
+		currentHost = h
+		currentPort = p
+	}
 	csrfTok := ""
 	if tok, ok := s.getSession(r); ok {
 		csrfTok = s.csrfTokenFor(tok)
@@ -229,10 +236,10 @@ func (s *Server) handleSetupStep3(w http.ResponseWriter, r *http.Request) {
   <input id="bind_addr" name="bind_addr" type="text" value="%s">
   <p class="note">Use 127.0.0.1 for localhost-only (recommended).</p>
   <label for="port">Port</label>
-  <input id="port" name="port" type="number" min="1024" max="65535" value="%d">
+  <input id="port" name="port" type="number" min="1024" max="65535" value="%s">
   <button type="submit">Confirm &amp; continue</button>
   <button type="submit" name="skip" value="1" class="secondary">Skip (keep default)</button>
-</form>`, currentAddr, csrfTok, s.cfg.UI.Addr, s.cfg.UI.Port)
+</form>`, currentAddr, csrfTok, currentHost, currentPort)
 	renderSetupPage(w, 3, "UI bind address and port", body, "")
 }
 
