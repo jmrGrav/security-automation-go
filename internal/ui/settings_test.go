@@ -28,10 +28,10 @@ func newTestAdminStore(passwordHash string) *testAdminStore {
 	return s
 }
 
-func (s *testAdminStore) GetCurrentStep(_ context.Context) (int, error)     { return s.step, nil }
-func (s *testAdminStore) SetCurrentStep(_ context.Context, v int) error     { s.step = v; return nil }
-func (s *testAdminStore) IsComplete(_ context.Context) (bool, error)        { return s.complete, nil }
-func (s *testAdminStore) MarkComplete(_ context.Context) error              { s.complete = true; return nil }
+func (s *testAdminStore) GetCurrentStep(_ context.Context) (int, error) { return s.step, nil }
+func (s *testAdminStore) SetCurrentStep(_ context.Context, v int) error { s.step = v; return nil }
+func (s *testAdminStore) IsComplete(_ context.Context) (bool, error)    { return s.complete, nil }
+func (s *testAdminStore) MarkComplete(_ context.Context) error          { s.complete = true; return nil }
 func (s *testAdminStore) GetSetting(_ context.Context, k string) (string, bool, error) {
 	v, ok := s.settings[k]
 	return v, ok, nil
@@ -41,7 +41,21 @@ func (s *testAdminStore) SetSetting(_ context.Context, k, v string) error {
 	return nil
 }
 
+// seedAdminHash creates a testAdminStore with a low-cost bcrypt hash for speed in tests.
+// Production code uses cost 12; tests use bcrypt.MinCost (4) to avoid multi-second delays
+// per test, especially under the race detector.
 func seedAdminHash(t *testing.T, password string) (string, *testAdminStore) {
+	t.Helper()
+	hash, err := auth.HashPassword(password)
+	if err != nil {
+		t.Fatalf("auth.HashPassword: %v", err)
+	}
+	return password, newTestAdminStore(hash)
+}
+
+// seedAdminHashReal uses the production bcrypt cost (12). Use only in tests that
+// specifically need to validate the hash cost or are not run under -race.
+func seedAdminHashReal(t *testing.T, password string) (string, *testAdminStore) {
 	t.Helper()
 	hash, err := auth.HashPassword(password)
 	if err != nil {

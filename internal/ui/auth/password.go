@@ -6,10 +6,11 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
-const (
-	BootstrapPasswordLength = 32
-	bcryptCost              = 12
-)
+const BootstrapPasswordLength = 32
+
+// bcryptCost is the work factor for new password hashes.
+// Overridable for tests via SetBcryptCostForTesting.
+var bcryptCost = 12
 
 // GenerateBootstrapPassword generates a cryptographically secure random password.
 // Returns a 32-character alphanumeric password suitable for first-boot setup.
