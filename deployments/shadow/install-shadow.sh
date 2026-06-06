@@ -5,7 +5,7 @@
 set -euo pipefail
 
 BINARY_SRC="${1:-./bin/cf-shadow}"
-INSTALL_DIR="/opt/security-automation-go"
+INSTALL_BIN="/usr/local/bin"
 CONFIG_DIR="/etc/security-automation-go"
 STATE_DIR="/var/lib/security-automation-go/shadow"
 SERVICE_FILE="/etc/systemd/system/cf-shadow.service"
@@ -31,10 +31,8 @@ else
 fi
 
 # 2. Install binary
-mkdir -p "${INSTALL_DIR}/bin"
-cp "${BINARY_SRC}" "${INSTALL_DIR}/bin/cf-shadow"
-chmod 750 "${INSTALL_DIR}/bin/cf-shadow"
-echo "✓ Binary installed: ${INSTALL_DIR}/bin/cf-shadow"
+install -Dm 750 "${BINARY_SRC}" "${INSTALL_BIN}/cf-shadow"
+echo "✓ Binary installed: ${INSTALL_BIN}/cf-shadow"
 
 # 3. Config directory
 mkdir -p "${CONFIG_DIR}"
