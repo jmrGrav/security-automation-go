@@ -14,8 +14,8 @@ import (
 
 	"github.com/jm/security-automation-go/internal/adapters/cloudflareevent"
 	"github.com/jm/security-automation-go/internal/api/auth"
-	"github.com/jm/security-automation-go/internal/config"
 	"github.com/jm/security-automation-go/internal/api/server"
+	"github.com/jm/security-automation-go/internal/config"
 	"github.com/jm/security-automation-go/internal/observability/handlers"
 	"github.com/jm/security-automation-go/internal/orchestrator/pipeline"
 	"github.com/jm/security-automation-go/internal/policy/admission"
