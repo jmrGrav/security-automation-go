@@ -10,9 +10,10 @@ Wants=network-online.target
 Type=simple
 User=root
 Group=root
+EnvironmentFile=-/etc/security-automation-go/security-automation.env
 EnvironmentFile=/etc/security-automation-go/cf-shadow.env
-WorkingDirectory=/opt/security-automation-go
-ExecStart=/opt/security-automation-go/bin/cf-shadow \
+WorkingDirectory=/var/lib/security-automation-go
+ExecStart=/usr/local/bin/cf-shadow \
     --config /etc/security-automation-go/cf-shadow.yaml \
     --report-dir /var/lib/security-automation-go/shadow
 
@@ -35,6 +36,13 @@ SyslogIdentifier=cf-shadow
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+LockPersonality=yes
 ReadWritePaths=/var/lib/security-automation-go /var/log/crowdsec
 
 [Install]

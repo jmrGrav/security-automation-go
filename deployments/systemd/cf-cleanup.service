@@ -7,10 +7,20 @@ Wants=network-online.target
 Type=oneshot
 User=root
 Group=root
-EnvironmentFile=/etc/security-automation-go/cf-cleanup.env
-WorkingDirectory=/opt/security-automation-go
-ExecStart=/opt/security-automation-go/bin/cf-cleanup
+EnvironmentFile=-/etc/security-automation-go/security-automation.env
+WorkingDirectory=/var/lib/security-automation-go
+ExecStart=/usr/local/bin/cf-cleanup
 NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+LockPersonality=yes
+ReadWritePaths=/var/lib/security-automation-go /etc/security-automation-go/secrets
 
 [Install]
 WantedBy=multi-user.target

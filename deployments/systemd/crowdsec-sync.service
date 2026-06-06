@@ -7,12 +7,22 @@ Wants=network-online.target
 Type=simple
 User=root
 Group=root
-EnvironmentFile=/etc/security-automation-go/crowdsec-sync.env
-WorkingDirectory=/opt/security-automation-go
-ExecStart=/opt/security-automation-go/bin/crowdsec-sync
+EnvironmentFile=-/etc/security-automation-go/security-automation.env
+WorkingDirectory=/var/lib/security-automation-go
+ExecStart=/usr/local/bin/crowdsec-sync
 Restart=on-failure
 RestartSec=5s
 NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+LockPersonality=yes
+ReadWritePaths=/var/lib/security-automation-go /var/log/crowdsec /etc/security-automation-go/secrets
 
 [Install]
 WantedBy=multi-user.target
