@@ -1,11 +1,17 @@
 package ui
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"net/http"
 	"strings"
+	"time"
 
+	"github.com/jm/security-automation-go/internal/cloudflare/discovery"
+	"github.com/jm/security-automation-go/internal/cloudflare/transport"
+	"github.com/jm/security-automation-go/internal/config"
+	"github.com/jm/security-automation-go/internal/httpclient"
 	uiauth "github.com/jm/security-automation-go/internal/ui/auth"
 )
 
@@ -282,11 +288,113 @@ func (s *Server) handleSetupStep3Post(w http.ResponseWriter, r *http.Request) {
 	}
 	http.Redirect(w, r, "/setup/step/4", http.StatusFound)
 }
-func (s *Server) handleSetupStep4(w http.ResponseWriter, r *http.Request) {
-	renderSetupPage(w, 4, "Cloudflare API token", "<p>Coming soon.</p>", "")
+const cfTokenSecretPath = "/etc/security-automation/secrets/cloudflare_api_token"
+
+// validateCFToken verifies the token is active and can list zones.
+func (s *Server) validateCFToken(ctx context.Context, token, zoneID string) error {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	httpCfg := config.HTTPConfig{Timeout: 10 * time.Second}
+	t := transport.New(httpclient.New(httpCfg), token)
+	d := discovery.New(t)
+
+	tv, err := d.VerifyToken(ctx)
+	if err != nil {
+		return fmt.Errorf("token verification failed: %w", err)
+	}
+	if tv.Status != "active" {
+		return fmt.Errorf("token status is %q — must be active", tv.Status)
+	}
+	if zoneID == "" {
+		return nil
+	}
+	zones, err := d.ListZones(ctx)
+	if err != nil {
+		return fmt.Errorf("cannot list zones (check Zone:Read permission): %w", err)
+	}
+	for _, z := range zones {
+		if z.ID == zoneID {
+			return nil
+		}
+	}
+	return fmt.Errorf("zone %q not accessible with this token", zoneID)
 }
+
+func (s *Server) handleSetupStep4(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.getSession(r); !ok {
+		http.Redirect(w, r, "/setup/step/1", http.StatusFound)
+		return
+	}
+	csrfTok := ""
+	if tok, ok := s.getSession(r); ok {
+		csrfTok = s.csrfTokenFor(tok)
+	}
+	body := fmt.Sprintf(`
+<p>Paste your Cloudflare API token below. It will be stored at:</p>
+<pre style="background:#f4f7fb;padding:.75rem;border-radius:6px">%s</pre>
+<p class="note">Mode 0600. The token will not be displayed again.</p>
+<p class="note">Required permissions: Zone / Firewall Services / Edit</p>
+<form action="/setup/step/4" method="post">
+  <input type="hidden" name="csrf_token" value="%s">
+  <label for="cf_token">Cloudflare API token</label>
+  <input id="cf_token" name="cf_token" type="password" autocomplete="off" required placeholder="cfut_...">
+  <label for="zone_id">Zone ID (optional — used to verify zone access)</label>
+  <input id="zone_id" name="zone_id" type="text" placeholder="d2f7807c2c5b7c9737da45f538072423" value="%s">
+  <button type="submit">Validate &amp; save</button>
+  <button type="submit" name="skip" value="1" class="secondary">Skip (configure later)</button>
+</form>`, cfTokenSecretPath, csrfTok, s.cfg.Cloudflare.ZoneID)
+	renderSetupPage(w, 4, "Cloudflare API token", body, "")
+}
+
 func (s *Server) handleSetupStep4Post(w http.ResponseWriter, r *http.Request) {
-	http.Redirect(w, r, "/setup/step/5", http.StatusFound)
+	if _, ok := s.getSession(r); !ok {
+		http.Redirect(w, r, "/setup/step/1", http.StatusFound)
+		return
+	}
+	if !s.validCSRF(r) {
+		http.Error(w, "csrf required", http.StatusForbidden)
+		return
+	}
+	if r.FormValue("skip") == "1" {
+		if s.setupStore != nil {
+			_ = s.setupStore.SetCurrentStep(r.Context(), 5)
+		}
+		http.Redirect(w, r, "/setup/step/5", http.StatusFound)
+		return
+	}
+
+	cfToken := strings.TrimSpace(r.FormValue("cf_token"))
+	zoneID := strings.TrimSpace(r.FormValue("zone_id"))
+	if cfToken == "" {
+		renderSetupPage(w, 4, "Cloudflare API token", "", "Token is required.")
+		return
+	}
+
+	if err := s.validateCFToken(r.Context(), cfToken, zoneID); err != nil {
+		renderSetupPage(w, 4, "Cloudflare API token", "", "Token validation failed: "+err.Error())
+		return
+	}
+
+	if err := WriteSecretFile(cfTokenSecretPath, map[string]string{"CF_API_TOKEN": cfToken}); err != nil {
+		if s.logger != nil {
+			s.logger.Error("write CF token secret", "err", err)
+		}
+		renderSetupPage(w, 4, "Cloudflare API token", "", "Failed to store token: "+err.Error())
+		return
+	}
+
+	if s.setupStore != nil {
+		_ = s.setupStore.SetSetting(r.Context(), "cf_token_path", cfTokenSecretPath)
+		if zoneID != "" {
+			_ = s.setupStore.SetSetting(r.Context(), "cf_zone_id", zoneID)
+		}
+		_ = s.setupStore.SetCurrentStep(r.Context(), 5)
+	}
+
+	body := `<div class="ok">✓ Token validated and stored. It will not be displayed again.</div>
+<a href="/setup/step/5"><button>Continue</button></a>`
+	renderSetupPage(w, 4, "Cloudflare API token", body, "")
 }
 func (s *Server) handleSetupStep5(w http.ResponseWriter, r *http.Request) {
 	renderSetupPage(w, 5, "AbuseIPDB API key (optional)", "<p>Coming soon.</p>", "")
