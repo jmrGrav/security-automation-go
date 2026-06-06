@@ -24,6 +24,8 @@ LockPersonality=yes
 # Paths
 StateDirectory=cf-sync
 RuntimeDirectory=cf-sync
+LogsDirectory=security-automation
+LogsDirectoryMode=0750
 WorkingDirectory=/var/lib/cf-sync
 
 # Execution
