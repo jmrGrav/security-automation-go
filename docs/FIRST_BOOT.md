@@ -19,6 +19,22 @@ On first start, the service:
 3. Starts the UI on `127.0.0.1:9091` (default) in setup-required mode
 4. Blocks all normal routes until setup is complete
 
+## Starting the UI
+
+The setup wizard runs in UI mode, which is separate from the background daemon:
+
+```bash
+sudo /usr/local/bin/cf-sync -mode ui -config /etc/security-automation/cf-sync.yaml
+```
+
+Or if using the systemd UI unit:
+
+```bash
+sudo systemctl start cf-sync-ui
+```
+
+**Note:** The standard `cf-sync.service` runs the background daemon (`-mode daemon`). The setup wizard requires a separate invocation of `-mode ui` on the same binary. Both share the same SQLite state directory.
+
 ## Reading the Initial Password
 
 ```bash

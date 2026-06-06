@@ -88,6 +88,14 @@ func runUI(ctx context.Context, logger *slog.Logger, cfg *config.Config) error {
 	defer setupDB.Close()
 	setupStore := sqlite.NewSetupStore(setupDB)
 
+	// Apply wizard settings as runtime overrides (wizard stores these in SQLite).
+	if v, ok, _ := setupStore.GetSetting(ctx, "ui_addr"); ok && v != "" {
+		cfg.UI.Addr = v
+	}
+	if v, ok, _ := setupStore.GetSetting(ctx, "mutations_enabled"); ok && v == "true" {
+		cfg.UI.MutationsEnabled = true
+	}
+
 	auditSink, err := ui.NewFileAuditSink(filepath.Join(cfg.StateDir, "ui-audit.log"))
 	if err != nil {
 		return err

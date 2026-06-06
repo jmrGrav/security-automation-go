@@ -288,7 +288,7 @@ func (s *Server) handleSetupStep3Post(w http.ResponseWriter, r *http.Request) {
 	}
 	http.Redirect(w, r, "/setup/step/4", http.StatusFound)
 }
-const cfTokenSecretPath = "/etc/security-automation/secrets/cloudflare_api_token"
+const cfTokenSecretPath = "/etc/security-automation/secrets/cf_sync_api_token.env"
 
 const (
 	abuseIPDBSecretPath   = "/etc/security-automation/secrets/abuseipdb_api_key"

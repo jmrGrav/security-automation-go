@@ -1,6 +1,9 @@
 [Unit]
 Description=Cloudflare to CrowdSec Reconciliation Daemon
 After=network.target crowdsec.service
+Wants=network.target
+StartLimitIntervalSec=300
+StartLimitBurst=5
 
 [Service]
 Type=simple
@@ -29,15 +32,17 @@ LogsDirectoryMode=0750
 WorkingDirectory=/var/lib/cf-sync
 
 # Execution
+EnvironmentFile=/etc/security-automation/secrets/cf_sync_api_token.env
 EnvironmentFile=-/etc/security-automation/security-automation.env
 Environment=STATE_DIR=/var/lib/cf-sync
 ExecStart=/usr/local/bin/cf-sync -mode daemon -interval 1m
 
+# Paths (writable)
+ReadWritePaths=/var/lib/cf-sync /var/log/crowdsec /var/log/security-automation /etc/security-automation/secrets /etc/security-automation/runtime
+
 # Reliability
 Restart=always
 RestartSec=30
-StartLimitIntervalSec=300
-StartLimitBurst=5
 
 [Install]
 WantedBy=multi-user.target
