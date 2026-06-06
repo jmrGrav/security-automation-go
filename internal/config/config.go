@@ -455,3 +455,26 @@ func (c *Config) GetAdminToken() string {
 	}
 	return ""
 }
+
+// ResolveAdminToken returns the admin API token for daemon startup.
+// Precedence: CF_SYNC_API_TOKEN_FILE (file) > CF_SYNC_API_TOKEN (env).
+// If CF_SYNC_API_TOKEN_FILE is set but the file cannot be read or is empty,
+// an error is returned and startup must fail. Token values are never logged.
+func ResolveAdminToken() (string, error) {
+	if path := strings.TrimSpace(os.Getenv("CF_SYNC_API_TOKEN_FILE")); path != "" {
+		b, err := os.ReadFile(path)
+		if err != nil {
+			return "", fmt.Errorf("CF_SYNC_API_TOKEN_FILE: read %q: %w", path, err)
+		}
+		token := strings.TrimSpace(string(b))
+		if token == "" {
+			return "", fmt.Errorf("CF_SYNC_API_TOKEN_FILE: file %q is empty", path)
+		}
+		return token, nil
+	}
+	token := strings.TrimSpace(os.Getenv("CF_SYNC_API_TOKEN"))
+	if token == "" {
+		return "", errors.New("CF_SYNC_API_TOKEN is required (or set CF_SYNC_API_TOKEN_FILE)")
+	}
+	return token, nil
+}

@@ -9,12 +9,12 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"strings"
 	"syscall"
 	"time"
 
 	"github.com/jm/security-automation-go/internal/adapters/cloudflareevent"
 	"github.com/jm/security-automation-go/internal/api/auth"
+	"github.com/jm/security-automation-go/internal/config"
 	"github.com/jm/security-automation-go/internal/api/server"
 	"github.com/jm/security-automation-go/internal/observability/handlers"
 	"github.com/jm/security-automation-go/internal/orchestrator/pipeline"
@@ -46,9 +46,9 @@ type cursorStateStore interface {
 }
 
 func newAuthenticator() (*auth.Authenticator, error) {
-	token := strings.TrimSpace(os.Getenv("CF_SYNC_API_TOKEN"))
-	if token == "" {
-		return nil, fmt.Errorf("CF_SYNC_API_TOKEN environment variable is required in daemon mode")
+	token, err := config.ResolveAdminToken()
+	if err != nil {
+		return nil, fmt.Errorf("resolving admin token: %w", err)
 	}
 	authTokens := map[string]auth.Identity{
 		token: {

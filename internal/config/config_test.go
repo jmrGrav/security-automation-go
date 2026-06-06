@@ -157,6 +157,75 @@ runtime:
 	}
 }
 
+func TestResolveAdminToken(t *testing.T) {
+	t.Run("file_wins_over_env", func(t *testing.T) {
+		f, err := os.CreateTemp(t.TempDir(), "token*")
+		if err != nil {
+			t.Fatal(err)
+		}
+		f.WriteString("file-token\n")
+		f.Close()
+		t.Setenv("CF_SYNC_API_TOKEN_FILE", f.Name())
+		t.Setenv("CF_SYNC_API_TOKEN", "env-token")
+
+		got, err := ResolveAdminToken()
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got != "file-token" {
+			t.Errorf("expected file-token, got %q", got)
+		}
+	})
+
+	t.Run("file_missing_is_error", func(t *testing.T) {
+		t.Setenv("CF_SYNC_API_TOKEN_FILE", "/nonexistent/path/token")
+		t.Setenv("CF_SYNC_API_TOKEN", "env-token")
+
+		_, err := ResolveAdminToken()
+		if err == nil {
+			t.Fatal("expected error for missing token file, got nil")
+		}
+	})
+
+	t.Run("file_empty_is_error", func(t *testing.T) {
+		f, err := os.CreateTemp(t.TempDir(), "token*")
+		if err != nil {
+			t.Fatal(err)
+		}
+		f.Close()
+		t.Setenv("CF_SYNC_API_TOKEN_FILE", f.Name())
+		t.Setenv("CF_SYNC_API_TOKEN", "env-token")
+
+		_, err = ResolveAdminToken()
+		if err == nil {
+			t.Fatal("expected error for empty token file, got nil")
+		}
+	})
+
+	t.Run("env_fallback", func(t *testing.T) {
+		t.Setenv("CF_SYNC_API_TOKEN_FILE", "")
+		t.Setenv("CF_SYNC_API_TOKEN", "env-only-token")
+
+		got, err := ResolveAdminToken()
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got != "env-only-token" {
+			t.Errorf("expected env-only-token, got %q", got)
+		}
+	})
+
+	t.Run("neither_set_is_error", func(t *testing.T) {
+		t.Setenv("CF_SYNC_API_TOKEN_FILE", "")
+		t.Setenv("CF_SYNC_API_TOKEN", "")
+
+		_, err := ResolveAdminToken()
+		if err == nil {
+			t.Fatal("expected error when both CF_SYNC_API_TOKEN_FILE and CF_SYNC_API_TOKEN are unset")
+		}
+	})
+}
+
 func TestConfig_GetAdminToken(t *testing.T) {
 	t.Run("from memory", func(t *testing.T) {
 		cfg := DefaultConfig()
