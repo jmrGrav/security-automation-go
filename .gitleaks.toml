@@ -1,0 +1,37 @@
+# gitleaks configuration for security-automation-go
+# https://github.com/gitleaks/gitleaks
+
+title = "security-automation-go gitleaks config"
+
+[extend]
+# Extend the default gitleaks ruleset
+useDefault = true
+
+[[allowlists]]
+description = "Test fixtures — bcrypt hashes and synthetic keys in test code"
+paths = [
+  '''.*_test\.go$''',
+  '''.*testdata/.*''',
+]
+
+[[allowlists]]
+description = "Documentation — example paths and placeholder values in docs"
+paths = [
+  '''docs/.*''',
+  '''.*REPORT\.md$''',
+  '''.*RUNBOOK.*\.md$''',
+  '''.*INSTALL.*\.md$''',
+  '''.*FIRST_BOOT.*\.md$''',
+]
+regexes = [
+  '''YOUR_.*_HERE''',
+  '''<placeholder>''',
+  '''example.*token''',
+]
+
+[[allowlists]]
+description = "Env example files — documented placeholder values only"
+paths = [
+  '''.*\.env\.example$''',
+  '''.*example\.env$''',
+]
