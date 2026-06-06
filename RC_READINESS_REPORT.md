@@ -73,3 +73,77 @@ These are tracked in `docs/archive/TEST_GAP_REPORT.md` and are explicitly out of
 **Repository Gate: GREEN**
 
 All local validation gates pass. All audit findings resolved or accepted. No open critical TODO items. Working tree clean. 109 test packages pass with no data races detected.
+
+---
+
+## Phase 6 — Production Observability
+
+| Component | Status | Notes |
+|---|---|---|
+| journald integration | ✅ | log/slog JSON format → stdout → journald capture |
+| Startup log | ✅ | internal/startuplog writes to /var/log/security-automation/startup.log before first sync |
+| logrotate | ✅ | copytruncate strategy; no SIGUSR1 required |
+| /healthz | ✅ | Always 200 OK |
+| /readyz | ✅ | Returns 200 when daemon ready |
+| /statusz | ✅ | Runtime status for operator inspection |
+| /metrics | ✅ | Prometheus-compatible endpoint |
+| Audit trail | ✅ | All mutation surface events logged to audit sink |
+| LogsDirectory= in unit | ✅ | systemd creates /var/log/security-automation before ExecStart |
+
+### Operator Quick-Diagnosis Commands (run on production host)
+
+```bash
+# Service health
+systemctl is-active cf-sync.service
+journalctl -u cf-sync.service -n 50 --no-pager
+
+# Startup log
+cat /var/log/security-automation/startup.log
+
+# HTTP endpoints
+curl -sf http://127.0.0.1:9090/healthz
+curl -sf http://127.0.0.1:9090/readyz
+curl -sf http://127.0.0.1:9090/statusz | jq .
+
+# Shadow agreement (if still in shadow phase)
+cat /var/lib/cf-sync/shadow/SHADOW_MODE_REPORT.md | \
+  grep "7-day agreement\|Status\|in_sync\|consecutive"
+```
+
+### Note
+
+Shadow completion threshold (≥99.9% agreement, ≥20 consecutive in-sync cycles) is documented in
+`docs/runbooks/CUTOVER_RUNBOOK.md` (Pre-Cutover Checklist, Step 1). The shadow runbook does not
+restate this threshold — operators should reference the cutover checklist for the GO criterion.
+
+---
+
+## Phase 7 — Final Cutover Verdict
+
+### Gates Summary
+
+| Gate | Status |
+|---|---|
+| Repository (all local validation) | ✅ GREEN |
+| All v1.2 audit findings resolved | ✅ GREEN |
+| TODO.md — no open critical items | ✅ GREEN |
+| Runbook service names corrected | ✅ GREEN |
+| Shadow gate (production host) | ⏳ PENDING HOST VERIFICATION |
+
+### Shadow Gate (host-required)
+
+Shadow agreement reported at **~99.98%** in the pre-v1.2 sprint. To confirm before cutover:
+
+```bash
+cat /var/lib/cf-sync/shadow/SHADOW_MODE_REPORT.md | \
+  grep "7-day agreement\|Status\|in_sync\|consecutive"
+```
+
+Expected: 7-day agreement ≥ 99.9%, no unresolved drift.
+
+### Verdict
+
+**READY FOR CUTOVER** — pending shadow gate verification on production host.
+
+Once shadow gate is confirmed ≥ 99.9%, follow `docs/runbooks/CUTOVER_RUNBOOK.md` for the
+controlled-authority promotion sequence.
