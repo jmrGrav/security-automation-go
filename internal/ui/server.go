@@ -199,17 +199,6 @@ func (s *Server) routes() {
 	s.mux.Handle("GET /static/ai-explain.js", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleAIExplainScript)))))
 }
 
-// setupGuardMiddleware redirects to the current setup step when setup is incomplete.
-// Implemented in setup_wizard.go (Task 5).
-func (s *Server) setupGuardMiddleware(next http.Handler) http.Handler {
-	return next // stub — full implementation in setup_wizard.go
-}
-
-// registerSetupRoutes registers /setup/* routes.
-// Implemented in setup_wizard.go (Task 5).
-func (s *Server) registerSetupRoutes() {
-	// stub — full implementation in setup_wizard.go
-}
 
 func (s *Server) handleLoginPage(w http.ResponseWriter, r *http.Request) {
 	if s.isAuthed(r) {
