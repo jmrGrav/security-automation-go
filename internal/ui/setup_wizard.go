@@ -290,6 +290,14 @@ func (s *Server) handleSetupStep3Post(w http.ResponseWriter, r *http.Request) {
 }
 const cfTokenSecretPath = "/etc/security-automation/secrets/cloudflare_api_token"
 
+const (
+	abuseIPDBSecretPath   = "/etc/security-automation/secrets/abuseipdb_api_key"
+	betterStackSecretPath = "/etc/security-automation/secrets/betterstack_source_token"
+	openAISecretPath      = "/etc/security-automation/secrets/openai_api_key"
+	anthropicSecretPath   = "/etc/security-automation/secrets/anthropic_api_key"
+	geminiSecretPath      = "/etc/security-automation/secrets/gemini_api_key"
+)
+
 // validateCFToken verifies the token is active and can list zones.
 func (s *Server) validateCFToken(ctx context.Context, token, zoneID string) error {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
@@ -319,6 +327,49 @@ func (s *Server) validateCFToken(ctx context.Context, token, zoneID string) erro
 		}
 	}
 	return fmt.Errorf("zone %q not accessible with this token", zoneID)
+}
+
+// validateAbuseIPDB sends a minimal check request. Returns nil on HTTP 200 or 429.
+func validateAbuseIPDB(ctx context.Context, key string) error {
+	ctx, cancel := context.WithTimeout(ctx, 8*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, "GET", "https://api.abuseipdb.com/api/v2/check?ipAddress=127.0.0.1&maxAgeInDays=90", nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Key", key)
+	req.Header.Set("Accept", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("network error: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+		return fmt.Errorf("API key rejected (HTTP %d)", resp.StatusCode)
+	}
+	return nil
+}
+
+// validateBetterStack sends a test log event. Returns nil on HTTP 202.
+func validateBetterStack(ctx context.Context, token string) error {
+	ctx, cancel := context.WithTimeout(ctx, 8*time.Second)
+	defer cancel()
+	payload := `{"message":"security-automation setup validation","dt":"` + time.Now().UTC().Format(time.RFC3339) + `"}`
+	req, err := http.NewRequestWithContext(ctx, "POST", "https://in.logs.betterstack.com", strings.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("network error: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+		return fmt.Errorf("source token rejected (HTTP %d)", resp.StatusCode)
+	}
+	return nil
 }
 
 func (s *Server) handleSetupStep4(w http.ResponseWriter, r *http.Request) {
@@ -397,21 +448,176 @@ func (s *Server) handleSetupStep4Post(w http.ResponseWriter, r *http.Request) {
 	renderSetupPage(w, 4, "Cloudflare API token", body, "")
 }
 func (s *Server) handleSetupStep5(w http.ResponseWriter, r *http.Request) {
-	renderSetupPage(w, 5, "AbuseIPDB API key (optional)", "<p>Coming soon.</p>", "")
+	if _, ok := s.getSession(r); !ok {
+		http.Redirect(w, r, "/setup/step/1", http.StatusFound)
+		return
+	}
+	csrfTok := ""
+	if tok, ok := s.getSession(r); ok {
+		csrfTok = s.csrfTokenFor(tok)
+	}
+	body := fmt.Sprintf(`
+<p class="note">Optional. Used to report confirmed attacker IPs to AbuseIPDB.</p>
+<form action="/setup/step/5" method="post">
+  <input type="hidden" name="csrf_token" value="%s">
+  <label for="abuseipdb_key">AbuseIPDB API key</label>
+  <input id="abuseipdb_key" name="abuseipdb_key" type="password" autocomplete="off" placeholder="paste key here">
+  <p class="note">Leave blank to skip. Stored at: <code>%s</code> (0600)</p>
+  <button type="submit">Validate &amp; save</button>
+  <button type="submit" name="skip" value="1" class="secondary">Skip</button>
+</form>`, csrfTok, abuseIPDBSecretPath)
+	renderSetupPage(w, 5, "AbuseIPDB API key (optional)", body, "")
 }
+
 func (s *Server) handleSetupStep5Post(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.getSession(r); !ok {
+		http.Redirect(w, r, "/setup/step/1", http.StatusFound)
+		return
+	}
+	if !s.validCSRF(r) {
+		http.Error(w, "csrf required", http.StatusForbidden)
+		return
+	}
+	key := strings.TrimSpace(r.FormValue("abuseipdb_key"))
+	if r.FormValue("skip") == "1" || key == "" {
+		if s.setupStore != nil {
+			_ = s.setupStore.SetCurrentStep(r.Context(), 6)
+		}
+		http.Redirect(w, r, "/setup/step/6", http.StatusFound)
+		return
+	}
+	if err := validateAbuseIPDB(r.Context(), key); err != nil {
+		renderSetupPage(w, 5, "AbuseIPDB API key (optional)", "", "Validation failed: "+err.Error())
+		return
+	}
+	if err := WriteSecretFile(abuseIPDBSecretPath, map[string]string{"ABUSEIPDB_KEY": key}); err != nil {
+		renderSetupPage(w, 5, "AbuseIPDB API key (optional)", "", "Failed to store key: "+err.Error())
+		return
+	}
+	if s.setupStore != nil {
+		_ = s.setupStore.SetCurrentStep(r.Context(), 6)
+	}
 	http.Redirect(w, r, "/setup/step/6", http.StatusFound)
 }
+
 func (s *Server) handleSetupStep6(w http.ResponseWriter, r *http.Request) {
-	renderSetupPage(w, 6, "BetterStack source token (optional)", "<p>Coming soon.</p>", "")
+	if _, ok := s.getSession(r); !ok {
+		http.Redirect(w, r, "/setup/step/1", http.StatusFound)
+		return
+	}
+	csrfTok := ""
+	if tok, ok := s.getSession(r); ok {
+		csrfTok = s.csrfTokenFor(tok)
+	}
+	body := fmt.Sprintf(`
+<p class="note">Optional. Used to forward structured logs to BetterStack Logs.</p>
+<form action="/setup/step/6" method="post">
+  <input type="hidden" name="csrf_token" value="%s">
+  <label for="bs_token">BetterStack source token</label>
+  <input id="bs_token" name="bs_token" type="password" autocomplete="off" placeholder="paste token here">
+  <p class="note">Leave blank to skip. Stored at: <code>%s</code> (0600)</p>
+  <button type="submit">Validate &amp; save</button>
+  <button type="submit" name="skip" value="1" class="secondary">Skip</button>
+</form>`, csrfTok, betterStackSecretPath)
+	renderSetupPage(w, 6, "BetterStack source token (optional)", body, "")
 }
+
 func (s *Server) handleSetupStep6Post(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.getSession(r); !ok {
+		http.Redirect(w, r, "/setup/step/1", http.StatusFound)
+		return
+	}
+	if !s.validCSRF(r) {
+		http.Error(w, "csrf required", http.StatusForbidden)
+		return
+	}
+	token := strings.TrimSpace(r.FormValue("bs_token"))
+	if r.FormValue("skip") == "1" || token == "" {
+		if s.setupStore != nil {
+			_ = s.setupStore.SetCurrentStep(r.Context(), 7)
+		}
+		http.Redirect(w, r, "/setup/step/7", http.StatusFound)
+		return
+	}
+	if err := validateBetterStack(r.Context(), token); err != nil {
+		renderSetupPage(w, 6, "BetterStack source token (optional)", "", "Validation failed: "+err.Error())
+		return
+	}
+	if err := WriteSecretFile(betterStackSecretPath, map[string]string{"BETTERSTACK_SOURCE_TOKEN": token}); err != nil {
+		renderSetupPage(w, 6, "BetterStack source token (optional)", "", "Failed to store token: "+err.Error())
+		return
+	}
+	if s.setupStore != nil {
+		_ = s.setupStore.SetCurrentStep(r.Context(), 7)
+	}
 	http.Redirect(w, r, "/setup/step/7", http.StatusFound)
 }
+
 func (s *Server) handleSetupStep7(w http.ResponseWriter, r *http.Request) {
-	renderSetupPage(w, 7, "AI provider keys (optional)", "<p>Coming soon.</p>", "")
+	if _, ok := s.getSession(r); !ok {
+		http.Redirect(w, r, "/setup/step/1", http.StatusFound)
+		return
+	}
+	csrfTok := ""
+	if tok, ok := s.getSession(r); ok {
+		csrfTok = s.csrfTokenFor(tok)
+	}
+	body := fmt.Sprintf(`
+<p class="note">Optional. Enable AI-powered explanations for security events.</p>
+<form action="/setup/step/7" method="post">
+  <input type="hidden" name="csrf_token" value="%s">
+  <label for="openai_key">OpenAI API key</label>
+  <input id="openai_key" name="openai_key" type="password" autocomplete="off" placeholder="sk-...">
+  <label for="anthropic_key">Anthropic API key</label>
+  <input id="anthropic_key" name="anthropic_key" type="password" autocomplete="off" placeholder="sk-ant-...">
+  <label for="gemini_key">Gemini API key</label>
+  <input id="gemini_key" name="gemini_key" type="password" autocomplete="off" placeholder="AIza...">
+  <p class="note">Leave all blank to skip. Keys are stored individually (0600 each).</p>
+  <button type="submit">Save &amp; continue</button>
+  <button type="submit" name="skip" value="1" class="secondary">Skip all</button>
+</form>`, csrfTok)
+	renderSetupPage(w, 7, "AI provider keys (optional)", body, "")
 }
+
 func (s *Server) handleSetupStep7Post(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.getSession(r); !ok {
+		http.Redirect(w, r, "/setup/step/1", http.StatusFound)
+		return
+	}
+	if !s.validCSRF(r) {
+		http.Error(w, "csrf required", http.StatusForbidden)
+		return
+	}
+	if r.FormValue("skip") == "1" {
+		if s.setupStore != nil {
+			_ = s.setupStore.SetCurrentStep(r.Context(), 8)
+		}
+		http.Redirect(w, r, "/setup/step/8", http.StatusFound)
+		return
+	}
+	type aiSecret struct{ field, path, envKey string }
+	secrets := []aiSecret{
+		{"openai_key", openAISecretPath, "OPENAI_API_KEY"},
+		{"anthropic_key", anthropicSecretPath, "ANTHROPIC_API_KEY"},
+		{"gemini_key", geminiSecretPath, "GEMINI_API_KEY"},
+	}
+	var errs []string
+	for _, sec := range secrets {
+		val := strings.TrimSpace(r.FormValue(sec.field))
+		if val == "" {
+			continue
+		}
+		if err := WriteSecretFile(sec.path, map[string]string{sec.envKey: val}); err != nil {
+			errs = append(errs, fmt.Sprintf("%s: %v", sec.envKey, err))
+		}
+	}
+	if len(errs) > 0 {
+		renderSetupPage(w, 7, "AI provider keys (optional)", "", strings.Join(errs, "; "))
+		return
+	}
+	if s.setupStore != nil {
+		_ = s.setupStore.SetCurrentStep(r.Context(), 8)
+	}
 	http.Redirect(w, r, "/setup/step/8", http.StatusFound)
 }
 func (s *Server) handleSetupStep8(w http.ResponseWriter, r *http.Request) {
