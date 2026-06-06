@@ -21,7 +21,7 @@ func NewSetupStore(db *DB) *SetupStore {
 func (s *SetupStore) GetCurrentStep(ctx context.Context) (int, error) {
 	const op = "storage.sqlite.SetupStore.GetCurrentStep"
 	var step int
-	err := s.db.conn.QueryRowContext(ctx, `SELECT current_step FROM setup_state WHERE id = 1`).Scan(&step)
+	err := s.db.Conn().QueryRowContext(ctx, `SELECT current_step FROM setup_state WHERE id = 1`).Scan(&step)
 	if err == sql.ErrNoRows {
 		return 1, nil
 	}
@@ -34,7 +34,10 @@ func (s *SetupStore) GetCurrentStep(ctx context.Context) (int, error) {
 // SetCurrentStep persists the current wizard step.
 func (s *SetupStore) SetCurrentStep(ctx context.Context, step int) error {
 	const op = "storage.sqlite.SetupStore.SetCurrentStep"
-	_, err := s.db.conn.ExecContext(ctx,
+	if err := s.db.ensureWritable(op); err != nil {
+		return err
+	}
+	_, err := s.db.Conn().ExecContext(ctx,
 		`INSERT INTO setup_state (id, current_step, updated_at)
 		 VALUES (1, ?, ?)
 		 ON CONFLICT(id) DO UPDATE SET current_step = excluded.current_step, updated_at = excluded.updated_at`,
@@ -47,7 +50,7 @@ func (s *SetupStore) SetCurrentStep(ctx context.Context, step int) error {
 func (s *SetupStore) IsComplete(ctx context.Context) (bool, error) {
 	const op = "storage.sqlite.SetupStore.IsComplete"
 	var completedAt sql.NullTime
-	err := s.db.conn.QueryRowContext(ctx, `SELECT completed_at FROM setup_state WHERE id = 1`).Scan(&completedAt)
+	err := s.db.Conn().QueryRowContext(ctx, `SELECT completed_at FROM setup_state WHERE id = 1`).Scan(&completedAt)
 	if err == sql.ErrNoRows {
 		return false, nil
 	}
@@ -60,11 +63,14 @@ func (s *SetupStore) IsComplete(ctx context.Context) (bool, error) {
 // MarkComplete marks setup as complete with the current timestamp.
 func (s *SetupStore) MarkComplete(ctx context.Context) error {
 	const op = "storage.sqlite.SetupStore.MarkComplete"
+	if err := s.db.ensureWritable(op); err != nil {
+		return err
+	}
 	now := time.Now().UTC()
-	_, err := s.db.conn.ExecContext(ctx,
+	_, err := s.db.Conn().ExecContext(ctx,
 		`INSERT INTO setup_state (id, current_step, completed_at, updated_at)
 		 VALUES (1, 9, ?, ?)
-		 ON CONFLICT(id) DO UPDATE SET completed_at = excluded.completed_at, updated_at = excluded.updated_at`,
+		 ON CONFLICT(id) DO UPDATE SET current_step = excluded.current_step, completed_at = excluded.completed_at, updated_at = excluded.updated_at`,
 		now, now,
 	)
 	return apperr.Wrap(op, err)
@@ -74,7 +80,7 @@ func (s *SetupStore) MarkComplete(ctx context.Context) error {
 func (s *SetupStore) GetSetting(ctx context.Context, key string) (string, bool, error) {
 	const op = "storage.sqlite.SetupStore.GetSetting"
 	var val string
-	err := s.db.conn.QueryRowContext(ctx, `SELECT value FROM ui_settings WHERE key = ?`, key).Scan(&val)
+	err := s.db.Conn().QueryRowContext(ctx, `SELECT value FROM ui_settings WHERE key = ?`, key).Scan(&val)
 	if err == sql.ErrNoRows {
 		return "", false, nil
 	}
@@ -87,7 +93,10 @@ func (s *SetupStore) GetSetting(ctx context.Context, key string) (string, bool, 
 // SetSetting upserts a named setting.
 func (s *SetupStore) SetSetting(ctx context.Context, key, value string) error {
 	const op = "storage.sqlite.SetupStore.SetSetting"
-	_, err := s.db.conn.ExecContext(ctx,
+	if err := s.db.ensureWritable(op); err != nil {
+		return err
+	}
+	_, err := s.db.Conn().ExecContext(ctx,
 		`INSERT INTO ui_settings (key, value, updated_at) VALUES (?, ?, ?)
 		 ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
 		key, value, time.Now().UTC(),
