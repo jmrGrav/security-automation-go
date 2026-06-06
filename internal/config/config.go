@@ -103,7 +103,8 @@ type UIBoolConfig struct {
 	MutationsEnabled  bool   `yaml:"mutations_enabled"`
 	SecretFile        string `yaml:"secret_file"`
 	ProviderStateFile string `yaml:"provider_state_file"`
-	AdminPasswordFile string `yaml:"admin_password_file"` // New: path to admin password hash
+	AdminPasswordFile   string `yaml:"admin_password_file"`   // New: path to admin password hash
+	InitialPasswordFile string `yaml:"initial_password_file"` // New: path to one-time setup password
 }
 
 type EnrichmentConfig struct {
@@ -183,8 +184,9 @@ func DefaultConfig() *Config {
 			Addr:              "127.0.0.1:6969",
 			Port:              6969,
 			SecretFile:        "/etc/security-automation/secrets/ui_secret",
-			AdminPasswordFile: "/etc/security-automation/secrets/admin_password",
-			ProviderStateFile: "/etc/security-automation/providers/ai-providers.env",
+			AdminPasswordFile:   "/etc/security-automation/secrets/admin_password",
+			InitialPasswordFile: "/etc/security-automation/runtime/initial-admin-password",
+			ProviderStateFile:   "/etc/security-automation/providers/ai-providers.env",
 			MutationsEnabled:  false,
 		},
 		Enrichment: EnrichmentConfig{
@@ -339,6 +341,9 @@ func applyEnvOverrides(cfg *Config) {
 	}
 	if v := os.Getenv("UI_ADMIN_PASSWORD_FILE"); v != "" {
 		cfg.UI.AdminPasswordFile = v
+	}
+	if v := os.Getenv("UI_INITIAL_PASSWORD_FILE"); v != "" {
+		cfg.UI.InitialPasswordFile = v
 	}
 	if v := os.Getenv("ENRICHMENT_ENABLED"); v != "" {
 		if enabled, err := strconv.ParseBool(v); err == nil {

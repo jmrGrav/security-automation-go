@@ -23,6 +23,7 @@ import (
 	"github.com/jm/security-automation-go/internal/config"
 	"github.com/jm/security-automation-go/internal/runtime/lock"
 	"github.com/jm/security-automation-go/internal/startupcheck"
+	"github.com/jm/security-automation-go/internal/storage/sqlite"
 	"github.com/jm/security-automation-go/internal/ui"
 	uiauth "github.com/jm/security-automation-go/internal/ui/auth"
 )
@@ -68,9 +69,24 @@ func runUI(ctx context.Context, logger *slog.Logger, cfg *config.Config) error {
 
 	logger.Info("instance lock acquired", "lock_file", lockFile)
 
+	// Generate the initial one-time setup password if it doesn't exist yet.
+	// NEVER log the password value — log only the file path.
+	if _, err := uiauth.GenerateInitialPassword(cfg.UI.InitialPasswordFile); err != nil {
+		return fmt.Errorf("generate initial password: %w", err)
+	}
+	logger.Info("initial setup password available", "path", cfg.UI.InitialPasswordFile)
+
 	if err := uiauth.InitializeFromPassword(cfg.UI.AdminPasswordFile, os.Getenv("SECURITY_AUTOMATION_INITIAL_ADMIN_PASSWORD")); err != nil {
 		return fmt.Errorf("bootstrap admin password: %w", err)
 	}
+
+	// Open SQLite for setup wizard state persistence.
+	setupDB, err := sqlite.New(cfg.StateDir)
+	if err != nil {
+		return fmt.Errorf("open setup db: %w", err)
+	}
+	defer setupDB.Close()
+	setupStore := sqlite.NewSetupStore(setupDB)
 
 	auditSink, err := ui.NewFileAuditSink(filepath.Join(cfg.StateDir, "ui-audit.log"))
 	if err != nil {
@@ -78,6 +94,7 @@ func runUI(ctx context.Context, logger *slog.Logger, cfg *config.Config) error {
 	}
 	aiCfg := ai.FromEnv()
 	server, err := ui.NewServer(cfg, ui.Options{
+		SetupStore:     setupStore,
 		SecretProvider: ui.NewFileSecretProvider(cfg.UI.SecretFile),
 		AuditSink:      auditSink,
 		Logger:         logger,
