@@ -18,6 +18,8 @@ Set at minimum:
 - `CF_API_TOKEN` — Cloudflare API token
 - `CF_ZONE_ID` — Cloudflare zone ID
 - `CF_SYNC_API_TOKEN` — cf-sync admin API token
+- `CF_SYNC_API_TOKEN_FILE` — path to a file containing the admin API token;
+  takes precedence over `CF_SYNC_API_TOKEN` when set (file must be non-empty)
 - `SECURITY_AUTOMATION_INITIAL_ADMIN_PASSWORD` — plaintext password used **once**
   to create the bcrypt credential file; ignored on subsequent startups
 

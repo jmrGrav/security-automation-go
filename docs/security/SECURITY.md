@@ -25,6 +25,10 @@ Expect an acknowledgement within 72 hours.
 
 - No secrets are committed. All credentials are delivered via environment
   variables / systemd `EnvironmentFile=` at runtime (see `pkg/configs/*.env.example`).
+- Admin API tokens can optionally be delivered via `CF_SYNC_API_TOKEN_FILE`
+  (a path to a file containing the token), which takes precedence over
+  `CF_SYNC_API_TOKEN`. If the file path is set but the file is missing or
+  empty, startup fails immediately.
 - `.env` files are git-ignored; only `*.env.example` templates (empty values) are tracked.
 - Rotate `CF_API_TOKEN`, `ABUSEIPDB_KEY`, and `CS_API_KEY` if a leak is suspected.
 - The Cloudflare token must be scoped to the minimum required permissions
