@@ -1,10 +1,10 @@
 package ui
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -13,37 +13,56 @@ import (
 	"github.com/jm/security-automation-go/internal/ui/auth"
 )
 
-// initTestBootstrap initializes a bootstrap password and returns the password and error.
-func initTestBootstrap(passwordFile string) (string, error) {
-	return auth.InitializeBootstrapPassword(passwordFile)
+// testAdminStore is a minimal in-memory SetupStorer for tests.
+type testAdminStore struct {
+	settings map[string]string
+	step     int
+	complete bool
 }
 
-// getTestBootstrapState retrieves the current bootstrap state.
-func getTestBootstrapState(passwordFile string) (auth.BootstrapState, error) {
-	return auth.GetBootstrapState(passwordFile)
+func newTestAdminStore(passwordHash string) *testAdminStore {
+	s := &testAdminStore{settings: make(map[string]string), step: 9, complete: true}
+	if passwordHash != "" {
+		s.settings["admin_password_hash"] = passwordHash
+	}
+	return s
 }
 
-// testConfig creates a minimal config for testing.
-func testConfig(passwordFile string) *config.Config {
-	return &config.Config{
-		UI: config.UIBoolConfig{
-			AdminPasswordFile: passwordFile,
-		},
+func (s *testAdminStore) GetCurrentStep(_ context.Context) (int, error)     { return s.step, nil }
+func (s *testAdminStore) SetCurrentStep(_ context.Context, v int) error     { s.step = v; return nil }
+func (s *testAdminStore) IsComplete(_ context.Context) (bool, error)        { return s.complete, nil }
+func (s *testAdminStore) MarkComplete(_ context.Context) error              { s.complete = true; return nil }
+func (s *testAdminStore) GetSetting(_ context.Context, k string) (string, bool, error) {
+	v, ok := s.settings[k]
+	return v, ok, nil
+}
+func (s *testAdminStore) SetSetting(_ context.Context, k, v string) error {
+	s.settings[k] = v
+	return nil
+}
+
+func seedAdminHash(t *testing.T, password string) (string, *testAdminStore) {
+	t.Helper()
+	hash, err := auth.HashPassword(password)
+	if err != nil {
+		t.Fatalf("HashPassword: %v", err)
+	}
+	return password, newTestAdminStore(hash)
+}
+
+func newServerWithStore(store SetupStorer) *Server {
+	return &Server{
+		cfg:        config.DefaultConfig(),
+		sessions:   make(map[string]time.Time),
+		uiSecret:   "test-secret",
+		setupStore: store,
 	}
 }
 
 func TestChangePassword_ValidFlow(t *testing.T) {
-	tmpDir := t.TempDir()
-	passwordFile := filepath.Join(tmpDir, "admin_password")
-	oldPwd, _ := initTestBootstrap(passwordFile)
+	oldPwd, store := seedAdminHash(t, "OldPassword123!@#Secure")
+	server := newServerWithStore(store)
 
-	server := &Server{
-		cfg:      testConfig(passwordFile),
-		sessions: make(map[string]time.Time),
-		uiSecret: "test-secret",
-	}
-
-	// Create valid session
 	sessionToken := generateSessionToken()
 	server.mu.Lock()
 	server.sessions[sessionToken] = time.Now().Add(sessionTTL)
@@ -69,23 +88,19 @@ func TestChangePassword_ValidFlow(t *testing.T) {
 		t.Errorf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
 
-	// Verify bootstrap state is cleared
-	state, _ := getTestBootstrapState(passwordFile)
-	if state.IsBootstrap {
-		t.Errorf("bootstrap flag not cleared after password change")
+	// Verify new hash is stored and old password no longer works
+	newHash, _, _ := store.GetSetting(context.Background(), "admin_password_hash")
+	if auth.VerifyPassword(newHash, oldPwd) {
+		t.Error("old password should not verify against new hash")
+	}
+	if !auth.VerifyPassword(newHash, "NewPassword123!@#SecurePassword") {
+		t.Error("new password should verify against stored hash")
 	}
 }
 
 func TestChangePassword_MismatchedPasswords(t *testing.T) {
-	tmpDir := t.TempDir()
-	passwordFile := filepath.Join(tmpDir, "admin_password")
-	oldPwd, _ := initTestBootstrap(passwordFile)
-
-	server := &Server{
-		cfg:      testConfig(passwordFile),
-		sessions: make(map[string]time.Time),
-		uiSecret: "test-secret",
-	}
+	oldPwd, store := seedAdminHash(t, "OldPassword123!@#Secure")
+	server := newServerWithStore(store)
 
 	sessionToken := generateSessionToken()
 	server.mu.Lock()
@@ -110,15 +125,8 @@ func TestChangePassword_MismatchedPasswords(t *testing.T) {
 }
 
 func TestChangePassword_WeakPassword(t *testing.T) {
-	tmpDir := t.TempDir()
-	passwordFile := filepath.Join(tmpDir, "admin_password")
-	oldPwd, _ := initTestBootstrap(passwordFile)
-
-	server := &Server{
-		cfg:      testConfig(passwordFile),
-		sessions: make(map[string]time.Time),
-		uiSecret: "test-secret",
-	}
+	oldPwd, store := seedAdminHash(t, "OldPassword123!@#Secure")
+	server := newServerWithStore(store)
 
 	sessionToken := generateSessionToken()
 	server.mu.Lock()
@@ -143,17 +151,12 @@ func TestChangePassword_WeakPassword(t *testing.T) {
 }
 
 func TestChangePassword_NoSession(t *testing.T) {
-	tmpDir := t.TempDir()
-	passwordFile := filepath.Join(tmpDir, "admin_password")
-	oldPwd, _ := initTestBootstrap(passwordFile)
-
-	server := &Server{
-		cfg:      testConfig(passwordFile),
-		sessions: make(map[string]time.Time),
-	}
+	_, store := seedAdminHash(t, "OldPassword123!@#Secure")
+	server := newServerWithStore(store)
+	server.uiSecret = ""
 
 	body := `{
-		"current_password": "` + oldPwd + `",
+		"current_password": "OldPassword123!@#Secure",
 		"new_password": "NewPassword123!@#",
 		"confirm_password": "NewPassword123!@#"
 	}`
@@ -168,15 +171,8 @@ func TestChangePassword_NoSession(t *testing.T) {
 }
 
 func TestChangePassword_IncorrectCurrentPassword(t *testing.T) {
-	tmpDir := t.TempDir()
-	passwordFile := filepath.Join(tmpDir, "admin_password")
-	_, _ = initTestBootstrap(passwordFile)
-
-	server := &Server{
-		cfg:      testConfig(passwordFile),
-		sessions: make(map[string]time.Time),
-		uiSecret: "test-secret",
-	}
+	_, store := seedAdminHash(t, "OldPassword123!@#Secure")
+	server := newServerWithStore(store)
 
 	sessionToken := generateSessionToken()
 	server.mu.Lock()
@@ -201,22 +197,14 @@ func TestChangePassword_IncorrectCurrentPassword(t *testing.T) {
 }
 
 func TestChangePassword_PasswordTooShort(t *testing.T) {
-	tmpDir := t.TempDir()
-	passwordFile := filepath.Join(tmpDir, "admin_password")
-	oldPwd, _ := initTestBootstrap(passwordFile)
-
-	server := &Server{
-		cfg:      testConfig(passwordFile),
-		sessions: make(map[string]time.Time),
-		uiSecret: "test-secret",
-	}
+	oldPwd, store := seedAdminHash(t, "OldPassword123!@#Secure")
+	server := newServerWithStore(store)
 
 	sessionToken := generateSessionToken()
 	server.mu.Lock()
 	server.sessions[sessionToken] = time.Now().Add(sessionTTL)
 	server.mu.Unlock()
 
-	// 15 chars, need 16
 	body := `{
 		"current_password": "` + oldPwd + `",
 		"new_password": "Short1!Pass1234",
@@ -235,22 +223,14 @@ func TestChangePassword_PasswordTooShort(t *testing.T) {
 }
 
 func TestChangePassword_MissingComplexity(t *testing.T) {
-	tmpDir := t.TempDir()
-	passwordFile := filepath.Join(tmpDir, "admin_password")
-	oldPwd, _ := initTestBootstrap(passwordFile)
-
-	server := &Server{
-		cfg:      testConfig(passwordFile),
-		sessions: make(map[string]time.Time),
-		uiSecret: "test-secret",
-	}
+	oldPwd, store := seedAdminHash(t, "OldPassword123!@#Secure")
+	server := newServerWithStore(store)
 
 	sessionToken := generateSessionToken()
 	server.mu.Lock()
 	server.sessions[sessionToken] = time.Now().Add(sessionTTL)
 	server.mu.Unlock()
 
-	// Missing symbol
 	body := `{
 		"current_password": "` + oldPwd + `",
 		"new_password": "NoSymbolPassword123456",
@@ -269,15 +249,8 @@ func TestChangePassword_MissingComplexity(t *testing.T) {
 }
 
 func TestChangePassword_InvalidJSON(t *testing.T) {
-	tmpDir := t.TempDir()
-	passwordFile := filepath.Join(tmpDir, "admin_password")
-	_, _ = initTestBootstrap(passwordFile)
-
-	server := &Server{
-		cfg:      testConfig(passwordFile),
-		sessions: make(map[string]time.Time),
-		uiSecret: "test-secret",
-	}
+	_, store := seedAdminHash(t, "OldPassword123!@#Secure")
+	server := newServerWithStore(store)
 
 	sessionToken := generateSessionToken()
 	server.mu.Lock()
@@ -298,14 +271,8 @@ func TestChangePassword_InvalidJSON(t *testing.T) {
 }
 
 func TestChangePassword_MethodNotAllowed(t *testing.T) {
-	tmpDir := t.TempDir()
-	passwordFile := filepath.Join(tmpDir, "admin_password")
-	_, _ = initTestBootstrap(passwordFile)
-
-	server := &Server{
-		cfg:      testConfig(passwordFile),
-		sessions: make(map[string]time.Time),
-	}
+	_, store := seedAdminHash(t, "OldPassword123!@#Secure")
+	server := newServerWithStore(store)
 
 	req := httptest.NewRequest("GET", "/ui/settings/password/change", nil)
 	w := httptest.NewRecorder()
@@ -318,15 +285,8 @@ func TestChangePassword_MethodNotAllowed(t *testing.T) {
 }
 
 func TestChangePassword_ValidResponseFormat(t *testing.T) {
-	tmpDir := t.TempDir()
-	passwordFile := filepath.Join(tmpDir, "admin_password")
-	oldPwd, _ := initTestBootstrap(passwordFile)
-
-	server := &Server{
-		cfg:      testConfig(passwordFile),
-		sessions: make(map[string]time.Time),
-		uiSecret: "test-secret",
-	}
+	oldPwd, store := seedAdminHash(t, "OldPassword123!@#Secure")
+	server := newServerWithStore(store)
 
 	sessionToken := generateSessionToken()
 	server.mu.Lock()
@@ -391,15 +351,8 @@ func TestHasPasswordComplexity(t *testing.T) {
 }
 
 func TestChangePassword_MissingCSRF(t *testing.T) {
-	tmpDir := t.TempDir()
-	passwordFile := filepath.Join(tmpDir, "admin_password")
-	oldPwd, _ := initTestBootstrap(passwordFile)
-
-	server := &Server{
-		cfg:      testConfig(passwordFile),
-		sessions: make(map[string]time.Time),
-		uiSecret: "test-secret",
-	}
+	oldPwd, store := seedAdminHash(t, "OldPassword123!@#Secure")
+	server := newServerWithStore(store)
 
 	sessionToken := generateSessionToken()
 	server.mu.Lock()
@@ -419,15 +372,8 @@ func TestChangePassword_MissingCSRF(t *testing.T) {
 }
 
 func TestChangePassword_InvalidCSRF(t *testing.T) {
-	tmpDir := t.TempDir()
-	passwordFile := filepath.Join(tmpDir, "admin_password")
-	oldPwd, _ := initTestBootstrap(passwordFile)
-
-	server := &Server{
-		cfg:      testConfig(passwordFile),
-		sessions: make(map[string]time.Time),
-		uiSecret: "test-secret",
-	}
+	oldPwd, store := seedAdminHash(t, "OldPassword123!@#Secure")
+	server := newServerWithStore(store)
 
 	sessionToken := generateSessionToken()
 	server.mu.Lock()
@@ -446,19 +392,9 @@ func TestChangePassword_InvalidCSRF(t *testing.T) {
 	}
 }
 
-// TestChangePassword_ValidCSRF verifies that a correct X-CSRF-Token header
-// is accepted and the request proceeds. It does not test the full flow —
-// see TestChangePassword_ValidFlow for that.
 func TestChangePassword_ValidCSRF(t *testing.T) {
-	tmpDir := t.TempDir()
-	passwordFile := filepath.Join(tmpDir, "admin_password")
-	oldPwd, _ := initTestBootstrap(passwordFile)
-
-	server := &Server{
-		cfg:      testConfig(passwordFile),
-		sessions: make(map[string]time.Time),
-		uiSecret: "test-secret",
-	}
+	oldPwd, store := seedAdminHash(t, "OldPassword123!@#Secure")
+	server := newServerWithStore(store)
 
 	sessionToken := generateSessionToken()
 	server.mu.Lock()

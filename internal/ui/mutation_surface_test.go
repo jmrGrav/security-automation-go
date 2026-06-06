@@ -5,21 +5,10 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-
-	"github.com/jm/security-automation-go/internal/ui/auth"
 )
 
 func TestMutationSurface_CSRFAndMethodEnforcement(t *testing.T) {
 	srv, _, _ := newTestServer(t, map[string]string{"UI_SECRET": "test-secret"})
-
-	// Initialize admin password file so it doesn't force change
-	passwordFile := srv.cfg.UI.AdminPasswordFile
-	if _, err := auth.InitializeBootstrapPassword(passwordFile); err != nil {
-		t.Fatalf("failed to init bootstrap password: %v", err)
-	}
-	if err := auth.ClearBootstrapState(passwordFile); err != nil {
-		t.Fatalf("failed to clear bootstrap state: %v", err)
-	}
 
 	cookie := loginCookie(t, srv, "test-secret")
 	csrfToken := srv.csrfTokenFor(cookie.Value)

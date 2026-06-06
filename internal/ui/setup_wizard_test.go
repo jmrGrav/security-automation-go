@@ -40,7 +40,6 @@ func newTestServerWithSetup(t *testing.T, store ui.SetupStorer) *ui.Server {
 	cfg := config.DefaultConfig()
 	cfg.UI.Enabled = true
 	cfg.UI.Addr = "127.0.0.1:0"
-	cfg.UI.AdminPasswordFile = dataDir + "/admin_password"
 	cfg.UI.InitialPasswordFile = dataDir + "/initial-admin-password"
 	cfg.UI.SecretFile = dataDir + "/secret"
 	cfg.UI.ProviderStateFile = dataDir + "/ai-providers.env"

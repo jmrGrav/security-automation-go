@@ -2,6 +2,7 @@ package ui
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -13,40 +14,19 @@ import (
 )
 
 // TestFullAuthenticationFlow verifies the complete authentication lifecycle:
-// 1. Bootstrap password initialization
-// 2. First login with bootstrap password
-// 3. Force redirect to password change
-// 4. Password change with validation
-// 5. Bootstrap flag cleared
-// 6. Old password no longer works
-// 7. New password works
-// 8. No secret leakage
+// 1. Seed admin hash into SQLite store
+// 2. Login with the known password → 200 + session token
+// 3. Change password with valid session
+// 4. Verify new hash is stored; old password no longer verifies
 func TestFullAuthenticationFlow(t *testing.T) {
-	// Setup: Initialize bootstrap password
-	tmpDir := t.TempDir()
-	passwordFile := filepath.Join(tmpDir, "admin_password")
-	bootstrapPwd, err := auth.InitializeBootstrapPassword(passwordFile)
-	if err != nil {
-		t.Fatalf("InitializeBootstrapPassword failed: %v", err)
-	}
+	initialPwd := "InitialPass123!@#Secure"
+	_, store := seedAdminHash(t, initialPwd)
 
-	// Verify bootstrap state is initially active
-	state, err := auth.GetBootstrapState(passwordFile)
-	if err != nil {
-		t.Fatalf("GetBootstrapState failed: %v", err)
-	}
-	if !state.IsBootstrap {
-		t.Errorf("bootstrap should be active on initialization")
-	}
+	server := newServerWithStore(store)
+	server.uiSecret = "test-secret"
 
-	server := &Server{
-		cfg:      testConfig(passwordFile),
-		sessions: make(map[string]time.Time),
-		uiSecret: "test-secret",
-	}
-
-	// Step 1: Login with bootstrap password via JSON
-	loginBody := map[string]string{"password": bootstrapPwd}
+	// Step 1: Login with initial password via JSON
+	loginBody := map[string]string{"password": initialPwd}
 	loginJSON, _ := json.Marshal(loginBody)
 	req := httptest.NewRequest("POST", "/login", bytes.NewReader(loginJSON))
 	req.Header.Set("Content-Type", "application/json")
@@ -67,25 +47,22 @@ func TestFullAuthenticationFlow(t *testing.T) {
 		t.Fatalf("no session_token in response")
 	}
 
-	// Verify redirect points to password change
-	if loginResp["redirect"] != "/ui/settings/password" {
-		t.Errorf("expected redirect to /ui/settings/password, got %q", loginResp["redirect"])
+	// After normal login, redirect is to root (not password change page)
+	if loginResp["redirect"] == "" {
+		t.Errorf("expected a redirect in response, got empty")
 	}
 
-	// Step 2: Change password with bootstrap session
+	// Step 2: Change password with valid session
 	newPassword := "NewSecurePassword123!@#"
 	changeBody := map[string]string{
-		"current_password": bootstrapPwd,
+		"current_password": initialPwd,
 		"new_password":     newPassword,
 		"confirm_password": newPassword,
 	}
 	changeJSON, _ := json.Marshal(changeBody)
 	req = httptest.NewRequest("POST", "/ui/settings/password/change", bytes.NewReader(changeJSON))
 	req.Header.Set("Content-Type", "application/json")
-	req.AddCookie(&http.Cookie{
-		Name:  sessionCookieName,
-		Value: sessionToken,
-	})
+	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: sessionToken})
 	req.Header.Set("X-CSRF-Token", server.csrfTokenFor(sessionToken))
 	w = httptest.NewRecorder()
 	server.handleChangePassword(w, req)
@@ -103,91 +80,27 @@ func TestFullAuthenticationFlow(t *testing.T) {
 		t.Errorf("expected status=success, got %q", changeResp["status"])
 	}
 
-	// Step 3: Verify bootstrap flag is cleared
-	stateAfterChange, err := auth.GetBootstrapState(passwordFile)
-	if err != nil {
-		t.Fatalf("GetBootstrapState failed after password change: %v", err)
-	}
-	if stateAfterChange.IsBootstrap {
-		t.Errorf("bootstrap flag should be cleared after password change")
-	}
-
-	// Keep old state for comparison later
-	oldPasswordHash := state.PasswordHash
-
-	// Step 4: Verify bootstrap login no longer works after flag is cleared
-	// (because handleLoginJSON checks IsBootstrap flag)
-	oldLoginBody := map[string]string{"password": bootstrapPwd}
-	oldLoginJSON, _ := json.Marshal(oldLoginBody)
-	req = httptest.NewRequest("POST", "/login", bytes.NewReader(oldLoginJSON))
-	req.Header.Set("Content-Type", "application/json")
-	w = httptest.NewRecorder()
-	server.handleLoginJSON(w, req)
-
-	if w.Code != http.StatusUnauthorized {
-		t.Errorf("bootstrap login should fail after bootstrap cleared: expected 401, got %d", w.Code)
-	}
-
-	// Step 5: Verify new password is securely hashed
-	finalState, err := auth.GetBootstrapState(passwordFile)
-	if err != nil {
-		t.Fatalf("GetBootstrapState failed at end: %v", err)
-	}
-
-	// New password hash should be different from bootstrap hash
-	if finalState.PasswordHash == oldPasswordHash {
-		t.Errorf("password hash should have changed after password change")
-	}
-
-	// Verify new password verifies correctly
-	if !auth.VerifyPassword(finalState.PasswordHash, newPassword) {
-		t.Errorf("new password should verify against final hash")
-	}
-
-	// Verify old password does not verify
-	if auth.VerifyPassword(finalState.PasswordHash, bootstrapPwd) {
+	// Step 3: Verify hash changed — old password no longer works
+	newHash, _, _ := store.GetSetting(context.Background(), "admin_password_hash")
+	if auth.VerifyPassword(newHash, initialPwd) {
 		t.Errorf("old password should not verify against new hash")
+	}
+	if !auth.VerifyPassword(newHash, newPassword) {
+		t.Errorf("new password should verify against stored hash")
 	}
 }
 
-// TestNoSecretLeakage verifies that secrets are never leaked in plaintext
+// TestNoSecretLeakage verifies that wrong passwords give 401 and responses
+// never contain the password hash or plaintext.
 func TestNoSecretLeakage(t *testing.T) {
-	tmpDir := t.TempDir()
-	passwordFile := filepath.Join(tmpDir, "admin_password")
-	bootstrapPwd, err := auth.InitializeBootstrapPassword(passwordFile)
-	if err != nil {
-		t.Fatalf("InitializeBootstrapPassword failed: %v", err)
-	}
+	initialPwd := "SecretPassword123!@#"
+	_, store := seedAdminHash(t, initialPwd)
 
-	// Verify password hash is not plaintext
-	state, err := auth.GetBootstrapState(passwordFile)
-	if err != nil {
-		t.Fatalf("GetBootstrapState failed: %v", err)
-	}
+	hash, _, _ := store.GetSetting(context.Background(), "admin_password_hash")
 
-	// Password hash should be different from plaintext password
-	if state.PasswordHash == bootstrapPwd {
-		t.Errorf("password hash should not be plaintext")
-	}
+	server := newServerWithStore(store)
 
-	// Password hash should look like bcrypt (starts with $2a$, $2b$, or $2y$)
-	if len(state.PasswordHash) < 20 || state.PasswordHash[0:1] != "$" {
-		t.Errorf("invalid bcrypt hash format: %q", state.PasswordHash)
-	}
-
-	// Verify plaintext password field is only in-memory from InitializeBootstrapPassword,
-	// not persisted in subsequent GetBootstrapState calls
-	state2, _ := auth.GetBootstrapState(passwordFile)
-	if state2.Password != bootstrapPwd {
-		t.Errorf("plaintext password should be readable from first state, but may be cleared after password change")
-	}
-
-	server := &Server{
-		cfg:      testConfig(passwordFile),
-		sessions: make(map[string]time.Time),
-	}
-
-	// Test that error responses don't leak sensitive information
+	// Wrong password attempt
 	wrongPwd := "WrongPassword123!@#"
 	loginBody := map[string]string{"password": wrongPwd}
 	loginJSON, _ := json.Marshal(loginBody)
@@ -196,67 +109,59 @@ func TestNoSecretLeakage(t *testing.T) {
 	w := httptest.NewRecorder()
 	server.handleLoginJSON(w, req)
 
-	// Should get generic error message, not revealing what's wrong
 	if w.Code == http.StatusOK {
 		t.Errorf("invalid password should not succeed")
 	}
-	errorMsg := w.Body.String()
-	if errorMsg == "" {
-		t.Errorf("error message is empty")
-	}
 
-	// Error message must not contain password hashes or plaintext passwords
-	if bytes.Contains(w.Body.Bytes(), []byte(state.PasswordHash)) {
+	body := w.Body.Bytes()
+	// Error response must not contain the bcrypt hash or plaintext passwords
+	if bytes.Contains(body, []byte(hash)) {
 		t.Errorf("error response must not contain password hash")
 	}
-	if bytes.Contains(w.Body.Bytes(), []byte(bootstrapPwd)) {
-		t.Errorf("error response must not contain plaintext password")
+	if bytes.Contains(body, []byte(initialPwd)) {
+		t.Errorf("error response must not contain plaintext initial password")
+	}
+	if bytes.Contains(body, []byte(wrongPwd)) {
+		t.Errorf("error response must not contain attempted password")
 	}
 }
 
-// TestBootstrapPasswordInitializationIdempotent verifies that calling
-// InitializeBootstrapPassword multiple times returns the same password
-func TestBootstrapPasswordInitializationIdempotent(t *testing.T) {
+// TestInitialPasswordFileIdempotent verifies that calling GenerateInitialPassword
+// multiple times returns the same password without overwriting the file.
+func TestInitialPasswordFileIdempotent(t *testing.T) {
 	tmpDir := t.TempDir()
-	passwordFile := filepath.Join(tmpDir, "admin_password")
+	passwordFile := filepath.Join(tmpDir, "runtime", "initial-admin-password")
 
-	pwd1, err := auth.InitializeBootstrapPassword(passwordFile)
+	pwd1, err := auth.GenerateInitialPassword(passwordFile)
 	if err != nil {
-		t.Fatalf("first InitializeBootstrapPassword failed: %v", err)
+		t.Fatalf("first GenerateInitialPassword failed: %v", err)
 	}
 
-	pwd2, err := auth.InitializeBootstrapPassword(passwordFile)
+	pwd2, err := auth.GenerateInitialPassword(passwordFile)
 	if err != nil {
-		t.Fatalf("second InitializeBootstrapPassword failed: %v", err)
+		t.Fatalf("second GenerateInitialPassword failed: %v", err)
 	}
 
 	if pwd1 != pwd2 {
-		t.Errorf("InitializeBootstrapPassword should return same password on subsequent calls")
+		t.Errorf("GenerateInitialPassword should return same password on subsequent calls")
 	}
 }
 
 // TestPasswordChangeRequiresValidSession verifies that password change
-// requires an authenticated session
+// requires an authenticated session.
 func TestPasswordChangeRequiresValidSession(t *testing.T) {
-	tmpDir := t.TempDir()
-	passwordFile := filepath.Join(tmpDir, "admin_password")
-	bootstrapPwd, err := auth.InitializeBootstrapPassword(passwordFile)
-	if err != nil {
-		t.Fatalf("InitializeBootstrapPassword failed: %v", err)
-	}
+	_, store := seedAdminHash(t, "SomePassword123!@#")
 
-	server := &Server{
-		cfg:      testConfig(passwordFile),
-		sessions: make(map[string]time.Time),
-	}
+	server := newServerWithStore(store)
 
-	// Try to change password without session cookie
 	changeBody := map[string]string{
-		"current_password": bootstrapPwd,
+		"current_password": "SomePassword123!@#",
 		"new_password":     "NewPassword123!@#",
 		"confirm_password": "NewPassword123!@#",
 	}
 	changeJSON, _ := json.Marshal(changeBody)
+
+	// No session cookie
 	req := httptest.NewRequest("POST", "/ui/settings/password/change", bytes.NewReader(changeJSON))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -266,13 +171,10 @@ func TestPasswordChangeRequiresValidSession(t *testing.T) {
 		t.Errorf("password change without session should fail: expected 401, got %d", w.Code)
 	}
 
-	// Try with invalid session token
+	// Invalid session token
 	req = httptest.NewRequest("POST", "/ui/settings/password/change", bytes.NewReader(changeJSON))
 	req.Header.Set("Content-Type", "application/json")
-	req.AddCookie(&http.Cookie{
-		Name:  sessionCookieName,
-		Value: "invalid-token",
-	})
+	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: "invalid-token"})
 	w = httptest.NewRecorder()
 	server.handleChangePassword(w, req)
 
@@ -281,20 +183,13 @@ func TestPasswordChangeRequiresValidSession(t *testing.T) {
 	}
 }
 
-// TestPasswordChangeValidation verifies password complexity requirements
+// TestPasswordChangeValidation verifies password complexity requirements.
 func TestPasswordChangeValidation(t *testing.T) {
-	tmpDir := t.TempDir()
-	passwordFile := filepath.Join(tmpDir, "admin_password")
-	bootstrapPwd, err := auth.InitializeBootstrapPassword(passwordFile)
-	if err != nil {
-		t.Fatalf("InitializeBootstrapPassword failed: %v", err)
-	}
+	bootstrapPwd := "BootstrapPassword123!@#"
+	_, store := seedAdminHash(t, bootstrapPwd)
 
-	server := &Server{
-		cfg:      testConfig(passwordFile),
-		sessions: make(map[string]time.Time),
-		uiSecret: "test-secret",
-	}
+	server := newServerWithStore(store)
+	server.uiSecret = "test-secret"
 
 	sessionToken := generateSessionToken()
 	server.mu.Lock()
@@ -302,76 +197,52 @@ func TestPasswordChangeValidation(t *testing.T) {
 	server.mu.Unlock()
 
 	tests := []struct {
-		name        string
-		currentPwd  string
-		newPwd      string
-		confirmPwd  string
-		expectCode  int
-		description string
+		name       string
+		currentPwd string
+		newPwd     string
+		confirmPwd string
+		expectCode int
+		desc       string
 	}{
 		{
-			name:        "too short",
-			currentPwd:  bootstrapPwd,
-			newPwd:      "Short1!",
-			confirmPwd:  "Short1!",
-			expectCode:  http.StatusBadRequest,
-			description: "password less than 16 characters",
+			name: "too short", currentPwd: bootstrapPwd,
+			newPwd: "Short1!", confirmPwd: "Short1!",
+			expectCode: http.StatusBadRequest, desc: "password less than 16 chars",
 		},
 		{
-			name:        "no uppercase",
-			currentPwd:  bootstrapPwd,
-			newPwd:      "password123456!@#",
-			confirmPwd:  "password123456!@#",
-			expectCode:  http.StatusBadRequest,
-			description: "missing uppercase letters",
+			name: "no uppercase", currentPwd: bootstrapPwd,
+			newPwd: "password123456!@#", confirmPwd: "password123456!@#",
+			expectCode: http.StatusBadRequest, desc: "missing uppercase",
 		},
 		{
-			name:        "no lowercase",
-			currentPwd:  bootstrapPwd,
-			newPwd:      "PASSWORD123456!@#",
-			confirmPwd:  "PASSWORD123456!@#",
-			expectCode:  http.StatusBadRequest,
-			description: "missing lowercase letters",
+			name: "no lowercase", currentPwd: bootstrapPwd,
+			newPwd: "PASSWORD123456!@#", confirmPwd: "PASSWORD123456!@#",
+			expectCode: http.StatusBadRequest, desc: "missing lowercase",
 		},
 		{
-			name:        "no digits",
-			currentPwd:  bootstrapPwd,
-			newPwd:      "PasswordChars!@#",
-			confirmPwd:  "PasswordChars!@#",
-			expectCode:  http.StatusBadRequest,
-			description: "missing digits",
+			name: "no digits", currentPwd: bootstrapPwd,
+			newPwd: "PasswordChars!@#", confirmPwd: "PasswordChars!@#",
+			expectCode: http.StatusBadRequest, desc: "missing digits",
 		},
 		{
-			name:        "no symbols",
-			currentPwd:  bootstrapPwd,
-			newPwd:      "PasswordChars123",
-			confirmPwd:  "PasswordChars123",
-			expectCode:  http.StatusBadRequest,
-			description: "missing symbols",
+			name: "no symbols", currentPwd: bootstrapPwd,
+			newPwd: "PasswordChars123", confirmPwd: "PasswordChars123",
+			expectCode: http.StatusBadRequest, desc: "missing symbols",
 		},
 		{
-			name:        "mismatch",
-			currentPwd:  bootstrapPwd,
-			newPwd:      "Password123!@#",
-			confirmPwd:  "DifferentPass123!@#",
-			expectCode:  http.StatusBadRequest,
-			description: "passwords do not match",
+			name: "mismatch", currentPwd: bootstrapPwd,
+			newPwd: "Password123!@#", confirmPwd: "DifferentPass123!@#",
+			expectCode: http.StatusBadRequest, desc: "passwords do not match",
 		},
 		{
-			name:        "wrong current",
-			currentPwd:  "WrongPassword",
-			newPwd:      "NewPassword123!@#",
-			confirmPwd:  "NewPassword123!@#",
-			expectCode:  http.StatusUnauthorized,
-			description: "incorrect current password",
+			name: "wrong current", currentPwd: "WrongPassword",
+			newPwd: "NewPassword123!@#", confirmPwd: "NewPassword123!@#",
+			expectCode: http.StatusUnauthorized, desc: "incorrect current password",
 		},
 		{
-			name:        "valid",
-			currentPwd:  bootstrapPwd,
-			newPwd:      "ValidPassword123!@#",
-			confirmPwd:  "ValidPassword123!@#",
-			expectCode:  http.StatusOK,
-			description: "valid password change",
+			name: "valid", currentPwd: bootstrapPwd,
+			newPwd: "ValidPassword123!@#", confirmPwd: "ValidPassword123!@#",
+			expectCode: http.StatusOK, desc: "valid password change",
 		},
 	}
 
@@ -385,75 +256,85 @@ func TestPasswordChangeValidation(t *testing.T) {
 			changeJSON, _ := json.Marshal(changeBody)
 			req := httptest.NewRequest("POST", "/ui/settings/password/change", bytes.NewReader(changeJSON))
 			req.Header.Set("Content-Type", "application/json")
-			req.AddCookie(&http.Cookie{
-				Name:  sessionCookieName,
-				Value: sessionToken,
-			})
+			req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: sessionToken})
 			req.Header.Set("X-CSRF-Token", server.csrfTokenFor(sessionToken))
 			w := httptest.NewRecorder()
 			server.handleChangePassword(w, req)
 
 			if w.Code != tt.expectCode {
-				t.Errorf("password change validation failed for %s: expected %d, got %d: %s",
-					tt.description, tt.expectCode, w.Code, w.Body.String())
+				t.Errorf("%s: expected %d, got %d: %s", tt.desc, tt.expectCode, w.Code, w.Body.String())
 			}
 		})
 	}
 }
 
-// TestPasswordHashVerification verifies bcrypt password hashing is secure
+// TestPasswordHashVerification verifies bcrypt password hashing is secure.
 func TestPasswordHashVerification(t *testing.T) {
-	tmpDir := t.TempDir()
-	passwordFile := filepath.Join(tmpDir, "admin_password")
-	pwd, err := auth.InitializeBootstrapPassword(passwordFile)
+	pwd := "TestPassword123!@#"
+	hash, err := auth.HashPassword(pwd)
 	if err != nil {
-		t.Fatalf("InitializeBootstrapPassword failed: %v", err)
+		t.Fatalf("HashPassword failed: %v", err)
 	}
 
-	state, err := auth.GetBootstrapState(passwordFile)
-	if err != nil {
-		t.Fatalf("GetBootstrapState failed: %v", err)
+	// Hash must not be plaintext
+	if hash == pwd {
+		t.Errorf("hash must not equal plaintext password")
 	}
 
-	// Test correct password verifies
-	if !auth.VerifyPassword(state.PasswordHash, pwd) {
+	// Must look like bcrypt
+	if len(hash) < 20 || hash[0] != '$' {
+		t.Errorf("invalid bcrypt hash format: %q", hash)
+	}
+
+	// Correct password verifies
+	if !auth.VerifyPassword(hash, pwd) {
 		t.Errorf("correct password should verify")
 	}
 
-	// Test incorrect password fails
-	if auth.VerifyPassword(state.PasswordHash, "WrongPassword") {
+	// Wrong password fails
+	if auth.VerifyPassword(hash, "WrongPassword") {
 		t.Errorf("incorrect password should not verify")
 	}
 
-	// Test empty password fails
-	if auth.VerifyPassword(state.PasswordHash, "") {
+	// Empty password fails
+	if auth.VerifyPassword(hash, "") {
 		t.Errorf("empty password should not verify")
 	}
 
-	// Test similar but wrong password fails
-	similarButWrong := pwd[:len(pwd)-1] + "X"
-	if auth.VerifyPassword(state.PasswordHash, similarButWrong) {
+	// Similar but wrong fails
+	similar := pwd[:len(pwd)-1] + "X"
+	if auth.VerifyPassword(hash, similar) {
 		t.Errorf("similar but wrong password should not verify")
 	}
 }
 
-// TestClearBootstrapStateDisablesBootstrapLogin verifies that clearing
-// the bootstrap flag prevents bootstrap password from being used
-func TestClearBootstrapStateDisablesBootstrapLogin(t *testing.T) {
-	tmpDir := t.TempDir()
-	passwordFile := filepath.Join(tmpDir, "admin_password")
-	bootstrapPwd, err := auth.InitializeBootstrapPassword(passwordFile)
-	if err != nil {
-		t.Fatalf("InitializeBootstrapPassword failed: %v", err)
-	}
+// TestLoginFailsWithNoHash verifies that login fails when no admin_password_hash
+// exists in the store (bootstrap not complete / no password set).
+func TestLoginFailsWithNoHash(t *testing.T) {
+	// Store with no hash set
+	emptyStore := newTestAdminStore("")
+	server := newServerWithStore(emptyStore)
 
-	server := &Server{
-		cfg:      testConfig(passwordFile),
-		sessions: make(map[string]time.Time),
-	}
+	loginBody := map[string]string{"password": "AnyPassword123!@#"}
+	loginJSON, _ := json.Marshal(loginBody)
+	req := httptest.NewRequest("POST", "/login", bytes.NewReader(loginJSON))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	server.handleLoginJSON(w, req)
 
-	// First, verify bootstrap login works
-	loginBody := map[string]string{"password": bootstrapPwd}
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("login with no stored hash should return 401, got %d", w.Code)
+	}
+}
+
+// TestLoginSucceedsAfterHashSet verifies that login works once admin_password_hash
+// is set in the store.
+func TestLoginSucceedsAfterHashSet(t *testing.T) {
+	pwd := "StoredPassword123!@#"
+	_, store := seedAdminHash(t, pwd)
+	server := newServerWithStore(store)
+
+	loginBody := map[string]string{"password": pwd}
 	loginJSON, _ := json.Marshal(loginBody)
 	req := httptest.NewRequest("POST", "/login", bytes.NewReader(loginJSON))
 	req.Header.Set("Content-Type", "application/json")
@@ -461,27 +342,6 @@ func TestClearBootstrapStateDisablesBootstrapLogin(t *testing.T) {
 	server.handleLoginJSON(w, req)
 
 	if w.Code != http.StatusOK {
-		t.Fatalf("bootstrap login should work before clear: got %d", w.Code)
-	}
-
-	// Clear bootstrap flag
-	if err := auth.ClearBootstrapState(passwordFile); err != nil {
-		t.Fatalf("ClearBootstrapState failed: %v", err)
-	}
-
-	// Verify state is cleared
-	state, _ := auth.GetBootstrapState(passwordFile)
-	if state.IsBootstrap {
-		t.Errorf("IsBootstrap should be false after clear")
-	}
-
-	// Now bootstrap login should fail
-	req = httptest.NewRequest("POST", "/login", bytes.NewReader(loginJSON))
-	req.Header.Set("Content-Type", "application/json")
-	w = httptest.NewRecorder()
-	server.handleLoginJSON(w, req)
-
-	if w.Code != http.StatusUnauthorized {
-		t.Errorf("bootstrap login should fail after clear: expected 401, got %d", w.Code)
+		t.Errorf("login with valid hash should return 200, got %d: %s", w.Code, w.Body.String())
 	}
 }

@@ -4,43 +4,23 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/jm/security-automation-go/internal/ui/auth"
 )
 
 func TestLoginHandler_ValidCredentials(t *testing.T) {
-	// Setup server with bootstrap password
-	tmpDir := t.TempDir()
-	passwordFile := filepath.Join(tmpDir, "admin_password")
-	pwd, err := auth.InitializeBootstrapPassword(passwordFile)
-	if err != nil {
-		t.Fatalf("InitializeBootstrapPassword failed: %v", err)
-	}
-
-	// Create server with admin password file configured
-	t.Setenv("UI_ENABLED", "1")
-	t.Setenv("UI_ADDR", "127.0.0.1:9090")
-	t.Setenv("UI_SECRET_FILE", filepath.Join(tmpDir, "ui-secrets.local"))
-	t.Setenv("UI_PROVIDER_STATE_FILE", filepath.Join(tmpDir, "ai-providers.env"))
-	t.Setenv("UI_ADMIN_PASSWORD_FILE", passwordFile)
-	t.Setenv("STATE_DIR", tmpDir)
-	t.Setenv("CF_API_TOKEN", "test-token")
-	t.Setenv("CF_ZONE_ID", "test-zone")
-
-	srv, _, _ := newTestServer(t, nil)
+	pwd, store := seedAdminHash(t, "TestPassword123!@#Secure")
+	server := newServerWithStore(store)
 
 	body := `{"password": "` + pwd + `"}`
 	req := httptest.NewRequest("POST", "/login", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
-	srv.Handler().ServeHTTP(w, req)
+	server.handleLoginJSON(w, req)
 
 	if w.Code != http.StatusOK {
-		t.Errorf("expected 200, got %d", w.Code)
+		t.Errorf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
 
 	var resp map[string]interface{}
@@ -54,70 +34,50 @@ func TestLoginHandler_ValidCredentials(t *testing.T) {
 }
 
 func TestLoginHandler_InvalidCredentials(t *testing.T) {
-	tmpDir := t.TempDir()
-	passwordFile := filepath.Join(tmpDir, "admin_password")
-	_, err := auth.InitializeBootstrapPassword(passwordFile)
-	if err != nil {
-		t.Fatalf("InitializeBootstrapPassword failed: %v", err)
-	}
-
-	// Create server with admin password file configured
-	t.Setenv("UI_ENABLED", "1")
-	t.Setenv("UI_ADDR", "127.0.0.1:9090")
-	t.Setenv("UI_SECRET_FILE", filepath.Join(tmpDir, "ui-secrets.local"))
-	t.Setenv("UI_PROVIDER_STATE_FILE", filepath.Join(tmpDir, "ai-providers.env"))
-	t.Setenv("UI_ADMIN_PASSWORD_FILE", passwordFile)
-	t.Setenv("STATE_DIR", tmpDir)
-	t.Setenv("CF_API_TOKEN", "test-token")
-	t.Setenv("CF_ZONE_ID", "test-zone")
-
-	srv, _, _ := newTestServer(t, nil)
+	_, store := seedAdminHash(t, "TestPassword123!@#Secure")
+	server := newServerWithStore(store)
 
 	body := `{"password": "wrong-password"}`
 	req := httptest.NewRequest("POST", "/login", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
-	srv.Handler().ServeHTTP(w, req)
+	server.handleLoginJSON(w, req)
 
 	if w.Code != http.StatusUnauthorized {
 		t.Errorf("expected 401, got %d", w.Code)
 	}
 }
 
-func TestLoginHandler_BootstrapNotActive(t *testing.T) {
-	tmpDir := t.TempDir()
-	passwordFile := filepath.Join(tmpDir, "admin_password")
-	pwd, err := auth.InitializeBootstrapPassword(passwordFile)
-	if err != nil {
-		t.Fatalf("InitializeBootstrapPassword failed: %v", err)
-	}
+func TestLoginHandler_NoHashInStore(t *testing.T) {
+	// Empty store — no admin_password_hash set (setup not complete)
+	store := newTestAdminStore("")
+	server := newServerWithStore(store)
 
-	// Clear bootstrap flag
-	if err := auth.ClearBootstrapState(passwordFile); err != nil {
-		t.Fatalf("ClearBootstrapState failed: %v", err)
-	}
-
-	// Create server with admin password file configured
-	t.Setenv("UI_ENABLED", "1")
-	t.Setenv("UI_ADDR", "127.0.0.1:9090")
-	t.Setenv("UI_SECRET_FILE", filepath.Join(tmpDir, "ui-secrets.local"))
-	t.Setenv("UI_PROVIDER_STATE_FILE", filepath.Join(tmpDir, "ai-providers.env"))
-	t.Setenv("UI_ADMIN_PASSWORD_FILE", passwordFile)
-	t.Setenv("STATE_DIR", tmpDir)
-	t.Setenv("CF_API_TOKEN", "test-token")
-	t.Setenv("CF_ZONE_ID", "test-zone")
-
-	srv, _, _ := newTestServer(t, nil)
-
-	body := `{"password": "` + pwd + `"}`
+	body := `{"password": "AnyPassword123!@#"}`
 	req := httptest.NewRequest("POST", "/login", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
-	srv.Handler().ServeHTTP(w, req)
+	server.handleLoginJSON(w, req)
 
 	if w.Code != http.StatusUnauthorized {
-		t.Errorf("expected 401 after bootstrap cleared, got %d", w.Code)
+		t.Errorf("expected 401 when no hash stored, got %d", w.Code)
+	}
+}
+
+func TestLoginHandler_NoSetupStore(t *testing.T) {
+	// No setup store at all → 503
+	server := newServerWithStore(nil)
+
+	body := `{"password": "AnyPassword123!@#"}`
+	req := httptest.NewRequest("POST", "/login", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	server.handleLoginJSON(w, req)
+
+	if w.Code != http.StatusServiceUnavailable {
+		t.Errorf("expected 503 when setupStore is nil, got %d", w.Code)
 	}
 }

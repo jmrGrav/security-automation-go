@@ -179,11 +179,13 @@ func (s *Server) handleSetupStep2Post(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Verify current password — accept either the initial file password or existing bcrypt hash.
+	// Verify current password — accept either the initial file password or existing SQLite hash.
 	currentOK := uiauth.VerifyInitialPassword(s.cfg.UI.InitialPasswordFile, currentPwd)
-	if !currentOK {
-		state, _ := uiauth.GetBootstrapState(s.cfg.UI.AdminPasswordFile)
-		currentOK = uiauth.VerifyPassword(state.PasswordHash, currentPwd)
+	if !currentOK && s.setupStore != nil {
+		existingHash, ok, _ := s.setupStore.GetSetting(r.Context(), "admin_password_hash")
+		if ok && existingHash != "" {
+			currentOK = uiauth.VerifyPassword(existingHash, currentPwd)
+		}
 	}
 	if !currentOK {
 		rerender("Current password is incorrect.")
@@ -195,17 +197,18 @@ func (s *Server) handleSetupStep2Post(w http.ResponseWriter, r *http.Request) {
 		rerender("Internal error hashing password.")
 		return
 	}
-	newState := uiauth.BootstrapState{IsBootstrap: false, PasswordHash: hash}
-	if err := uiauth.SaveBootstrapState(s.cfg.UI.AdminPasswordFile, newState); err != nil {
+	if s.setupStore == nil {
+		rerender("Setup store not available — cannot save password.")
+		return
+	}
+	if err := s.setupStore.SetSetting(r.Context(), "admin_password_hash", hash); err != nil {
 		rerender("Failed to save password.")
 		return
 	}
 
 	_ = uiauth.InvalidateInitialPassword(s.cfg.UI.InitialPasswordFile)
 
-	if s.setupStore != nil {
-		_ = s.setupStore.SetCurrentStep(r.Context(), 3)
-	}
+	_ = s.setupStore.SetCurrentStep(r.Context(), 3)
 	http.Redirect(w, r, "/setup/step/3", http.StatusFound)
 }
 
