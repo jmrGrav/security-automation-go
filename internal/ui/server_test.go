@@ -4,7 +4,6 @@ import (
 	"crypto/tls"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -523,11 +522,6 @@ func newTestServer(t *testing.T, env map[string]string) (*Server, *BufferAuditSi
 	t.Setenv("UI_ADDR", "127.0.0.1:9090")
 	t.Setenv("UI_SECRET_FILE", filepath.Join(dataDir, "ui-secrets.local"))
 	t.Setenv("UI_PROVIDER_STATE_FILE", filepath.Join(dataDir, "ai-providers.env"))
-	// Only set UI_ADMIN_PASSWORD_FILE if it was not already set by the caller
-	// (either via the env map or via a t.Setenv call before newTestServer was invoked).
-	if _, alreadyInMap := env["UI_ADMIN_PASSWORD_FILE"]; !alreadyInMap && os.Getenv("UI_ADMIN_PASSWORD_FILE") == "" {
-		t.Setenv("UI_ADMIN_PASSWORD_FILE", filepath.Join(dataDir, "admin-password.local"))
-	}
 	t.Setenv("STATE_DIR", dataDir)
 	cfg, err := config.Load("")
 	if err != nil {

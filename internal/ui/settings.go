@@ -56,23 +56,32 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Load current bootstrap state
-	state, err := auth.GetBootstrapState(s.cfg.UI.AdminPasswordFile)
+	if s.setupStore == nil {
+		http.Error(w, "auth not configured", http.StatusServiceUnavailable)
+		return
+	}
+
+	// Load current password hash from SQLite.
+	currentHash, ok, err := s.setupStore.GetSetting(r.Context(), "admin_password_hash")
 	if err != nil {
 		if s.logger != nil {
-			s.logger.Error("load bootstrap state", "err", err)
+			s.logger.Error("load admin password hash", "err", err)
 		}
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
+	if !ok || currentHash == "" {
+		http.Error(w, "auth not initialized", http.StatusServiceUnavailable)
+		return
+	}
 
 	// Verify current password
-	if !auth.VerifyPassword(state.PasswordHash, req.CurrentPassword) {
+	if !auth.VerifyPassword(currentHash, req.CurrentPassword) {
 		http.Error(w, "current password is incorrect", http.StatusUnauthorized)
 		return
 	}
 
-	// Hash and store new password
+	// Hash and store new password in SQLite
 	newHash, err := auth.HashPassword(req.NewPassword)
 	if err != nil {
 		if s.logger != nil {
@@ -82,23 +91,16 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Update bootstrap state: set new hash and clear bootstrap flag
-	state.PasswordHash = newHash
-	state.IsBootstrap = false
-
-	if err := auth.SaveBootstrapState(s.cfg.UI.AdminPasswordFile, state); err != nil {
+	if err := s.setupStore.SetSetting(r.Context(), "admin_password_hash", newHash); err != nil {
 		if s.logger != nil {
-			s.logger.Error("save bootstrap state", "err", err)
+			s.logger.Error("save admin password hash", "err", err)
 		}
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 
-	// Audit: password_changed
 	if s.audit != nil {
-		s.audit.Record("password_changed", map[string]string{
-			"bootstrap_cleared": "true",
-		})
+		s.audit.Record("password_changed", map[string]string{})
 	}
 
 	w.Header().Set("Content-Type", "application/json")

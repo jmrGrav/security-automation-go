@@ -25,7 +25,6 @@ import (
 	"github.com/jm/security-automation-go/internal/observability/metrics"
 	"github.com/jm/security-automation-go/internal/security"
 	"github.com/jm/security-automation-go/internal/security/enrichment"
-	"github.com/jm/security-automation-go/internal/ui/auth"
 )
 
 const (
@@ -1045,16 +1044,18 @@ func (s *Server) forcePasswordChangeMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// isBootstrapActive checks if the bootstrap password is still active.
-// Returns false if the bootstrap state file doesn't exist (system is initialized).
+// isBootstrapActive returns true when no permanent admin password hash is stored in SQLite,
+// meaning the operator has not yet completed setup step 2. Returns false if setupStore is nil
+// (legacy installs without wizard) or when a hash is present.
 func (s *Server) isBootstrapActive() bool {
-	state, err := auth.GetBootstrapState(s.cfg.UI.AdminPasswordFile)
-	if err != nil {
-		// If we can't load the bootstrap state, assume it's not active
-		// (system is already initialized or bootstrap file doesn't exist yet)
+	if s.setupStore == nil {
 		return false
 	}
-	return state.IsBootstrap
+	_, ok, err := s.setupStore.GetSetting(context.Background(), "admin_password_hash")
+	if err != nil {
+		return false
+	}
+	return !ok
 }
 
 func clientKey(r *http.Request) string {

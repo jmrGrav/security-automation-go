@@ -76,10 +76,6 @@ func runUI(ctx context.Context, logger *slog.Logger, cfg *config.Config) error {
 	}
 	logger.Info("initial setup password available", "path", cfg.UI.InitialPasswordFile)
 
-	if err := uiauth.InitializeFromPassword(cfg.UI.AdminPasswordFile, os.Getenv("SECURITY_AUTOMATION_INITIAL_ADMIN_PASSWORD")); err != nil {
-		return fmt.Errorf("bootstrap admin password: %w", err)
-	}
-
 	// Open SQLite for setup wizard state persistence.
 	setupDB, err := sqlite.New(cfg.StateDir)
 	if err != nil {
@@ -87,6 +83,23 @@ func runUI(ctx context.Context, logger *slog.Logger, cfg *config.Config) error {
 	}
 	defer setupDB.Close()
 	setupStore := sqlite.NewSetupStore(setupDB)
+
+	// If SECURITY_AUTOMATION_INITIAL_ADMIN_PASSWORD is set and no permanent password hash
+	// exists yet in SQLite, store its bcrypt hash now. This allows automated deployments
+	// to seed the admin password without a file at secrets/admin_password.
+	// NEVER log the password value.
+	if envPwd := os.Getenv("SECURITY_AUTOMATION_INITIAL_ADMIN_PASSWORD"); envPwd != "" {
+		if _, ok, _ := setupStore.GetSetting(ctx, "admin_password_hash"); !ok {
+			hash, err := uiauth.HashPassword(envPwd)
+			if err != nil {
+				return fmt.Errorf("hash initial admin password: %w", err)
+			}
+			if err := setupStore.SetSetting(ctx, "admin_password_hash", hash); err != nil {
+				return fmt.Errorf("store initial admin password: %w", err)
+			}
+			logger.Info("initial admin password stored in SQLite from environment")
+		}
+	}
 
 	// Apply wizard settings as runtime overrides (wizard stores these in SQLite).
 	if v, ok, _ := setupStore.GetSetting(ctx, "ui_addr"); ok && v != "" {

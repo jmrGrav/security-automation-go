@@ -13,8 +13,8 @@ import (
 
 // handleLogin processes POST /login requests.
 // Supports two authentication methods:
-// 1. JSON with bootstrap password ({"password": "..."}) - new method
-// 2. Form-encoded UI_SECRET (secret=...) - legacy method for backward compatibility
+// 1. JSON with admin password ({"password": "..."}) - permanent password stored in SQLite
+// 2. Form-encoded UI_SECRET (secret=...) - session token method
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -26,7 +26,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Try JSON first (bootstrap password method)
+	// Try JSON first (admin password method)
 	if r.Header.Get("Content-Type") == "application/json" {
 		s.handleLoginJSON(w, r)
 		return
@@ -36,7 +36,8 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	s.handleLoginForm(w, r)
 }
 
-// handleLoginJSON handles JSON-based bootstrap password authentication.
+// handleLoginJSON handles JSON-based admin password authentication.
+// The permanent admin password hash is stored in SQLite (ui_settings key "admin_password_hash").
 func (s *Server) handleLoginJSON(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Password string `json:"password"`
@@ -46,24 +47,27 @@ func (s *Server) handleLoginJSON(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Load bootstrap state
-	state, err := auth.GetBootstrapState(s.cfg.UI.AdminPasswordFile)
+	if s.setupStore == nil {
+		http.Error(w, "not configured", http.StatusServiceUnavailable)
+		return
+	}
+
+	// Load permanent admin password hash from SQLite.
+	hash, ok, err := s.setupStore.GetSetting(r.Context(), "admin_password_hash")
 	if err != nil {
 		if s.logger != nil {
-			s.logger.Error("failed to load bootstrap state", "err", err)
+			s.logger.Error("load admin password hash", "err", err)
 		}
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-
-	// Check if bootstrap is still active
-	if !state.IsBootstrap {
+	if !ok || hash == "" {
+		// No permanent password set yet — setup not complete.
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 
-	// Verify password
-	if !auth.VerifyPassword(state.PasswordHash, req.Password) {
+	if !auth.VerifyPassword(hash, req.Password) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
@@ -88,11 +92,11 @@ func (s *Server) handleLoginJSON(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{
 		"session_token": sessionToken,
 		"status":        "logged in",
-		"redirect":      "/ui/settings/password",
+		"redirect":      "/",
 	})
 }
 
-// handleLoginForm handles form-based UI_SECRET authentication (legacy).
+// handleLoginForm handles form-based UI_SECRET authentication.
 func (s *Server) handleLoginForm(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {
 		s.audit.Record("login_error", map[string]string{"reason": "bad_form"})
