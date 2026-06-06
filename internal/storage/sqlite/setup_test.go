@@ -64,6 +64,14 @@ func TestSetupStore_MarkComplete(t *testing.T) {
 	if !ok {
 		t.Error("should be complete after MarkComplete")
 	}
+	// Verify step was also advanced to 9
+	step, err := s.GetCurrentStep(context.Background())
+	if err != nil {
+		t.Fatalf("GetCurrentStep after MarkComplete: %v", err)
+	}
+	if step != 9 {
+		t.Errorf("want step 9 after MarkComplete, got %d", step)
+	}
 }
 
 func TestSetupStore_Settings(t *testing.T) {
