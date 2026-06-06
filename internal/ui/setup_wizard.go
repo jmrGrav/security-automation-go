@@ -206,9 +206,73 @@ func (s *Server) handleSetupStep2Post(w http.ResponseWriter, r *http.Request) {
 // Placeholder handlers so the build passes.
 
 func (s *Server) handleSetupStep3(w http.ResponseWriter, r *http.Request) {
-	renderSetupPage(w, 3, "UI bind address and port", "<p>Coming soon.</p>", "")
+	if _, ok := s.getSession(r); !ok {
+		http.Redirect(w, r, "/setup/step/1", http.StatusFound)
+		return
+	}
+	currentAddr := s.cfg.UI.Addr
+	if s.setupStore != nil {
+		if v, ok, _ := s.setupStore.GetSetting(r.Context(), "ui_addr"); ok {
+			currentAddr = v
+		}
+	}
+	csrfTok := ""
+	if tok, ok := s.getSession(r); ok {
+		csrfTok = s.csrfTokenFor(tok)
+	}
+	body := fmt.Sprintf(`
+<p>The UI is currently configured to listen on <code>%s</code>.</p>
+<p class="note">Default: 127.0.0.1:9091 (localhost only).</p>
+<form action="/setup/step/3" method="post">
+  <input type="hidden" name="csrf_token" value="%s">
+  <label for="bind_addr">Bind address</label>
+  <input id="bind_addr" name="bind_addr" type="text" value="%s">
+  <p class="note">Use 127.0.0.1 for localhost-only (recommended).</p>
+  <label for="port">Port</label>
+  <input id="port" name="port" type="number" min="1024" max="65535" value="%d">
+  <button type="submit">Confirm &amp; continue</button>
+  <button type="submit" name="skip" value="1" class="secondary">Skip (keep default)</button>
+</form>`, currentAddr, csrfTok, s.cfg.UI.Addr, s.cfg.UI.Port)
+	renderSetupPage(w, 3, "UI bind address and port", body, "")
 }
+
 func (s *Server) handleSetupStep3Post(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.getSession(r); !ok {
+		http.Redirect(w, r, "/setup/step/1", http.StatusFound)
+		return
+	}
+	if !s.validCSRF(r) {
+		http.Error(w, "csrf required", http.StatusForbidden)
+		return
+	}
+	if r.FormValue("skip") == "1" {
+		if s.setupStore != nil {
+			_ = s.setupStore.SetCurrentStep(r.Context(), 4)
+		}
+		http.Redirect(w, r, "/setup/step/4", http.StatusFound)
+		return
+	}
+	bindAddr := strings.TrimSpace(r.FormValue("bind_addr"))
+	port := strings.TrimSpace(r.FormValue("port"))
+	if bindAddr == "" || port == "" {
+		renderSetupPage(w, 3, "UI bind address and port", "", "Bind address and port are required.")
+		return
+	}
+	addr := bindAddr + ":" + port
+
+	if s.setupStore != nil {
+		_ = s.setupStore.SetSetting(r.Context(), "ui_addr", addr)
+		_ = s.setupStore.SetCurrentStep(r.Context(), 4)
+	}
+
+	// Notify if address changed (requires restart).
+	if addr != s.cfg.UI.Addr {
+		body := fmt.Sprintf(`<div class="ok">Port/address saved. The change takes effect after a service restart.</div>
+<p>Configured address: <code>%s</code></p>
+<a href="/setup/step/4"><button>Continue</button></a>`, addr)
+		renderSetupPage(w, 3, "UI bind address and port", body, "")
+		return
+	}
 	http.Redirect(w, r, "/setup/step/4", http.StatusFound)
 }
 func (s *Server) handleSetupStep4(w http.ResponseWriter, r *http.Request) {
