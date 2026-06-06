@@ -262,3 +262,76 @@ func TestConfig_GetAdminToken(t *testing.T) {
 		}
 	})
 }
+
+// TestConfigPrecedenceLayerOrdering proves the configuration hierarchy:
+//  1. Built-in defaults (no file, no env)
+//  2. YAML config file overrides defaults
+//  3. Environment variables override YAML
+//
+// Note: SQLite/UI-persisted configuration (provider API keys changed via UI)
+// is applied by the Server at startup from cfg.UI.ProviderStateFile — it is
+// a separate layer above config.Load() and is not tested here.
+func TestConfigPrecedenceLayerOrdering(t *testing.T) {
+	// Layer 1: Built-in default for log level is "info".
+	{
+		t.Setenv("CF_API_TOKEN", "tok")
+		t.Setenv("CF_ZONE_ID", "zone")
+		t.Setenv("RUNTIME_PROFILE", "")
+		cfg, err := Load("")
+		if err != nil {
+			t.Fatalf("defaults load: %v", err)
+		}
+		if cfg.Global.Log.Level != "info" {
+			t.Errorf("layer1 default: expected log level 'info', got %q", cfg.Global.Log.Level)
+		}
+	}
+
+	// Layer 2: YAML overrides the default log level.
+	yamlContent := `
+version: v1
+global:
+  log:
+    level: debug
+cloudflare:
+  api_token: yaml-token
+  zone_id: yaml-zone
+`
+	yamlFile, err := os.CreateTemp(t.TempDir(), "config*.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	yamlFile.WriteString(yamlContent)
+	yamlFile.Close()
+
+	{
+		t.Setenv("CF_API_TOKEN", "tok")
+		t.Setenv("CF_ZONE_ID", "zone")
+		cfg, err := Load(yamlFile.Name())
+		if err != nil {
+			t.Fatalf("YAML layer load: %v", err)
+		}
+		if cfg.Global.Log.Level != "debug" {
+			t.Errorf("layer2 YAML: expected log level 'debug', got %q", cfg.Global.Log.Level)
+		}
+		// Env var overrides YAML for CF token.
+		if cfg.Cloudflare.APIToken != "tok" {
+			t.Errorf("layer3 env should override YAML token: got %q", cfg.Cloudflare.APIToken)
+		}
+	}
+
+	// Layer 3: Env var overrides YAML. Use RUNTIME_PROFILE as a clean signal.
+	t.Setenv("RUNTIME_PROFILE", RuntimeProfileStrictHA)
+	{
+		cfg, err := Load(yamlFile.Name())
+		if err != nil {
+			t.Fatalf("env layer load: %v", err)
+		}
+		if cfg.Runtime.Profile != RuntimeProfileStrictHA {
+			t.Errorf("layer3 env: expected strict-ha runtime profile, got %q", cfg.Runtime.Profile)
+		}
+		// YAML log level still visible (env only overrides what it sets).
+		if cfg.Global.Log.Level != "debug" {
+			t.Errorf("layer3 env: YAML log level should be preserved, got %q", cfg.Global.Log.Level)
+		}
+	}
+}
