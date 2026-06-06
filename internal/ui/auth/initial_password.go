@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"crypto/subtle"
 	"errors"
 	"fmt"
 	"os"
@@ -57,5 +58,5 @@ func VerifyInitialPassword(path, candidate string) bool {
 		return false
 	}
 	stored := strings.TrimSpace(string(data))
-	return stored != "" && stored == candidate
+	return stored != "" && subtle.ConstantTimeCompare([]byte(stored), []byte(candidate)) == 1
 }
