@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
@@ -33,6 +34,17 @@ const (
 	sessionTTL        = 8 * time.Hour
 )
 
+// SetupStorer is the subset of sqlite.SetupStore used by the UI server.
+// Using an interface keeps the UI package free of a hard dependency on sqlite.
+type SetupStorer interface {
+	GetCurrentStep(ctx context.Context) (int, error)
+	SetCurrentStep(ctx context.Context, step int) error
+	IsComplete(ctx context.Context) (bool, error)
+	MarkComplete(ctx context.Context) error
+	GetSetting(ctx context.Context, key string) (string, bool, error)
+	SetSetting(ctx context.Context, key, value string) error
+}
+
 type Options struct {
 	SecretProvider    SecretProvider
 	AuditSink         AuditSink
@@ -42,6 +54,7 @@ type Options struct {
 	AIExplainBuilder  func(ai.Config) aigateway.Gateway
 	AIConfig          ai.Config
 	ProviderFactories map[string]ProviderFactory
+	SetupStore        SetupStorer
 }
 
 type Server struct {
@@ -65,6 +78,7 @@ type Server struct {
 	aiConfig          ai.Config
 	aiExplainBuilder  func(ai.Config) aigateway.Gateway
 	providerFactories map[string]ProviderFactory
+	setupStore        SetupStorer
 }
 
 func NewServer(cfg *config.Config, opts Options) (*Server, error) {
@@ -107,6 +121,7 @@ func NewServer(cfg *config.Config, opts Options) (*Server, error) {
 		aiConfig:          effectiveAIConfig,
 		aiExplainBuilder:  opts.AIExplainBuilder,
 		providerFactories: opts.ProviderFactories,
+		setupStore:        opts.SetupStore,
 	}
 	if s.aiConfig.MaxContextBytes <= 0 {
 		s.aiConfig.MaxContextBytes = 12_000
@@ -151,36 +166,49 @@ func securityHeaders(next http.Handler) http.Handler {
 }
 
 func (s *Server) routes() {
+	s.registerSetupRoutes() // must come first — setup routes bypass the guard
 	s.mux.HandleFunc("GET /login", s.handleLoginPage)
 	s.mux.HandleFunc("POST /login", s.handleLogin)
 	s.mux.Handle("POST /ui/settings/password/change", s.forcePasswordChangeMiddleware(http.HandlerFunc(s.handleChangePassword)))
-	s.mux.Handle("POST /logout", s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleLogout))))
-	s.mux.Handle("GET /", s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleDashboard))))
-	s.mux.Handle("GET /providers", s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleProviders))))
-	s.mux.Handle("POST /admin/providers/{name}/key", s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleProviderReplaceKey))))
-	s.mux.Handle("POST /admin/providers/{name}/test", s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleProviderTest))))
-	s.mux.Handle("POST /admin/providers/{name}/enable", s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleProviderEnable))))
-	s.mux.Handle("POST /admin/providers/{name}/disable", s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleProviderDisable))))
-	s.mux.Handle("GET /forensic", s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleForensicPage))))
-	s.mux.Handle("POST /forensic", s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleForensicLookup))))
-	s.mux.Handle("GET /about", s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleAboutPage))))
-	s.mux.Handle("GET /system", s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleAboutPage))))
-	s.mux.Handle("GET /audit", s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleAuditTrailPage))))
-	s.mux.Handle("GET /timeline", s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleTimelinePage))))
-	s.mux.Handle("GET /intelligence", s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleIntelligencePage))))
-	s.mux.Handle("POST /intelligence", s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleIntelligenceLookup))))
-	s.mux.Handle("GET /trusted-networks", s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleTrustedNetworksPage))))
-	s.mux.Handle("GET /trusted-networks/diff", s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleTrustedNetworksDiff))))
-	s.mux.Handle("GET /trusted-networks/refresh", s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleTrustedNetworksRefreshDryRun))))
-	s.mux.Handle("GET /trusted-networks/export", s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleTrustedNetworksExport))))
-	s.mux.Handle("GET /cloudflare/diff", s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleCloudflareDiffPage))))
-	s.mux.Handle("GET /replay", s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleReplayPage))))
-	s.mux.Handle("GET /deban", s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleDebanPage))))
-	s.mux.Handle("GET /recovery", s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleRecoveryPage))))
-	s.mux.Handle("GET /drift", s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleDriftPage))))
-	s.mux.Handle("POST /actions/cloudflare/ban", s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleCloudflareBanPreview))))
-	s.mux.Handle("POST /ui/ai/explain", s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleAIExplain))))
-	s.mux.Handle("GET /static/ai-explain.js", s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleAIExplainScript))))
+	s.mux.Handle("POST /logout", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleLogout)))))
+	s.mux.Handle("GET /", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleDashboard)))))
+	s.mux.Handle("GET /providers", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleProviders)))))
+	s.mux.Handle("POST /admin/providers/{name}/key", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleProviderReplaceKey)))))
+	s.mux.Handle("POST /admin/providers/{name}/test", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleProviderTest)))))
+	s.mux.Handle("POST /admin/providers/{name}/enable", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleProviderEnable)))))
+	s.mux.Handle("POST /admin/providers/{name}/disable", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleProviderDisable)))))
+	s.mux.Handle("GET /forensic", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleForensicPage)))))
+	s.mux.Handle("POST /forensic", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleForensicLookup)))))
+	s.mux.Handle("GET /about", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleAboutPage)))))
+	s.mux.Handle("GET /system", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleAboutPage)))))
+	s.mux.Handle("GET /audit", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleAuditTrailPage)))))
+	s.mux.Handle("GET /timeline", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleTimelinePage)))))
+	s.mux.Handle("GET /intelligence", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleIntelligencePage)))))
+	s.mux.Handle("POST /intelligence", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleIntelligenceLookup)))))
+	s.mux.Handle("GET /trusted-networks", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleTrustedNetworksPage)))))
+	s.mux.Handle("GET /trusted-networks/diff", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleTrustedNetworksDiff)))))
+	s.mux.Handle("GET /trusted-networks/refresh", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleTrustedNetworksRefreshDryRun)))))
+	s.mux.Handle("GET /trusted-networks/export", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleTrustedNetworksExport)))))
+	s.mux.Handle("GET /cloudflare/diff", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleCloudflareDiffPage)))))
+	s.mux.Handle("GET /replay", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleReplayPage)))))
+	s.mux.Handle("GET /deban", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleDebanPage)))))
+	s.mux.Handle("GET /recovery", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleRecoveryPage)))))
+	s.mux.Handle("GET /drift", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleDriftPage)))))
+	s.mux.Handle("POST /actions/cloudflare/ban", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleCloudflareBanPreview)))))
+	s.mux.Handle("POST /ui/ai/explain", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleAIExplain)))))
+	s.mux.Handle("GET /static/ai-explain.js", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleAIExplainScript)))))
+}
+
+// setupGuardMiddleware redirects to the current setup step when setup is incomplete.
+// Implemented in setup_wizard.go (Task 5).
+func (s *Server) setupGuardMiddleware(next http.Handler) http.Handler {
+	return next // stub — full implementation in setup_wizard.go
+}
+
+// registerSetupRoutes registers /setup/* routes.
+// Implemented in setup_wizard.go (Task 5).
+func (s *Server) registerSetupRoutes() {
+	// stub — full implementation in setup_wizard.go
 }
 
 func (s *Server) handleLoginPage(w http.ResponseWriter, r *http.Request) {
