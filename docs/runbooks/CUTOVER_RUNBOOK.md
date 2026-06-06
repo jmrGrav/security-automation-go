@@ -189,37 +189,55 @@ go build -o bin/crowdsec-sync ./cmd/crowdsec-sync/
 sudo cp bin/crowdsec-sync /opt/security-automation-go/bin/crowdsec-sync
 ```
 
-### Create `/etc/systemd/system/crowdsec-sync-go.service`
+### Install `/etc/systemd/system/cf-sync.service`
+
+Copy the deployed template from `deployments/systemd/cf-sync.service` and populate the `EnvironmentFile`:
 
 ```bash
-sudo tee /etc/systemd/system/crowdsec-sync-go.service > /dev/null << 'EOF'
+sudo cp /home/jm/Documents/security-automation-go/deployments/systemd/cf-sync.service \
+    /etc/systemd/system/cf-sync.service
+sudo systemctl daemon-reload
+```
+
+The deployed unit (`deployments/systemd/cf-sync.service`) contains:
+
+```ini
 [Unit]
-Description=CrowdSec-CF Sync — Go control-plane (live mode)
-After=network-online.target crowdsec.service
-Wants=network-online.target
+Description=Cloudflare to CrowdSec Reconciliation Daemon
+After=network.target crowdsec.service
 
 [Service]
 Type=simple
-User=root
-Group=root
-EnvironmentFile=/etc/security-automation-go/crowdsec-sync-live.env
-WorkingDirectory=/opt/security-automation-go
-ExecStart=/opt/security-automation-go/bin/crowdsec-sync
-Restart=on-failure
-RestartSec=10s
-MemoryMax=256M
-StandardOutput=journal
-StandardError=journal
-SyslogIdentifier=crowdsec-sync-go
-NoNewPrivileges=true
-PrivateTmp=true
+DynamicUser=yes
 ProtectSystem=strict
-ReadWritePaths=/var/lib/cf-sync /var/log/crowdsec
+ProtectHome=yes
+PrivateTmp=yes
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+DeviceAllow=/dev/null rw
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=yes
+RestrictRealtime=yes
+MemoryDenyWriteExecute=yes
+LockPersonality=yes
+StateDirectory=cf-sync
+RuntimeDirectory=cf-sync
+LogsDirectory=security-automation
+LogsDirectoryMode=0750
+WorkingDirectory=/var/lib/cf-sync
+EnvironmentFile=-/etc/security-automation/security-automation.env
+Environment=STATE_DIR=/var/lib/cf-sync
+ExecStart=/usr/local/bin/cf-sync -mode daemon -interval 1m
+Restart=always
+RestartSec=30
+StartLimitIntervalSec=300
+StartLimitBurst=5
 
 [Install]
 WantedBy=multi-user.target
-EOF
-sudo systemctl daemon-reload
 ```
 
 ---
@@ -231,10 +249,10 @@ Execute each step only after verifying the previous one.
 ### Step 1 — Start Go in live mode (parallel with Python)
 
 ```bash
-sudo systemctl start crowdsec-sync-go.service
+sudo systemctl start cf-sync.service
 sleep 5
-sudo systemctl is-active crowdsec-sync-go.service
-sudo journalctl -u crowdsec-sync-go -n 20 --no-pager
+sudo systemctl is-active cf-sync.service
+sudo journalctl -u cf-sync -n 20 --no-pager
 ```
 
 **Expected output:**
@@ -255,7 +273,7 @@ sudo journalctl -u crowdsec-sync-go -n 20 --no-pager
 ```bash
 # Wait 3 minutes
 sleep 180
-sudo journalctl -u crowdsec-sync-go --since "$(date -d '4 minutes ago' '+%Y-%m-%d %H:%M:%S')" --no-pager \
+sudo journalctl -u cf-sync --since "$(date -d '4 minutes ago' '+%Y-%m-%d %H:%M:%S')" --no-pager \
   | grep "cf sync plan\|cf sync complete\|WARN\|ERROR"
 ```
 
@@ -291,7 +309,7 @@ ss -tlnp | grep 9999
 
 ```bash
 sleep 70
-sudo journalctl -u crowdsec-sync-go --since "$(date -d '2 minutes ago' '+%Y-%m-%d %H:%M:%S')" --no-pager \
+sudo journalctl -u cf-sync --since "$(date -d '2 minutes ago' '+%Y-%m-%d %H:%M:%S')" --no-pager \
   | grep "cf sync\|WARN\|ERROR"
 
 # Verify CF rule count unchanged
@@ -308,7 +326,7 @@ echo "Delta: $((RULES_AFTER - RULES_BEFORE)) rules"
 ### Step 5 — Enable Go service at boot
 
 ```bash
-sudo systemctl enable crowdsec-sync-go.service
+sudo systemctl enable cf-sync.service
 # Stop shadow mode (no longer needed — Go is live)
 sudo systemctl stop cf-shadow.service
 sudo systemctl disable cf-shadow.service
@@ -338,16 +356,16 @@ Check after 30 minutes of live operation:
 
 ```bash
 # 1. Go is running cleanly
-sudo systemctl is-active crowdsec-sync-go.service
+sudo systemctl is-active cf-sync.service
 
 # 2. No unexpected CF mutations
-sudo journalctl -u crowdsec-sync-go --since "30 minutes ago" --no-pager \
+sudo journalctl -u cf-sync --since "30 minutes ago" --no-pager \
   | grep "cf: added\|cf: removed" | wc -l
 # Normal: small number proportional to actual CS decisions
 
 # 3. AbuseIPDB outbox is processing
 sudo ls -la /var/lib/cf-sync/*.db 2>/dev/null
-sudo journalctl -u crowdsec-sync-go --since "30 minutes ago" --no-pager \
+sudo journalctl -u cf-sync --since "30 minutes ago" --no-pager \
   | grep "abuseipdb\|reporting"
 
 # 4. Python cf-sync still pushing Lua
@@ -383,7 +401,7 @@ Execute in order. Takes < 2 minutes.
 
 ```bash
 # Step R1 — Stop Go live service
-sudo systemctl stop crowdsec-sync-go.service
+sudo systemctl stop cf-sync.service
 
 # Step R2 — Re-enable and start the notifier
 sudo systemctl enable crowdsec-notifier.service
@@ -480,7 +498,7 @@ Blocking condition: any protected-IP drift or agreement drop below 99.9% in the 
 
 ```bash
 # Watch Go logs
-journalctl -u crowdsec-sync-go -f
+journalctl -u cf-sync -f
 
 # Watch Python reduced mode
 journalctl -u crowdsec-cf-sync -f | grep -v "CF Sync\|notifier actif"
