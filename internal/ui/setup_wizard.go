@@ -621,14 +621,92 @@ func (s *Server) handleSetupStep7Post(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/setup/step/8", http.StatusFound)
 }
 func (s *Server) handleSetupStep8(w http.ResponseWriter, r *http.Request) {
-	renderSetupPage(w, 8, "Runtime summary", "<p>Coming soon.</p>", "")
+	if _, ok := s.getSession(r); !ok {
+		http.Redirect(w, r, "/setup/step/1", http.StatusFound)
+		return
+	}
+	uiAddr := s.cfg.UI.Addr
+	if s.setupStore != nil {
+		if v, ok, _ := s.setupStore.GetSetting(r.Context(), "ui_addr"); ok {
+			uiAddr = v
+		}
+	}
+	cfPath := "(not configured)"
+	if s.setupStore != nil {
+		if v, ok, _ := s.setupStore.GetSetting(r.Context(), "cf_token_path"); ok {
+			cfPath = v
+		}
+	}
+	body := fmt.Sprintf(`
+<p>Review your configuration before proceeding.</p>
+<table style="width:100%%;border-collapse:collapse">
+<tr><td style="padding:.4rem .2rem;color:#5f6b7a">UI address</td><td><code>%s</code></td></tr>
+<tr><td style="padding:.4rem .2rem;color:#5f6b7a">State directory</td><td><code>%s</code></td></tr>
+<tr><td style="padding:.4rem .2rem;color:#5f6b7a">SQLite</td><td><code>%s/runtime.db</code></td></tr>
+<tr><td style="padding:.4rem .2rem;color:#5f6b7a">CF token</td><td><code>%s</code></td></tr>
+<tr><td style="padding:.4rem .2rem;color:#5f6b7a">Dry-run</td><td><code>true (default)</code></td></tr>
+<tr><td style="padding:.4rem .2rem;color:#5f6b7a">Mutations</td><td><code>disabled (default)</code></td></tr>
+</table>
+<br>
+<a href="/setup/step/9"><button>Continue to production mode</button></a>
+<a href="/setup/complete" style="margin-left:.5rem"><button class="secondary">Finish without enabling production mode</button></a>
+`, uiAddr, s.cfg.StateDir, s.cfg.StateDir, cfPath)
+	renderSetupPage(w, 8, "Runtime summary", body, "")
 }
+
 func (s *Server) handleSetupStep9(w http.ResponseWriter, r *http.Request) {
-	renderSetupPage(w, 9, "Enable production mode", "<p>Coming soon.</p>", "")
+	if _, ok := s.getSession(r); !ok {
+		http.Redirect(w, r, "/setup/step/1", http.StatusFound)
+		return
+	}
+	csrfTok := ""
+	if tok, ok := s.getSession(r); ok {
+		csrfTok = s.csrfTokenFor(tok)
+	}
+	body := fmt.Sprintf(`
+<div class="warn">⚠ Enabling production mode will allow the daemon to write firewall rules to Cloudflare.</div>
+<p>By default the service runs in <strong>dry-run mode</strong> with mutations disabled.</p>
+<form action="/setup/step/9" method="post">
+  <input type="hidden" name="csrf_token" value="%s">
+  <label style="display:flex;gap:.5rem;align-items:center;margin:.75rem 0">
+    <input type="checkbox" name="enable_production" value="1" style="width:auto">
+    I understand this will enable live Cloudflare mutations. Enable production mode now.
+  </label>
+  <button type="submit">Finish setup</button>
+</form>
+<p class="note">Or: <a href="/setup/complete">Finish without enabling production mode</a></p>`, csrfTok)
+	renderSetupPage(w, 9, "Enable production mode", body, "")
 }
+
 func (s *Server) handleSetupStep9Post(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.getSession(r); !ok {
+		http.Redirect(w, r, "/setup/step/1", http.StatusFound)
+		return
+	}
+	if !s.validCSRF(r) {
+		http.Error(w, "csrf required", http.StatusForbidden)
+		return
+	}
+	enableProd := r.FormValue("enable_production") == "1"
+	if s.setupStore != nil {
+		if enableProd {
+			_ = s.setupStore.SetSetting(r.Context(), "dry_run", "false")
+			_ = s.setupStore.SetSetting(r.Context(), "mutations_enabled", "true")
+		}
+		_ = s.setupStore.MarkComplete(r.Context())
+	}
 	http.Redirect(w, r, "/setup/complete", http.StatusFound)
 }
+
 func (s *Server) handleSetupComplete(w http.ResponseWriter, r *http.Request) {
-	renderSetupPage(w, 9, "Setup complete", `<div class="ok">Setup complete.</div><a href="/"><button>Go to dashboard</button></a>`, "")
+	body := `
+<div class="ok">✓ Setup complete. The service is now configured.</div>
+<p>Next steps:</p>
+<ul>
+  <li>Restart the service to apply any port/address changes: <code>sudo systemctl restart cf-sync</code></li>
+  <li>To enable production mode later: Settings → Runtime → Enable mutations</li>
+  <li>Check service health: <code>curl http://127.0.0.1:9091/healthz</code></li>
+</ul>
+<a href="/"><button>Go to dashboard</button></a>`
+	renderSetupPage(w, 9, "Setup complete", body, "")
 }
