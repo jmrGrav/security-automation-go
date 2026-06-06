@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"os"
 	"testing"
 	"time"
 
@@ -176,14 +177,14 @@ func TestRunWAFReplayIterationDoesNotAdvanceCursorOnSaveFailure(t *testing.T) {
 }
 
 func TestNewAuthenticator(t *testing.T) {
-	t.Run("with token", func(t *testing.T) {
-		token := "test-token"
-		t.Setenv("CF_SYNC_API_TOKEN", token)
+	t.Run("with_env_token", func(t *testing.T) {
+		t.Setenv("CF_SYNC_API_TOKEN", "test-token")
+		t.Setenv("CF_SYNC_API_TOKEN_FILE", "")
 		a, err := newAuthenticator()
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		id, err := a.Authenticate(token)
+		id, err := a.Authenticate("test-token")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -192,8 +193,45 @@ func TestNewAuthenticator(t *testing.T) {
 		}
 	})
 
-	t.Run("empty token", func(t *testing.T) {
+	t.Run("with_file_token", func(t *testing.T) {
+		f, err := os.CreateTemp(t.TempDir(), "token*")
+		if err != nil {
+			t.Fatal(err)
+		}
+		f.WriteString("file-secret\n")
+		f.Close()
+		t.Setenv("CF_SYNC_API_TOKEN_FILE", f.Name())
+		t.Setenv("CF_SYNC_API_TOKEN", "env-token-ignored")
+
+		a, err := newAuthenticator()
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		id, err := a.Authenticate("file-secret")
+		if err != nil {
+			t.Fatalf("file token not accepted: %v", err)
+		}
+		if id.OperatorID != "admin" {
+			t.Errorf("expected operator ID 'admin', got %q", id.OperatorID)
+		}
+		_, envErr := a.Authenticate("env-token-ignored")
+		if envErr == nil {
+			t.Error("env token should be rejected when file token is set")
+		}
+	})
+
+	t.Run("file_missing_fails_startup", func(t *testing.T) {
+		t.Setenv("CF_SYNC_API_TOKEN_FILE", "/nonexistent/path/token")
+		t.Setenv("CF_SYNC_API_TOKEN", "fallback")
+		_, err := newAuthenticator()
+		if err == nil {
+			t.Fatal("expected error for missing token file, got nil")
+		}
+	})
+
+	t.Run("empty_token_fails", func(t *testing.T) {
 		t.Setenv("CF_SYNC_API_TOKEN", "")
+		t.Setenv("CF_SYNC_API_TOKEN_FILE", "")
 		_, err := newAuthenticator()
 		if err == nil {
 			t.Fatal("expected error for missing CF_SYNC_API_TOKEN, got nil")
