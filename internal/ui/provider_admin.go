@@ -72,11 +72,11 @@ type providerSecretSnapshot struct {
 func providerSpec(name AIProviderName) (display string, secretFile string, prefix string) {
 	switch name {
 	case AIProviderOpenAI:
-		return "OpenAI", "/etc/security-automation/secrets/openai_api_key", "AI_PROVIDER_OPENAI"
+		return "OpenAI", "/etc/security-automation-go/secrets/openai_api_key", "AI_PROVIDER_OPENAI"
 	case AIProviderAnthropic:
-		return "Anthropic", "/etc/security-automation/secrets/anthropic_api_key", "AI_PROVIDER_ANTHROPIC"
+		return "Anthropic", "/etc/security-automation-go/secrets/anthropic_api_key", "AI_PROVIDER_ANTHROPIC"
 	case AIProviderGemini:
-		return "Gemini", "/etc/security-automation/secrets/gemini_api_key", "AI_PROVIDER_GEMINI"
+		return "Gemini", "/etc/security-automation-go/secrets/gemini_api_key", "AI_PROVIDER_GEMINI"
 	default:
 		return strings.Title(string(name)), "", ""
 	}
@@ -318,16 +318,16 @@ func providerStatePathHint(path string, secret bool) string {
 	lines := []string{
 		fmt.Sprintf("impossible to write %s at %s", ternary(secret, "the secret", "the provider state"), path),
 		"Run:",
-		"sudo install -d -m 755 -o root -g root /etc/security-automation",
+		"sudo install -d -m 755 -o root -g root /etc/security-automation-go",
 	}
 	if secret {
 		lines = append(lines,
-			"sudo install -d -m 700 -o root -g root /etc/security-automation/secrets",
+			"sudo install -d -m 700 -o root -g root /etc/security-automation-go/secrets",
 			fmt.Sprintf("sudo install -m 600 -o root -g root /dev/null %s", path),
 		)
 	} else {
 		lines = append(lines,
-			"sudo install -d -m 755 -o root -g root /etc/security-automation/providers",
+			"sudo install -d -m 755 -o root -g root /etc/security-automation-go/providers",
 			fmt.Sprintf("sudo install -m 640 -o root -g security-automation /dev/null %s", path),
 		)
 	}

@@ -14,7 +14,7 @@ sudo systemctl status cf-sync
 ```
 
 On first start, the service:
-1. Creates `/etc/security-automation/runtime/initial-admin-password` (mode 0600)
+1. Creates `/etc/security-automation-go/runtime/initial-admin-password` (mode 0600)
 2. Writes a random one-time password to that file — **it is never logged**
 3. Starts the UI on `127.0.0.1:9091` (default) in setup-required mode
 4. Blocks all normal routes until setup is complete
@@ -24,7 +24,7 @@ On first start, the service:
 The setup wizard runs in UI mode, which is separate from the background daemon:
 
 ```bash
-sudo /usr/local/bin/cf-sync -mode ui -config /etc/security-automation/cf-sync.yaml
+sudo /usr/local/bin/cf-sync -mode ui -config /etc/security-automation-go/cf-sync.yaml
 ```
 
 Or if using the systemd UI unit:
@@ -38,7 +38,7 @@ sudo systemctl start cf-sync-ui
 ## Reading the Initial Password
 
 ```bash
-sudo cat /etc/security-automation/runtime/initial-admin-password
+sudo cat /etc/security-automation-go/runtime/initial-admin-password
 ```
 
 Copy the password. You will need it to complete step 1 of the setup wizard.
@@ -57,8 +57,8 @@ If you need to start the wizard over:
 
 ```bash
 sudo systemctl stop cf-sync
-sudo rm /etc/security-automation/runtime/initial-admin-password
-sudo rm /etc/security-automation/secrets/admin_password
+sudo rm /etc/security-automation-go/runtime/initial-admin-password
+sudo rm /etc/security-automation-go/secrets/admin_password
 # Remove the SQLite DB to reset setup state:
 sudo rm -f /var/lib/cf-sync/<scope-dir>/runtime.db
 sudo systemctl start cf-sync

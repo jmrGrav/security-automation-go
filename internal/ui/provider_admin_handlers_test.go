@@ -126,7 +126,7 @@ func TestProviderManagementEnableRequiresReadableSecret(t *testing.T) {
 		t.Fatalf("expected enable refusal, got %d", rr.Code)
 	}
 	body := rr.Body.String()
-	for _, want := range []string{"impossible to write the secret", "sudo install -d -m 700 -o root -g root /etc/security-automation/secrets", "openai_api_key"} {
+	for _, want := range []string{"impossible to write the secret", "sudo install -d -m 700 -o root -g root /etc/security-automation-go/secrets", "openai_api_key"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("enable error missing %q: %s", want, body)
 		}

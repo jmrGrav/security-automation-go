@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-const DefaultEnvFile = "/etc/security-automation/security-automation.env"
+const DefaultEnvFile = "/etc/security-automation-go/security-automation.env"
 
 // LoadEnvFile reads a shell-style key=value env file and sets any unset
 // environment variables found in it. If the file does not exist it is silently

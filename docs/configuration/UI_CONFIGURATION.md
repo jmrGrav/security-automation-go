@@ -9,9 +9,9 @@ ui:
   enabled: true
   addr: "127.0.0.1:6969"
   mutations_enabled: false
-  secret_file: "/etc/security-automation/secrets/ui_secret"
-  admin_password_file: "/etc/security-automation/secrets/admin_password"
-  provider_state_file: "/etc/security-automation/providers/ai-providers.env"
+  secret_file: "/etc/security-automation-go/secrets/ui_secret"
+  admin_password_file: "/etc/security-automation-go/secrets/admin_password"
+  provider_state_file: "/etc/security-automation-go/providers/ai-providers.env"
 ```
 
 ## Environment Variables
@@ -23,9 +23,9 @@ All settings can be overridden via environment variables:
 | `UI_ENABLED` | bool | false |
 | `UI_ADDR` | string | `127.0.0.1:6969` |
 | `UI_MUTATIONS_ENABLED` | bool | false |
-| `UI_SECRET_FILE` | string | `/etc/security-automation/secrets/ui_secret` |
-| `UI_ADMIN_PASSWORD_FILE` | string | `/etc/security-automation/secrets/admin_password` |
-| `UI_PROVIDER_STATE_FILE` | string | `/etc/security-automation/providers/ai-providers.env` |
+| `UI_SECRET_FILE` | string | `/etc/security-automation-go/secrets/ui_secret` |
+| `UI_ADMIN_PASSWORD_FILE` | string | `/etc/security-automation-go/secrets/admin_password` |
+| `UI_PROVIDER_STATE_FILE` | string | `/etc/security-automation-go/providers/ai-providers.env` |
 
 ## Port Configuration
 
@@ -109,8 +109,8 @@ another instance (PID 12345) is running
 Verify the password file exists and is readable:
 
 ```bash
-ls -l /etc/security-automation/secrets/admin_password
-cat /etc/security-automation/secrets/admin_password
+ls -l /etc/security-automation-go/secrets/admin_password
+cat /etc/security-automation-go/secrets/admin_password
 ```
 
 The file should contain a JSON object with `is_bootstrap` and `password_hash` fields.

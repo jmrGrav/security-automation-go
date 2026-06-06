@@ -8,7 +8,7 @@ The UI uses password-based authentication with a secure bootstrap workflow.
 
 On first startup, a random 32-character password is generated automatically.
 
-**Location:** `/etc/security-automation/secrets/admin_password`
+**Location:** `/etc/security-automation-go/secrets/admin_password`
 
 **Permissions:** `0600` (read/write owner only)
 

@@ -38,4 +38,4 @@ introducing live mutation writers in the UI.
 - Cloudflare live mutations remain disabled by default.
 - CSRF is required for mutation routes.
 - Provider keys are masked and never rendered in full, and provider state is
-  stored separately from raw secrets in `/etc/security-automation/providers/ai-providers.env`.
+  stored separately from raw secrets in `/etc/security-automation-go/providers/ai-providers.env`.

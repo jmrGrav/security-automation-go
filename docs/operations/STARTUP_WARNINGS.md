@@ -2,18 +2,18 @@
 
 This document lists warnings that cf-sync emits at startup and what to do about them.
 
-## Warning: could not read /etc/security-automation/security-automation.env
+## Warning: could not read /etc/security-automation-go/security-automation.env
 
 ```
-Warning: could not read /etc/security-automation/security-automation.env: open ...: permission denied
+Warning: could not read /etc/security-automation-go/security-automation.env: open ...: permission denied
 ```
 
 **Cause:** The env file exists but is not readable by the process user.
 
 **Action:** Fix permissions:
 ```bash
-chmod 600 /etc/security-automation/security-automation.env
-chown root:root /etc/security-automation/security-automation.env
+chmod 600 /etc/security-automation-go/security-automation.env
+chown root:root /etc/security-automation-go/security-automation.env
 ```
 
 The env file not existing is silently ignored (it is optional).

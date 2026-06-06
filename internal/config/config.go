@@ -97,12 +97,12 @@ type VirusTotalConfig struct {
 }
 
 type UIBoolConfig struct {
-	Enabled           bool   `yaml:"enabled"`
-	Addr              string `yaml:"addr"`
-	Port              int    `yaml:"port"` // extracted from Addr; deprecated
-	MutationsEnabled  bool   `yaml:"mutations_enabled"`
-	SecretFile        string `yaml:"secret_file"`
-	ProviderStateFile string `yaml:"provider_state_file"`
+	Enabled             bool   `yaml:"enabled"`
+	Addr                string `yaml:"addr"`
+	Port                int    `yaml:"port"` // extracted from Addr; deprecated
+	MutationsEnabled    bool   `yaml:"mutations_enabled"`
+	SecretFile          string `yaml:"secret_file"`
+	ProviderStateFile   string `yaml:"provider_state_file"`
 	AdminPasswordFile   string `yaml:"admin_password_file"`   // New: path to admin password hash
 	InitialPasswordFile string `yaml:"initial_password_file"` // New: path to one-time setup password
 }
@@ -160,7 +160,7 @@ func DefaultConfig() *Config {
 		Global: GlobalConfig{
 			AppEnv:         "production",
 			ServiceName:    "cf-sync",
-			AdminTokenFile: "/etc/security-automation/secrets/admin_token",
+			AdminTokenFile: "/etc/security-automation-go/secrets/admin_token",
 			Log: LogConfig{
 				Level:  "info",
 				Format: "json",
@@ -180,14 +180,14 @@ func DefaultConfig() *Config {
 			Profile: RuntimeProfileSingleNode,
 		},
 		UI: UIBoolConfig{
-			Enabled:           false,
-			Addr:              "127.0.0.1:6969",
-			Port:              6969,
-			SecretFile:        "/etc/security-automation/secrets/ui_secret",
-			AdminPasswordFile:   "/etc/security-automation/secrets/admin_password",
-			InitialPasswordFile: "/etc/security-automation/runtime/initial-admin-password",
-			ProviderStateFile:   "/etc/security-automation/providers/ai-providers.env",
-			MutationsEnabled:  false,
+			Enabled:             false,
+			Addr:                "127.0.0.1:6969",
+			Port:                6969,
+			SecretFile:          "/etc/security-automation-go/secrets/ui_secret",
+			AdminPasswordFile:   "/etc/security-automation-go/secrets/admin_password",
+			InitialPasswordFile: "/etc/security-automation-go/runtime/initial-admin-password",
+			ProviderStateFile:   "/etc/security-automation-go/providers/ai-providers.env",
+			MutationsEnabled:    false,
 		},
 		Enrichment: EnrichmentConfig{
 			Enabled:    true,

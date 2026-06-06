@@ -7,11 +7,11 @@ Copy the example env file and fill in secrets before starting the service:
 ```bash
 install -m 600 -o root -g root \
   /usr/share/doc/cf-sync/security-automation.env.example \
-  /etc/security-automation/security-automation.env
+  /etc/security-automation-go/security-automation.env
 # Or from the repo:
 # cp deployments/config/security-automation.env.example \
-#    /etc/security-automation/security-automation.env
-chmod 600 /etc/security-automation/security-automation.env
+#    /etc/security-automation-go/security-automation.env
+chmod 600 /etc/security-automation-go/security-automation.env
 ```
 
 Set at minimum:
@@ -38,7 +38,7 @@ Bind address and port can be overridden with `SECURITY_AUTOMATION_BIND_ADDR` and
 
 3. **Bootstrap Password Initialization**: On first startup, the value of
    `SECURITY_AUTOMATION_INITIAL_ADMIN_PASSWORD` is bcrypt-hashed and stored at
-   `cfg.UI.AdminPasswordFile` (default `/etc/security-automation/secrets/admin_password`).
+   `cfg.UI.AdminPasswordFile` (default `/etc/security-automation-go/secrets/admin_password`).
    If the credential file already exists this step is skipped.
 
 4. **UI Server Starts**: The operator UI is now available at the configured address

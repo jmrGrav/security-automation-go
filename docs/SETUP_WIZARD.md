@@ -7,7 +7,7 @@ All normal routes are blocked until setup is complete.
 
 | Step | Title | Required? | What it does |
 |------|-------|-----------|-------------|
-| 1 | Login | Yes | Accepts the one-time setup password from `/etc/security-automation/runtime/initial-admin-password` |
+| 1 | Login | Yes | Accepts the one-time setup password from `/etc/security-automation-go/runtime/initial-admin-password` |
 | 2 | Set admin password | Yes | Replaces the one-time password with a bcrypt-hashed permanent password. Invalidates the initial-password file. |
 | 3 | UI bind/port | No | Confirms or changes the UI listen address. Port changes require a service restart. |
 | 4 | Cloudflare token | No | Validates and stores the CF API token. Required for CF mutations. |

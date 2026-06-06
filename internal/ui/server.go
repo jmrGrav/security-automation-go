@@ -199,7 +199,6 @@ func (s *Server) routes() {
 	s.mux.Handle("GET /static/ai-explain.js", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleAIExplainScript)))))
 }
 
-
 func (s *Server) handleLoginPage(w http.ResponseWriter, r *http.Request) {
 	if s.isAuthed(r) {
 		http.Redirect(w, r, "/", http.StatusFound)

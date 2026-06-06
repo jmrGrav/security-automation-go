@@ -4,22 +4,22 @@ This repository uses file-backed provider secrets for AI Explain and provider
 management state for the local UI. The runtime expects provider keys to be
 stored in owner-only files and referenced through `AI_PROVIDER_*_API_KEY_FILE`.
 The non-secret provider state lives in
-`/etc/security-automation/providers/ai-providers.env`.
+`/etc/security-automation-go/providers/ai-providers.env`.
 
 ## Secret directory
 
 Create the secret directory once:
 
 ```bash
-sudo install -d -m 700 -o root -g root /etc/security-automation/secrets
+sudo install -d -m 700 -o root -g root /etc/security-automation-go/secrets
 ```
 
 Create the key files with root-only permissions:
 
 ```bash
-sudo install -m 600 -o root -g root /dev/null /etc/security-automation/secrets/openai_api_key
-sudo install -m 600 -o root -g root /dev/null /etc/security-automation/secrets/anthropic_api_key
-sudo install -m 600 -o root -g root /dev/null /etc/security-automation/secrets/gemini_api_key
+sudo install -m 600 -o root -g root /dev/null /etc/security-automation-go/secrets/openai_api_key
+sudo install -m 600 -o root -g root /dev/null /etc/security-automation-go/secrets/anthropic_api_key
+sudo install -m 600 -o root -g root /dev/null /etc/security-automation-go/secrets/gemini_api_key
 ```
 
 Write each provider key into its file without printing the value to the
@@ -34,8 +34,8 @@ privileges:
 
 ```bash
 sudo install -d -m 755 -o root -g root /etc/security-automation
-sudo install -d -m 755 -o root -g root /etc/security-automation/providers
-sudo install -m 640 -o root -g security-automation /dev/null /etc/security-automation/providers/ai-providers.env
+sudo install -d -m 755 -o root -g root /etc/security-automation-go/providers
+sudo install -m 640 -o root -g security-automation /dev/null /etc/security-automation-go/providers/ai-providers.env
 ```
 
 The UI writes only non-secret provider state there:
@@ -87,7 +87,7 @@ Use the UI as usual. If a provider is not configured correctly, the gateway
 falls back to `provider disabled / unavailable` without exposing the secret
 value.
 
-If the process cannot write to `/etc/security-automation/providers/ai-providers.env`
+If the process cannot write to `/etc/security-automation-go/providers/ai-providers.env`
 or to one of the secret files, the UI shows an operator error with the
 recommended `sudo install ...` command instead of bypassing permissions.
 
