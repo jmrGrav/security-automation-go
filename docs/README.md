@@ -140,7 +140,7 @@ Notable archive entries:
 | Admin password | `/etc/security-automation-go/secrets/admin_password` | bcrypt hash |
 | Initial password | `/etc/security-automation-go/runtime/initial-admin-password` | plaintext (one-time) |
 
-All secret files: `root:root 0600`. See [SECRET_LOADING_MODEL.md](security/SECRET_LOADING_MODEL.md) for the full loading chain.
+All secret files: `security-automation:security-automation 0600`. See [SECRET_LOADING_MODEL.md](security/SECRET_LOADING_MODEL.md) for the full loading chain.
 
 > **Note:** The directory `/etc/security-automation/` (without `-go`) is a pre-V1.4 legacy path.
 > No daemon or wizard reads from it. If it exists on disk, the `layout` health check will report YELLOW (both)
