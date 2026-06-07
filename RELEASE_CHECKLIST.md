@@ -38,14 +38,18 @@ go install github.com/zricethezav/gitleaks/v8@latest
 
 ### What was found
 
-`trufflehog git file://. --only-verified` reports a verified AbuseIPDB API key in git history:
+`trufflehog git file://. --only-verified` reports a verified AbuseIPDB API key in git history (2 findings, same key):
+
+| # | Commit | File | Note |
+|---|--------|------|------|
+| 1 | `4649a1d` | `CUTOVER_RUNBOOK.md:151` | Original introduction |
+| 2 | `2aa3646` | `V1_5_RELEASE_VALIDATION_PIPELINE_REPORT.md` | Prior version of report embedded the raw key value; current version redacted |
+
+Also present in `b4a5b17` via the same git blob object.
 
 - **Git object:** `.git/objects/20/21b218e13e9f1dfa502035a81893ac4b35c280`
-- **Object type:** blob
-- **Introduced by:** Commit `b4a5b17` ("release: v1.1.1 production hardening") and
-  `4649a1d` ("docs: production cutover runbook with capability audit")
 - **trufflehog verdict:** `--only-verified` confirmed the key responded to a live API check
-- **Sprint introduced:** Pre-dates V1.4 and V1.5 — not introduced by any recent work
+- **Sprint introduced:** Commit `4649a1d` pre-dates V1.4 and V1.5; commit `2aa3646` was V1.5 report documentation
 
 ### What was NOT done (and why)
 
@@ -57,10 +61,9 @@ go install github.com/zricethezav/gitleaks/v8@latest
 
 ### What WAS done
 
-- The finding is **explicitly documented** in `.gitleaks.toml` with a commit-specific allowlist entry
-  (commits `b4a5b17`, `4649a1d`) and a full comment explaining the decision
+- The raw key value has been **redacted** from `V1_5_RELEASE_VALIDATION_PIPELINE_REPORT.md` HEAD
+- All affected commits are **explicitly allowlisted** in `.gitleaks.toml` with a full decision record comment (commits `b4a5b17`, `4649a1d`, `2aa3646`)
 - The finding is **explicitly documented** in this checklist
-- The finding is reported in `V1_5_OPERATOR_EXPERIENCE_IMPLEMENTATION_REPORT.md`
 
 ### Required operator actions
 
@@ -68,8 +71,7 @@ go install github.com/zricethezav/gitleaks/v8@latest
   `/etc/security-automation-go/secrets/` and any CI secrets. Do this before production deployment.
 - [ ] **Consider `git filter-repo` history scrub** — removes the key from git history so it can
   no longer be extracted by scanning tools. Requires explicit operator decision and coordination
-  with all repository clones. Command: `git filter-repo --strip-blobs-bigger-than 0B --invert-paths --blob-ids-with-sizes <file>`
-  (or use `git filter-repo --strip-blobs-with-ids` with the object hash).
+  with all repository clones.
 
 ### GO/NO-GO decision
 
@@ -131,8 +133,19 @@ dpkg-deb --contents dist/security-automation-go_1.5.0_amd64.deb
 govulncheck ./...
 ```
 
-Expected: no vulnerabilities in direct or transitive dependencies.
-If findings are reported: assess severity, update dependencies, re-run.
+**Current status:** 3 known pre-existing vulnerabilities (exit 3).
+
+| Vulnerability | Module | Fix version | Impact |
+|---------------|--------|-------------|--------|
+| GO-2026-4985 (DoS) | `go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp@v1.24.0` | v1.43.0 | Oversized OTLP response bodies → OOM |
+| GO-2026-4394 (RCE) | `go.opentelemetry.io/otel/sdk@v1.24.0` | v1.40.0 | PATH hijacking via env (requires attacker env control) |
+| GO-2024-3141 (SMB auth) | `github.com/open-policy-agent/opa@v0.64.1` | v0.68.0 | Windows-only SMB force-auth (no impact on Linux) |
+
+All 28 stdlib findings from `go1.25.0` are cleared by the `toolchain go1.25.11` directive in `go.mod`.
+Remaining 3 findings require dependency updates (deferred — separate sprint).
+
+`make verify-release` prints the findings as WARN and continues to gitleaks/trufflehog before failing.
+CI (`build-and-test`) runs govulncheck with `continue-on-error: true`.
 
 ---
 
@@ -157,9 +170,9 @@ Per standing constraints, the following are manual operator steps:
 | go test | PASS | All tests pass |
 | go test -race | PASS | No data races |
 | go build (all 6 binaries) | PASS | amd64 + arm64 |
-| govulncheck | Must verify | Run `make verify-release` |
+| govulncheck | 3 findings (OTEL + OPA) | NO-GO for production; stdlib cleared by go1.25.11 |
 | gitleaks | CONDITIONAL PASS | AbuseIPDB allowlisted with documented decision |
-| trufflehog | FINDING (pre-existing) | AbuseIPDB key — rotate before production |
+| trufflehog | 2 findings (same key) | Both in .gitleaks.toml allowlist; rotate key before production |
 | .deb package | PASS | `dist/security-automation-go_1.5.0_amd64.deb` |
 | RPM package | SKIP | `rpmbuild` not available on Debian/Ubuntu hosts |
 | Key rotation | OPERATOR ACTION REQUIRED | Rotate AbuseIPDB key |

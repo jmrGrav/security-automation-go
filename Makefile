@@ -43,42 +43,47 @@ build-linux-arm64:
 
 # Full pre-release gate: gofmt, vet, test, race, build, govulncheck, gitleaks, trufflehog
 # Requires: govulncheck, gitleaks, trufflehog — see RELEASE_CHECKLIST.md for install instructions
+# govulncheck findings are documented NO-GO (see RELEASE_CHECKLIST.md); all steps always run.
 verify-release:
-	@echo "==> [1/7] gofmt check"
-	@unformatted=$$(gofmt -l .); if [ -n "$$unformatted" ]; then \
-		echo "ERROR: unformatted files:"; echo "$$unformatted"; exit 1; \
-	fi
-	@echo "==> [2/7] go vet"
-	@$(GO) vet ./...
-	@echo "==> [3/7] go test"
-	@$(GO) test -timeout 120s ./...
-	@echo "==> [4/7] go test -race"
-	@$(GO) test -race -timeout 300s ./...
-	@echo "==> [5/7] go build (all 6 binaries)"
-	@$(MAKE) build
-	@echo "==> [6/7] govulncheck"
-	@GOVULNCHECK=$$(command -v govulncheck 2>/dev/null || echo "$(GOPATH_BIN)/govulncheck"); \
+	@FAIL=0; \
+	echo "==> [1/7] gofmt check"; \
+	unformatted=$$(gofmt -l .); \
+	if [ -n "$$unformatted" ]; then echo "ERROR: unformatted files:"; echo "$$unformatted"; exit 1; fi; \
+	echo "==> [2/7] go vet"; \
+	$(GO) vet ./... || exit 1; \
+	echo "==> [3/7] go test"; \
+	$(GO) test -timeout 120s ./... || exit 1; \
+	echo "==> [4/7] go test -race"; \
+	$(GO) test -race -timeout 300s ./... || exit 1; \
+	echo "==> [5/7] go build (all 6 binaries)"; \
+	$(MAKE) build || exit 1; \
+	echo "==> [6/7] govulncheck"; \
+	GOVULNCHECK=$$(command -v govulncheck 2>/dev/null || echo "$(GOPATH_BIN)/govulncheck"); \
 	if [ ! -x "$$GOVULNCHECK" ]; then \
 		echo "ERROR: govulncheck not found. Install: go install golang.org/x/vuln/cmd/govulncheck@latest"; exit 1; \
 	fi; \
-	"$$GOVULNCHECK" ./...
-	@echo "==> [7/7] secret scan — gitleaks"
-	@GITLEAKS=$$(command -v gitleaks 2>/dev/null || echo "$(GOPATH_BIN)/gitleaks"); \
+	"$$GOVULNCHECK" ./... || { FAIL=1; echo "WARN: govulncheck FINDINGS — NO-GO for production. See RELEASE_CHECKLIST.md."; }; \
+	echo "==> [7a/7] secret scan — gitleaks"; \
+	GITLEAKS=$$(command -v gitleaks 2>/dev/null || echo "$(GOPATH_BIN)/gitleaks"); \
 	if [ ! -x "$$GITLEAKS" ]; then \
 		echo "ERROR: gitleaks not found. Install: go install github.com/zricethezav/gitleaks/v8@latest"; exit 1; \
 	fi; \
-	"$$GITLEAKS" detect --source . --config .gitleaks.toml
-	@echo "==> [7/7] secret scan — trufflehog (informational; known pre-existing finding documented)"
-	@if command -v trufflehog >/dev/null 2>&1; then \
+	"$$GITLEAKS" detect --source . --config .gitleaks.toml || exit 1; \
+	echo "==> [7b/7] secret scan — trufflehog (informational; known pre-existing finding documented)"; \
+	if command -v trufflehog >/dev/null 2>&1; then \
 		echo "NOTE: trufflehog may report a pre-existing AbuseIPDB finding. See RELEASE_CHECKLIST.md."; \
-		trufflehog git file://. --only-verified; \
-		echo "trufflehog exit code: $$?"; \
+		trufflehog git file://. --only-verified || true; \
 	else \
 		echo "WARNING: trufflehog not found — scan skipped"; \
-	fi
-	@echo ""
-	@echo "==> verify-release COMPLETE — review secret scan output above"
-	@echo "    See RELEASE_CHECKLIST.md for GO/NO-GO criteria and AbuseIPDB decision."
+	fi; \
+	echo ""; \
+	if [ $$FAIL -ne 0 ]; then \
+		echo "ERROR: verify-release FAILED — govulncheck found vulnerabilities (see above)."; \
+		echo "       Update OTEL to v1.40.0+/v1.43.0+ and OPA to v0.68.0+ to clear findings."; \
+		echo "       See RELEASE_CHECKLIST.md for full decision record."; \
+		exit 1; \
+	fi; \
+	echo "==> verify-release COMPLETE — all gates passed. See RELEASE_CHECKLIST.md for GO/NO-GO."
 
 # Build .deb package for linux/amd64
 # RPM: requires rpmbuild (rpm-build package on Fedora/RHEL/SUSE) — skipped if not present

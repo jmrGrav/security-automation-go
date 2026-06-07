@@ -114,20 +114,25 @@ Two allowlist entries added to `.gitleaks.toml`:
 
 ## 7. trufflehog Status
 
-**EXIT CODE: 0 (trufflehog exits 0 even with findings on local git repos)**
+**2 verified findings (both pre-existing, same key):**
 
-**1 verified finding (pre-existing):**
-
+Finding #1 (original):
 ```
 Detector Type: AbuseIPDB
-Raw result:    85db4c46635f6bde946941ed3c692ad43fc58d929d07554043449a9bca5fb376450f9a61727cd60b
+Raw result:    [REDACTED — see git object 2021b218e13e9f1dfa502035a81893ac4b35c280]
 Commit:        4649a1d1fd77064cb3c337147a528c9e67fe0141
 File:          CUTOVER_RUNBOOK.md
 Line:          151
 Timestamp:     2026-05-30 18:00:11 +0000
 ```
 
-trufflehog `--only-verified` confirmed the key responded to a live API call. This key **is or was active**.
+Finding #2 (same key, in prior version of this report):
+```
+Detector Type: AbuseIPDB
+Commit:        2aa3646 (V1_5_RELEASE_VALIDATION_PIPELINE_REPORT.md — prior version embedded the raw key value)
+```
+
+Both findings are the same AbuseIPDB key. The raw key value has been redacted from the current version of this report. trufflehog `--only-verified` confirmed the key responded to a live API call. This key **is or was active**.
 
 ---
 

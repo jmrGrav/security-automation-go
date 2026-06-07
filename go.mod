@@ -2,6 +2,8 @@ module github.com/jm/security-automation-go
 
 go 1.25.0
 
+toolchain go1.25.11
+
 require (
 	github.com/a-h/templ v0.2.778
 	github.com/modelcontextprotocol/go-sdk v1.6.1
