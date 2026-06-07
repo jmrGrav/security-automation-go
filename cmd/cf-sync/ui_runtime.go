@@ -109,6 +109,14 @@ func runUI(ctx context.Context, logger *slog.Logger, cfg *config.Config) error {
 		cfg.UI.MutationsEnabled = true
 	}
 
+	// Phase 5 — Setup Mode UX: log the wizard URL if setup is not yet complete.
+	// The operator sees this in journald immediately after systemctl start cf-sync.
+	if complete, _ := setupStore.IsComplete(ctx); !complete {
+		logger.Info("first boot setup required — open in browser",
+			"url", "http://"+cfg.UI.Addr+"/setup/step/1",
+			"action", "complete_wizard_before_enabling_production")
+	}
+
 	auditSink, err := ui.NewFileAuditSink(filepath.Join(cfg.StateDir, "ui-audit.log"))
 	if err != nil {
 		return err

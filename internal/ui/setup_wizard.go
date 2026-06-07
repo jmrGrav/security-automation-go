@@ -6,6 +6,7 @@ import (
 	"html"
 	"net"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/jm/security-automation-go/internal/config"
 	"github.com/jm/security-automation-go/internal/detect"
 	"github.com/jm/security-automation-go/internal/httpclient"
+	"github.com/jm/security-automation-go/internal/startuplog"
 	uiauth "github.com/jm/security-automation-go/internal/ui/auth"
 )
 
@@ -294,9 +296,11 @@ func (s *Server) handleSetupStep3Post(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/setup/step/4", http.StatusFound)
 }
 
-const cfTokenSecretPath = "/etc/security-automation-go/secrets/cloudflare_api_token"
+// Secret paths are vars (not consts) so tests can redirect them to temp dirs.
+// Production defaults are the canonical paths; nothing should change them at runtime.
+var cfTokenSecretPath = "/etc/security-automation-go/secrets/cloudflare_api_token"
 
-const (
+var (
 	abuseIPDBSecretPath   = "/etc/security-automation-go/secrets/abuseipdb_api_key"
 	betterStackSecretPath = "/etc/security-automation-go/secrets/betterstack_source_token"
 	openAISecretPath      = "/etc/security-automation-go/secrets/openai_api_key"
@@ -710,6 +714,12 @@ func (s *Server) handleSetupStep9Post(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	enableProd := r.FormValue("enable_production") == "1"
+	if enableProd {
+		if err := checkProductionEnableReady(s.setupStore, r.Context()); err != nil {
+			renderSetupPage(w, 9, "Enable production mode", "", err.Error())
+			return
+		}
+	}
 	if s.setupStore != nil {
 		if enableProd {
 			_ = s.setupStore.SetSetting(r.Context(), "dry_run", "false")
@@ -718,6 +728,34 @@ func (s *Server) handleSetupStep9Post(w http.ResponseWriter, r *http.Request) {
 		_ = s.setupStore.MarkComplete(r.Context())
 	}
 	http.Redirect(w, r, "/setup/complete", http.StatusFound)
+}
+
+// checkProductionEnableReady validates the minimum prerequisites before the
+// operator can enable production mode (live Cloudflare mutations):
+//   - CF token secret file must exist on disk (written by step 4)
+//   - Zone ID must have been configured during step 4
+//   - Legacy-only layout must not be active (secrets can't load from old path)
+func checkProductionEnableReady(store SetupStorer, ctx context.Context) error {
+	// 1. CF token file must exist.
+	if _, err := os.Stat(cfTokenSecretPath); err != nil {
+		return fmt.Errorf("Cloudflare API token not configured. Complete step 4 first.")
+	}
+
+	// 2. Zone ID must be set.
+	if store != nil {
+		if zoneID, ok, _ := store.GetSetting(ctx, "cf_zone_id"); !ok || strings.TrimSpace(zoneID) == "" {
+			return fmt.Errorf("Cloudflare Zone ID not configured. Return to step 4 and enter your zone ID.")
+		}
+	}
+
+	// 3. Block if only the legacy config dir exists — secrets cannot load.
+	layout := startuplog.CheckLayout(startuplog.DefaultLegacyRoot, startuplog.DefaultCanonicalRoot+"/secrets")
+	if layout == startuplog.LayoutLegacy {
+		return fmt.Errorf("Legacy config directory detected and canonical path absent. " +
+			"Migrate secrets to /etc/security-automation-go/secrets/ before enabling production mode.")
+	}
+
+	return nil
 }
 
 func (s *Server) handleSetupComplete(w http.ResponseWriter, r *http.Request) {
