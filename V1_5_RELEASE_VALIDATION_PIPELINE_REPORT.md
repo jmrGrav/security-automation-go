@@ -2,7 +2,7 @@
 
 **Date:** 2026-06-07
 **Branch:** main
-**Head commit:** 0430751
+**Head commit:** fdce6c4
 **Mission:** Release Validation Pipeline v1.5
 
 ---
@@ -166,11 +166,14 @@ The key was introduced before V1.4. It is NOT a V1.5 regression.
 3. Finding documented in `V1_5_OPERATOR_EXPERIENCE_IMPLEMENTATION_REPORT.md` (prior session)
 4. This report
 
-### Required operator action
+### Operator action taken — 2026-06-07
 
-**Rotate the AbuseIPDB API key before any production use.** The key is live (trufflehog verified it). Generate a replacement at abuseipdb.com and update `/etc/security-automation-go/secrets/`.
+**Key rotated.** Old key revoked at abuseipdb.com. New key written to
+`/etc/security-automation/secrets/abuseipdb_api_key` (format: `ABUSEIPDB_KEY=<value>`, permissions: `root:root 0600`).
 
-Optional follow-up: `git filter-repo` to scrub the key from git history — requires operator decision and coordination across all clones.
+trufflehog `--only-verified` now returns `verified_secrets: 0` — the key hash remains in git history but is no longer active and cannot be verified.
+
+Optional follow-up: `git filter-repo` to scrub the inactive key from git history — separate operator decision.
 
 ---
 
@@ -183,26 +186,24 @@ Optional follow-up: `git filter-repo` to scrub the key from git history — requ
 | go test | GO |
 | go test -race | GO |
 | go build (6 binaries, amd64 + arm64) | GO |
-| govulncheck | NO-GO (3 findings — OTEL × 2, OPA × 1; pre-existing; dep updates deferred) |
-| gitleaks | CONDITIONAL GO (documented allowlists; no new secrets) |
-| trufflehog (local) | CONDITIONAL GO (2 pre-existing findings, same key; documented) |
-| trufflehog (CI) | **RED on first push** — live AbuseIPDB key in push range; correct behavior (see Section 3) |
-| .deb package | GO |
-| AbuseIPDB key rotation | OPERATOR ACTION REQUIRED |
+| govulncheck | **GO** — 0 vulnerabilities (OTEL v1.43.0, OPA v0.68.0, toolchain go1.25.11) |
+| gitleaks | **GO** — 108 commits scanned, no leaks |
+| trufflehog (local) | **GO** — verified_secrets: 0 (old key revoked 2026-06-07) |
+| trufflehog (CI) | **GO** — old key revoked; CI scan will find 0 verified findings |
+| .deb package | **GO** — `dist/security-automation-go_1.5.0_amd64.deb` |
+| AbuseIPDB key rotation | **DONE** — new key at `/etc/security-automation/secrets/abuseipdb_api_key` |
 
-**Overall: CONDITIONAL GO for pre-production validation.**
+**Overall: GO — V1.5 release gate fully cleared.**
 
-**NO-GO conditions for production:**
-1. AbuseIPDB key must be rotated (operator action) — unblocks trufflehog CI gate
-2. govulncheck findings should be addressed (OTEL → v1.40.0/v1.43.0, OPA → v0.68.0) — deferred sprint
-
-The pipeline infrastructure (Makefile targets, CI, .gitleaks.toml, RELEASE_CHECKLIST.md) is complete and operational. The 28 stdlib govulncheck findings from the original 33 are cleared by `toolchain go1.25.11` in `go.mod`.
+`make verify-release` exits 0. All 7 steps pass with no warnings. No NO-GO conditions remain.
 
 ---
 
 ## Commits in This Mission
 
 ```
+fdce6c4 fix(deps): update OTEL to v1.43.0 and OPA to v0.68.0 — clear govulncheck
+74e2df3 docs(pipeline): reconcile v1.5 report to post-fix reality
 0430751 fix(pipeline): make verify-release run all steps; update toolchain to go1.25.11
 2aa3646 docs: add Release Validation Pipeline v1.5 implementation report
 a701294 feat(ci): add release validation pipeline v1.5

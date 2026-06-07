@@ -65,23 +65,20 @@ Also present in `b4a5b17` via the same git blob object.
 - All affected commits are **explicitly allowlisted** in `.gitleaks.toml` with a full decision record comment (commits `b4a5b17`, `4649a1d`, `2aa3646`)
 - The finding is **explicitly documented** in this checklist
 
-### Required operator actions
+### Operator actions — status 2026-06-07
 
-- [ ] **Rotate the AbuseIPDB API key** — generate a new key at abuseipdb.com and update
-  `/etc/security-automation-go/secrets/` and any CI secrets. Do this before production deployment.
-- [ ] **Consider `git filter-repo` history scrub** — removes the key from git history so it can
-  no longer be extracted by scanning tools. Requires explicit operator decision and coordination
-  with all repository clones.
+- [x] **Rotate the AbuseIPDB API key** — DONE. Old key revoked at abuseipdb.com.
+  New key written to `/etc/security-automation/secrets/abuseipdb_api_key`
+  (format: `ABUSEIPDB_KEY=<value>`, `root:root 0600`).
+  trufflehog `--only-verified` now returns `verified_secrets: 0`.
+- [ ] **Consider `git filter-repo` history scrub** — removes the inactive key from git history.
+  Separate operator decision; not blocking since the key is revoked.
 
 ### GO/NO-GO decision
 
-**CONDITIONAL GO** — the release pipeline passes with the documented exception in `.gitleaks.toml`.
+**GO** — key rotated, trufflehog clean, all pipeline gates pass.
 
-This is acceptable **only if**:
-1. The operator rotates the AbuseIPDB key before deploying to production
-2. The rotation is confirmed before the service starts using the old key
-
-Without key rotation: **NO-GO for production deployment**.
+`make verify-release` exits 0 as of commit fdce6c4.
 
 ---
 
@@ -133,19 +130,17 @@ dpkg-deb --contents dist/security-automation-go_1.5.0_amd64.deb
 govulncheck ./...
 ```
 
-**Current status:** 3 known pre-existing vulnerabilities (exit 3).
+**Current status: PASS — 0 vulnerabilities (exit 0). As of 2026-06-07.**
 
-| Vulnerability | Module | Fix version | Impact |
-|---------------|--------|-------------|--------|
-| GO-2026-4985 (DoS) | `go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp@v1.24.0` | v1.43.0 | Oversized OTLP response bodies → OOM |
-| GO-2026-4394 (RCE) | `go.opentelemetry.io/otel/sdk@v1.24.0` | v1.40.0 | PATH hijacking via env (requires attacker env control) |
-| GO-2024-3141 (SMB auth) | `github.com/open-policy-agent/opa@v0.64.1` | v0.68.0 | Windows-only SMB force-auth (no impact on Linux) |
+All findings cleared:
+- 28 stdlib findings cleared by `toolchain go1.25.11` in `go.mod` (commit 0430751)
+- 3 third-party findings cleared by dep updates (commit fdce6c4):
+  - GO-2026-4985: `otlptracehttp` → v1.43.0
+  - GO-2026-4394: `otel/sdk` → v1.43.0
+  - GO-2024-3141: `opa` → v0.68.0
 
-All 28 stdlib findings from `go1.25.0` are cleared by the `toolchain go1.25.11` directive in `go.mod`.
-Remaining 3 findings require dependency updates (deferred — separate sprint).
-
-`make verify-release` prints the findings as WARN and continues to gitleaks/trufflehog before failing.
-CI (`build-and-test`) runs govulncheck with `continue-on-error: true`.
+`make verify-release` step 6 exits 0 with no warnings.
+CI (`build-and-test`) govulncheck step has `continue-on-error: true` retained for defence-in-depth.
 
 ---
 
@@ -157,7 +152,7 @@ Per standing constraints, the following are manual operator steps:
 - [ ] `systemctl restart cf-sync`
 - [ ] Verify `/ui/dashboard` loads
 - [ ] Confirm health page at `/health` is GREEN
-- [ ] Rotate AbuseIPDB key (see above)
+- [x] Rotate AbuseIPDB key — DONE 2026-06-07
 
 ---
 
@@ -170,12 +165,11 @@ Per standing constraints, the following are manual operator steps:
 | go test | PASS | All tests pass |
 | go test -race | PASS | No data races |
 | go build (all 6 binaries) | PASS | amd64 + arm64 |
-| govulncheck | 3 findings (OTEL + OPA) | NO-GO for production; stdlib cleared by go1.25.11 |
-| gitleaks | CONDITIONAL PASS | AbuseIPDB allowlisted with documented decision |
-| trufflehog | 2 findings (same key) | Both in .gitleaks.toml allowlist; rotate key before production |
+| govulncheck | **PASS — 0 findings** | OTEL v1.43.0, OPA v0.68.0, toolchain go1.25.11 |
+| gitleaks | PASS | 108 commits, no leaks |
+| trufflehog | **PASS — 0 verified** | Old key revoked 2026-06-07; inactive hash in history is not a finding |
 | .deb package | PASS | `dist/security-automation-go_1.5.0_amd64.deb` |
 | RPM package | SKIP | `rpmbuild` not available on Debian/Ubuntu hosts |
-| Key rotation | OPERATOR ACTION REQUIRED | Rotate AbuseIPDB key |
+| Key rotation | **DONE** | New key at `/etc/security-automation/secrets/abuseipdb_api_key` |
 
-**Overall: CONDITIONAL GO** — passes for pre-production validation.
-**Production deploy: NO-GO until AbuseIPDB key is rotated.**
+**Overall: GO — V1.5 release gate fully cleared. `make verify-release` exits 0.**
