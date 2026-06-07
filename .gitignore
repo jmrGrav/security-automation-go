@@ -1,5 +1,6 @@
 # Build artifacts
 /bin/
+/dist/
 /cf-sync
 *.exe
 *.test

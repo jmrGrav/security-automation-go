@@ -68,13 +68,13 @@ paths = [
 #       release pipeline to proceed. It does NOT mean the finding is resolved.
 #
 #   Required operator action: rotate AbuseIPDB key before production use.
-#   See RELEASE_CHECKLIST.md — Section: AbuseIPDB Pre-Existing Finding.
+#   See docs/releases/RELEASE_CHECKLIST.md — Section: AbuseIPDB Pre-Existing Finding.
 #
 # GO/NO-GO: CONDITIONAL GO — pipeline passes with this documented exception.
 #           Resolution: key rotation (required) + optional history scrub.
 # ---------------------------------------------------------------------------
 [[allowlists]]
-description = "KNOWN PRE-EXISTING FINDING: AbuseIPDB key in git history (commits b4a5b17, 4649a1d, 2aa3646). See RELEASE_CHECKLIST.md. Operator must rotate key."
+description = "KNOWN PRE-EXISTING FINDING: AbuseIPDB key in git history (commits b4a5b17, 4649a1d, 2aa3646). See docs/releases/RELEASE_CHECKLIST.md. Operator must rotate key."
 commits = [
   "b4a5b17",
   "4649a1d",
