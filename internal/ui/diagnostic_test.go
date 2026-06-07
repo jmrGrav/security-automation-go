@@ -116,6 +116,20 @@ func TestHandleSupportBundle_Returns200WithGzip(t *testing.T) {
 	}
 }
 
+func TestHandleSupportBundle_NoSession_Returns401(t *testing.T) {
+	_, store := seedAdminHash(t, "Password123!@#")
+	srv := newServerWithStore(store)
+
+	req := httptest.NewRequest("GET", "/health/support-bundle", nil)
+	// no session cookie
+	w := httptest.NewRecorder()
+	srv.handleSupportBundle(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401 for missing session, got %d", w.Code)
+	}
+}
+
 func TestRedactSecretLines(t *testing.T) {
 	tests := []struct {
 		input    string
