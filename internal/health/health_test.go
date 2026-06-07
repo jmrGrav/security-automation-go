@@ -135,8 +135,8 @@ func TestCheckNginx_NotConfigured(t *testing.T) {
 
 func TestCheckDisk_MissingPath(t *testing.T) {
 	c := health.CheckDisk(health.Config{StateDir: "/nonexistent-state-dir-xyz-test"})
-	if c.Status == health.Red {
-		t.Errorf("expected YELLOW for unstatfs-able path, got RED: %s", c.Reason)
+	if c.Status != health.Yellow {
+		t.Errorf("expected YELLOW for unstatfs-able path, got %s: %s", c.Status, c.Reason)
 	}
 }
 
@@ -175,6 +175,63 @@ func TestCheckLogDir_Missing(t *testing.T) {
 	c := health.CheckLogDir(health.Config{LogDir: "/nonexistent-log-xyz-test"})
 	if c.Status != health.Yellow {
 		t.Errorf("expected YELLOW for missing log dir, got %s", c.Status)
+	}
+}
+
+func TestCheckPermissions_GroupAccessible(t *testing.T) {
+	dir := t.TempDir()
+	_ = os.Chmod(dir, 0o750)
+	c := health.CheckPermissions(health.Config{SecretDir: dir})
+	if c.Status != health.Yellow {
+		t.Errorf("expected YELLOW for group-accessible dir (750), got %s: %s", c.Status, c.Reason)
+	}
+}
+
+func TestCheckPermissions_WorldAccessible(t *testing.T) {
+	dir := t.TempDir()
+	_ = os.Chmod(dir, 0o755)
+	c := health.CheckPermissions(health.Config{SecretDir: dir})
+	if c.Status != health.Red {
+		t.Errorf("expected RED for world-accessible dir (755), got %s: %s", c.Status, c.Reason)
+	}
+}
+
+func TestCheckDisk_GreenAbove20Pct(t *testing.T) {
+	orig := *health.DiskStatfsOverride
+	*health.DiskStatfsOverride = func(path string) (uint64, uint64, error) {
+		return 1000, 250, nil // 25% free — GREEN
+	}
+	defer func() { *health.DiskStatfsOverride = orig }()
+
+	c := health.CheckDisk(health.Config{StateDir: "/any"})
+	if c.Status != health.Green {
+		t.Errorf("expected GREEN at 25%% free, got %s: %s", c.Status, c.Reason)
+	}
+}
+
+func TestCheckDisk_YellowBetween10And20Pct(t *testing.T) {
+	orig := *health.DiskStatfsOverride
+	*health.DiskStatfsOverride = func(path string) (uint64, uint64, error) {
+		return 1000, 150, nil // 15% free — YELLOW
+	}
+	defer func() { *health.DiskStatfsOverride = orig }()
+
+	c := health.CheckDisk(health.Config{StateDir: "/any"})
+	if c.Status != health.Yellow {
+		t.Errorf("expected YELLOW at 15%% free, got %s: %s", c.Status, c.Reason)
+	}
+}
+
+func TestCheckDisk_RedBelow10Pct(t *testing.T) {
+	orig := *health.DiskStatfsOverride
+	*health.DiskStatfsOverride = func(path string) (uint64, uint64, error) {
+		return 1000, 50, nil // 5% free — RED
+	}
+	defer func() { *health.DiskStatfsOverride = orig }()
+
+	c := health.CheckDisk(health.Config{StateDir: "/any"})
+	if c.Status != health.Red {
+		t.Errorf("expected RED at 5%% free, got %s: %s", c.Status, c.Reason)
 	}
 }
 
