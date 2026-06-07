@@ -3,17 +3,115 @@ GOFLAGS ?=
 LDFLAGS ?= -s -w
 BUILD_FLAGS ?= -trimpath -buildvcs=false -ldflags "$(LDFLAGS)"
 STATIC_ENV = CGO_ENABLED=0
+VERSION ?= 1.5.0
+GOPATH_BIN := $(shell $(GO) env GOPATH)/bin
 
 GOFMT_FILES := $(shell find . -type f -name '*.go' -not -path './vendor/*')
 
-.PHONY: all build test fmt vet verify clean
+.PHONY: all build build-linux-amd64 build-linux-arm64 verify-release package test fmt vet verify clean
 
 all: build
 
+# Build all 6 binaries for host platform
 build:
 	$(STATIC_ENV) $(GO) build $(GOFLAGS) $(BUILD_FLAGS) -o bin/crowdsec-sync ./cmd/crowdsec-sync
 	$(STATIC_ENV) $(GO) build $(GOFLAGS) $(BUILD_FLAGS) -o bin/cf-allowlist-sync ./cmd/cf-allowlist-sync
 	$(STATIC_ENV) $(GO) build $(GOFLAGS) $(BUILD_FLAGS) -o bin/cf-cleanup ./cmd/cf-cleanup
+	$(STATIC_ENV) $(GO) build $(GOFLAGS) $(BUILD_FLAGS) -o bin/cf-sync ./cmd/cf-sync
+	$(STATIC_ENV) $(GO) build $(GOFLAGS) $(BUILD_FLAGS) -o bin/cf-shadow ./cmd/cf-shadow
+	$(STATIC_ENV) $(GO) build $(GOFLAGS) $(BUILD_FLAGS) -o bin/security-automation-mcp ./cmd/security-automation-mcp
+
+# linux/amd64 static binaries (for .deb packaging and CI artifact)
+build-linux-amd64:
+	@mkdir -p bin/linux-amd64
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GO) build $(GOFLAGS) $(BUILD_FLAGS) -o bin/linux-amd64/crowdsec-sync ./cmd/crowdsec-sync
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GO) build $(GOFLAGS) $(BUILD_FLAGS) -o bin/linux-amd64/cf-allowlist-sync ./cmd/cf-allowlist-sync
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GO) build $(GOFLAGS) $(BUILD_FLAGS) -o bin/linux-amd64/cf-cleanup ./cmd/cf-cleanup
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GO) build $(GOFLAGS) $(BUILD_FLAGS) -o bin/linux-amd64/cf-sync ./cmd/cf-sync
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GO) build $(GOFLAGS) $(BUILD_FLAGS) -o bin/linux-amd64/cf-shadow ./cmd/cf-shadow
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GO) build $(GOFLAGS) $(BUILD_FLAGS) -o bin/linux-amd64/security-automation-mcp ./cmd/security-automation-mcp
+
+# linux/arm64 static binaries (for CI artifact; modernc.org/sqlite is pure Go, no cross-compiler needed)
+build-linux-arm64:
+	@mkdir -p bin/linux-arm64
+	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 $(GO) build $(GOFLAGS) $(BUILD_FLAGS) -o bin/linux-arm64/crowdsec-sync ./cmd/crowdsec-sync
+	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 $(GO) build $(GOFLAGS) $(BUILD_FLAGS) -o bin/linux-arm64/cf-allowlist-sync ./cmd/cf-allowlist-sync
+	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 $(GO) build $(GOFLAGS) $(BUILD_FLAGS) -o bin/linux-arm64/cf-cleanup ./cmd/cf-cleanup
+	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 $(GO) build $(GOFLAGS) $(BUILD_FLAGS) -o bin/linux-arm64/cf-sync ./cmd/cf-sync
+	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 $(GO) build $(GOFLAGS) $(BUILD_FLAGS) -o bin/linux-arm64/cf-shadow ./cmd/cf-shadow
+	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 $(GO) build $(GOFLAGS) $(BUILD_FLAGS) -o bin/linux-arm64/security-automation-mcp ./cmd/security-automation-mcp
+
+# Full pre-release gate: gofmt, vet, test, race, build, govulncheck, gitleaks, trufflehog
+# Requires: govulncheck, gitleaks, trufflehog — see RELEASE_CHECKLIST.md for install instructions
+verify-release:
+	@echo "==> [1/7] gofmt check"
+	@unformatted=$$(gofmt -l .); if [ -n "$$unformatted" ]; then \
+		echo "ERROR: unformatted files:"; echo "$$unformatted"; exit 1; \
+	fi
+	@echo "==> [2/7] go vet"
+	@$(GO) vet ./...
+	@echo "==> [3/7] go test"
+	@$(GO) test -timeout 120s ./...
+	@echo "==> [4/7] go test -race"
+	@$(GO) test -race -timeout 300s ./...
+	@echo "==> [5/7] go build (all 6 binaries)"
+	@$(MAKE) build
+	@echo "==> [6/7] govulncheck"
+	@GOVULNCHECK=$$(command -v govulncheck 2>/dev/null || echo "$(GOPATH_BIN)/govulncheck"); \
+	if [ ! -x "$$GOVULNCHECK" ]; then \
+		echo "ERROR: govulncheck not found. Install: go install golang.org/x/vuln/cmd/govulncheck@latest"; exit 1; \
+	fi; \
+	"$$GOVULNCHECK" ./...
+	@echo "==> [7/7] secret scan — gitleaks"
+	@GITLEAKS=$$(command -v gitleaks 2>/dev/null || echo "$(GOPATH_BIN)/gitleaks"); \
+	if [ ! -x "$$GITLEAKS" ]; then \
+		echo "ERROR: gitleaks not found. Install: go install github.com/zricethezav/gitleaks/v8@latest"; exit 1; \
+	fi; \
+	"$$GITLEAKS" detect --source . --config .gitleaks.toml
+	@echo "==> [7/7] secret scan — trufflehog (informational; known pre-existing finding documented)"
+	@if command -v trufflehog >/dev/null 2>&1; then \
+		echo "NOTE: trufflehog may report a pre-existing AbuseIPDB finding. See RELEASE_CHECKLIST.md."; \
+		trufflehog git file://. --only-verified; \
+		echo "trufflehog exit code: $$?"; \
+	else \
+		echo "WARNING: trufflehog not found — scan skipped"; \
+	fi
+	@echo ""
+	@echo "==> verify-release COMPLETE — review secret scan output above"
+	@echo "    See RELEASE_CHECKLIST.md for GO/NO-GO criteria and AbuseIPDB decision."
+
+# Build .deb package for linux/amd64
+# RPM: requires rpmbuild (rpm-build package on Fedora/RHEL/SUSE) — skipped if not present
+package: build-linux-amd64
+	@echo "==> Assembling .deb for v$(VERSION)"
+	@mkdir -p dist
+	@mkdir -p packaging/deb/usr/local/bin
+	@mkdir -p packaging/deb/lib/systemd/system
+	@mkdir -p packaging/deb/usr/lib/sysusers.d
+	@mkdir -p packaging/deb/usr/lib/tmpfiles.d
+	@cp bin/linux-amd64/crowdsec-sync packaging/deb/usr/local/bin/
+	@cp bin/linux-amd64/cf-allowlist-sync packaging/deb/usr/local/bin/
+	@cp bin/linux-amd64/cf-cleanup packaging/deb/usr/local/bin/
+	@cp bin/linux-amd64/cf-sync packaging/deb/usr/local/bin/
+	@cp bin/linux-amd64/cf-shadow packaging/deb/usr/local/bin/
+	@cp bin/linux-amd64/security-automation-mcp packaging/deb/usr/local/bin/
+	@cp deployments/systemd/*.service packaging/deb/lib/systemd/system/
+	@cp deployments/systemd/*.timer packaging/deb/lib/systemd/system/ 2>/dev/null || true
+	@cp deployments/shadow/cf-shadow.service packaging/deb/lib/systemd/system/
+	@cp packaging/shared/sysusers.d/security-automation-go.conf packaging/deb/usr/lib/sysusers.d/
+	@cp packaging/shared/tmpfiles.d/security-automation-go.conf packaging/deb/usr/lib/tmpfiles.d/
+	@chmod 755 packaging/deb/DEBIAN/postinst packaging/deb/DEBIAN/postrm
+	@chmod 755 packaging/deb/usr/local/bin/*
+	@dpkg-deb --build packaging/deb dist/security-automation-go_$(VERSION)_amd64.deb
+	@echo "==> Built: dist/security-automation-go_$(VERSION)_amd64.deb"
+	@if command -v rpmbuild >/dev/null 2>&1; then \
+		echo "==> Building RPM..."; \
+		rpmbuild -bb packaging/rpm/security-automation-go.spec \
+			--define "_topdir $$(pwd)/dist/rpm-build" \
+			--define "_rpmdir $$(pwd)/dist" 2>&1; \
+	else \
+		echo "==> SKIP RPM: rpmbuild not available (install rpm-build on Fedora/RHEL/SUSE)"; \
+	fi
 
 test:
 	$(GO) test $(GOFLAGS) ./...
@@ -27,4 +125,5 @@ vet:
 verify: fmt vet test build
 
 clean:
-	rm -rf bin
+	rm -rf bin dist
+	rm -rf packaging/deb/usr packaging/deb/lib
