@@ -601,7 +601,7 @@ func (s *Server) handleSetupStep7Post(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/setup/step/8", http.StatusFound)
 		return
 	}
-	type aiSecret struct{ field, path, envKey string }
+	type aiSecret struct{ field, path, name string }
 	secrets := []aiSecret{
 		{"openai_key", openAISecretPath, "OPENAI_API_KEY"},
 		{"anthropic_key", anthropicSecretPath, "ANTHROPIC_API_KEY"},
@@ -613,8 +613,11 @@ func (s *Server) handleSetupStep7Post(w http.ResponseWriter, r *http.Request) {
 		if val == "" {
 			continue
 		}
-		if err := WriteSecretFile(sec.path, map[string]string{sec.envKey: val}); err != nil {
-			errs = append(errs, fmt.Sprintf("%s: %v", sec.envKey, err))
+		// AI keys are consumed by ReadAPIKeyFile which reads raw file content.
+		// writeProviderSecret writes the raw value (no KEY=VALUE prefix) — same
+		// format as the provider admin UI, ensuring wizard and UI outputs are identical.
+		if err := writeProviderSecret(sec.path, val); err != nil {
+			errs = append(errs, fmt.Sprintf("%s: %v", sec.name, err))
 		}
 	}
 	if len(errs) > 0 {

@@ -78,17 +78,20 @@ This means the service starts cleanly when the token has not yet been configured
 
 ---
 
-## Atomic Write Protocol (Already Correct)
+## Atomic Write Protocol
 
-All wizard-written secrets use the `WriteSecretFile` function, which:
-1. Creates a temporary file in the same directory (same filesystem → rename is atomic)
-2. Writes the value in env-file format (`KEY=VALUE`)
-3. `fsync`s the file
-4. Closes the file
-5. `os.Rename` (atomic on POSIX) to the final path
-6. `chmod 0600` on the final path
+All wizard-written secrets use an atomic write: temp file in the same directory → fsync → rename → chmod 0600. No secret is ever partially written from the reader's perspective.
 
-This pattern is correct and consistent. No secret is ever partially written from the reader's perspective. All secrets are mode 0600 — never world-readable.
+Two write functions are used depending on the loading mechanism:
+
+| Function | Format | Used for |
+|----------|--------|----------|
+| `WriteSecretFile(path, map[string]string{key: val})` | `KEY=VALUE` | CF token, AbuseIPDB key, BetterStack token (consumed via systemd `EnvironmentFile=`) |
+| `writeProviderSecret(path, val)` | raw value | OpenAI, Anthropic, Gemini keys (consumed via `ReadAPIKeyFile`, which reads raw content) |
+
+Using the wrong function (KEY=VALUE for an AI key) would cause `ReadAPIKeyFile` to return `OPENAI_API_KEY=sk-…` as the bearer token, producing 401 errors. The wizard uses `writeProviderSecret` for AI keys — identical to the provider admin UI path.
+
+All secret files: mode `0600`, owned by `security-automation:security-automation`.
 
 ---
 
@@ -107,13 +110,13 @@ If validation fails, no file is written. This prevents storing non-functional cr
 
 ## Env-File Format Reference
 
-All secret files written by the wizard use standard env-file format:
+Secrets consumed via systemd `EnvironmentFile=` use standard env-file format:
 
 ```
 KEY=VALUE
 ```
 
-One key-value pair per file. No quotes required (systemd's `EnvironmentFile` parser handles unquoted values). No shell escaping. The value is everything after the first `=` on the line.
+One key-value pair per file. No quotes required. The value is everything after the first `=`.
 
 Example — `/etc/security-automation-go/secrets/cloudflare_api_token`:
 ```
@@ -123,7 +126,14 @@ CF_API_TOKEN=v1.0-xxxxxxxxxxxxxxxxxxxxxxxx-yyyyyyyyyyyyyyyy
 This format is compatible with:
 - systemd `EnvironmentFile=` directive (native support)
 - `source /path/to/file && echo $CF_API_TOKEN` (manual operator verification)
-- `export $(grep -v '^#' /path/to/file | xargs)` (shell loading for debugging)
+
+AI key files (OpenAI, Anthropic, Gemini) use **raw format** — the file contains only the key value with no prefix:
+
+```
+sk-proj-abc123...
+```
+
+This is what `ReadAPIKeyFile` expects. Loading a `KEY=VALUE`-format AI key file would produce a 401 error because the entire string (including the `KEY=` prefix) would be sent as the bearer token.
 
 ---
 
@@ -137,11 +147,12 @@ sudo find /etc/security-automation-go/secrets/ -type f -exec ls -la {} \;
 
 All files should show:
 ```
--rw------- 1 root root  ...  /etc/security-automation-go/secrets/<name>
+-rw------- 1 security-automation security-automation  ...  /etc/security-automation-go/secrets/<name>
 ```
 
-If any file shows group or world read bits, fix immediately:
+If any file shows wrong owner or group/world read bits, fix immediately:
 
 ```bash
+sudo chown security-automation:security-automation /etc/security-automation-go/secrets/*
 sudo chmod 0600 /etc/security-automation-go/secrets/*
 ```

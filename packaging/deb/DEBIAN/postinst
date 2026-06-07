@@ -13,11 +13,22 @@ if ! getent passwd security-automation >/dev/null 2>&1; then
 fi
 
 # Create directories
+# /etc/security-automation-go/ root — non-secret config, readable by all
+install -d -m 755 -o root -g root \
+    /etc/security-automation-go
+# secrets/ — 0700: only the daemon user can enter
+install -d -m 700 -o security-automation -g security-automation \
+    /etc/security-automation-go/secrets
+# providers/ — provider state (ai-providers.env); daemon reads/writes
+install -d -m 750 -o security-automation -g security-automation \
+    /etc/security-automation-go/providers
+# runtime/ — initial-admin-password and other runtime-generated files
+install -d -m 750 -o security-automation -g security-automation \
+    /etc/security-automation-go/runtime
+# /var/lib — daemon state directory
 install -d -m 750 -o security-automation -g security-automation \
     /var/lib/security-automation-go \
     /var/lib/security-automation-go/diagnostics
-install -d -m 700 -o security-automation -g security-automation \
-    /etc/security-automation-go/secrets
 install -d -m 755 -o security-automation -g security-automation \
     /var/log/security-automation
 

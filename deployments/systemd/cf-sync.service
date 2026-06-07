@@ -7,8 +7,10 @@ StartLimitBurst=5
 
 [Service]
 Type=simple
+# User identity — must match packaging (postinst/sysusers.d/tmpfiles.d)
+User=security-automation
+Group=security-automation
 # Security Hardening
-DynamicUser=yes
 ProtectSystem=strict
 ProtectHome=yes
 PrivateTmp=yes
@@ -31,8 +33,10 @@ LogsDirectory=security-automation
 LogsDirectoryMode=0750
 WorkingDirectory=/var/lib/security-automation-go
 
-# Execution
+# Secrets — read by systemd as root before privilege drop
 EnvironmentFile=/etc/security-automation-go/secrets/cloudflare_api_token
+EnvironmentFile=-/etc/security-automation-go/secrets/abuseipdb_api_key
+EnvironmentFile=-/etc/security-automation-go/secrets/betterstack_source_token
 EnvironmentFile=-/etc/security-automation-go/security-automation.env
 Environment=STATE_DIR=/var/lib/security-automation-go
 ExecStart=/usr/local/bin/cf-sync -mode daemon -interval 1m
