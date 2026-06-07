@@ -1,0 +1,14 @@
+#!/bin/sh
+set -e
+
+if [ "$1" = "purge" ]; then
+    # Remove state on purge only — not on upgrade
+    rm -rf /var/lib/security-automation-go
+    rm -rf /var/log/security-automation
+    if getent passwd security-automation >/dev/null 2>&1; then
+        userdel security-automation || true
+    fi
+    if getent group security-automation >/dev/null 2>&1; then
+        groupdel security-automation || true
+    fi
+fi

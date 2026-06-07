@@ -1,0 +1,10 @@
+Package: security-automation-go
+Version: 1.5.0
+Section: utils
+Priority: optional
+Architecture: amd64
+Maintainer: Operator <operator@example.com>
+Description: Security automation operator daemon
+ Cloudflare/CrowdSec/OpenResty integration with operator UI.
+ Requires: systemd, sqlite3
+Depends: systemd
