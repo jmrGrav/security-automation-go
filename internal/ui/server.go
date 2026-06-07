@@ -22,6 +22,8 @@ import (
 	ai "github.com/jm/security-automation-go/internal/ai"
 	aigateway "github.com/jm/security-automation-go/internal/ai/gateway"
 	"github.com/jm/security-automation-go/internal/config"
+	"github.com/jm/security-automation-go/internal/detect"
+	"github.com/jm/security-automation-go/internal/health"
 	"github.com/jm/security-automation-go/internal/observability/metrics"
 	"github.com/jm/security-automation-go/internal/security"
 	"github.com/jm/security-automation-go/internal/security/enrichment"
@@ -196,6 +198,10 @@ func (s *Server) routes() {
 	s.mux.Handle("POST /actions/cloudflare/ban", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleCloudflareBanPreview)))))
 	s.mux.Handle("POST /ui/ai/explain", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleAIExplain)))))
 	s.mux.Handle("GET /static/ai-explain.js", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleAIExplainScript)))))
+	s.mux.Handle("GET /health", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleHealthPage)))))
+	s.mux.Handle("GET /health/json", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleHealthJSON)))))
+	s.mux.Handle("POST /health/diagnostic", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleRunDiagnostic)))))
+	s.mux.Handle("GET /health/support-bundle", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleSupportBundle)))))
 }
 
 func (s *Server) handleLoginPage(w http.ResponseWriter, r *http.Request) {
@@ -800,6 +806,24 @@ func (s *Server) providerHealthViews() []ProviderHealth {
 }
 
 func (s *Server) dashboardConsoleView() DashboardConsoleView {
+	checks := health.RunAll(s.buildHealthConfig())
+	detectors := detect.RunAll(s.buildDetectConfig())
+	env := EnvironmentWidget{Total: len(detectors)}
+	for _, c := range checks {
+		switch c.Status {
+		case health.Green:
+			env.Green++
+		case health.Yellow:
+			env.Yellow++
+		case health.Red:
+			env.Red++
+		}
+	}
+	for _, d := range detectors {
+		if d.Healthy {
+			env.Healthy++
+		}
+	}
 	return DashboardConsoleView{
 		Statuses: []StatusItem{
 			{Label: "Runtime", Level: "healthy", Detail: "UI mode active"},
@@ -818,6 +842,7 @@ func (s *Server) dashboardConsoleView() DashboardConsoleView {
 			{Label: "Shadow / cutover", Level: "disabled", Detail: "not wired in UI shell"},
 		},
 		AIProviders: s.providerDashboardEntries(),
+		Environment: env,
 	}
 }
 

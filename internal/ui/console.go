@@ -346,6 +346,7 @@ func consoleNav(active string) []navItem {
 	items := []navItem{
 		{Label: "Dashboard", Href: "/"},
 		{Label: "Providers", Href: "/providers"},
+		{Label: "Health", Href: "/health"},
 		{Label: "Forensic", Href: "/forensic"},
 		{Label: "Security Intelligence", Href: "/intelligence"},
 		{Label: "Timeline", Href: "/timeline"},
@@ -438,6 +439,21 @@ func DashboardConsolePage(view DashboardConsoleView) templ.Component {
 				if _, err := fmt.Fprint(w, `</div></div>`); err != nil {
 					return err
 				}
+			}
+			if _, err := fmt.Fprintf(w,
+				`<div class="panel"><h2>Environment &amp; Health</h2>`+
+					`<div class="badges">`+
+					`<span class="badge healthy">%d GREEN</span>`+
+					`<span class="badge warning">%d YELLOW</span>`+
+					`<span class="badge error">%d RED</span>`+
+					`</div>`+
+					`<p class="muted">%d of %d components healthy</p>`+
+					`<a href="/health">View Health Center &#x2192;</a>`+
+					`</div>`,
+				view.Environment.Green, view.Environment.Yellow, view.Environment.Red,
+				view.Environment.Healthy, view.Environment.Total,
+			); err != nil {
+				return err
 			}
 			_, err := fmt.Fprint(w, `</section>`)
 			return err
