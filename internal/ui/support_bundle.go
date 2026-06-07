@@ -18,19 +18,23 @@ import (
 )
 
 // secretRedactPattern matches lines containing common secret markers.
-var secretRedactPattern = regexp.MustCompile(`(?i)(token|password|api[_-]key|secret|private[_-]key)\s*[=:]\s*\S+`)
+var secretRedactPattern = regexp.MustCompile(`(?i)(token|password|api[_-]key|secret|private[_-]key)(\s*[=:]\s*)\S+`)
 
 func redactSecretLines(s string) string {
 	lines := strings.Split(s, "\n")
 	for i, line := range lines {
 		if secretRedactPattern.MatchString(line) {
-			lines[i] = secretRedactPattern.ReplaceAllString(line, "$1=<REDACTED>")
+			lines[i] = secretRedactPattern.ReplaceAllString(line, "${1}${2}<REDACTED>")
 		}
 	}
 	return strings.Join(lines, "\n")
 }
 
 func (s *Server) handleSupportBundle(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.getSession(r); !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
 	now := time.Now().UTC()
 	filename := "support-bundle-" + now.Format("20060102") + ".tar.gz"
 	w.Header().Set("Content-Type", "application/gzip")
