@@ -1,0 +1,28 @@
+#!/bin/sh
+set -e
+
+# Create system user and group
+if ! getent group security-automation >/dev/null 2>&1; then
+    groupadd --system security-automation
+fi
+if ! getent passwd security-automation >/dev/null 2>&1; then
+    useradd --system --no-create-home --gid security-automation \
+        --home /var/lib/security-automation-go \
+        --shell /usr/sbin/nologin \
+        security-automation
+fi
+
+# Create directories
+install -d -m 750 -o security-automation -g security-automation \
+    /var/lib/security-automation-go \
+    /var/lib/security-automation-go/diagnostics
+install -d -m 700 -o security-automation -g security-automation \
+    /etc/security-automation-go/secrets
+install -d -m 755 -o security-automation -g security-automation \
+    /var/log/security-automation
+
+# Enable and start service
+if [ "$1" = "configure" ]; then
+    systemctl daemon-reload
+    systemctl enable cf-sync.service || true
+fi
