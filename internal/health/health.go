@@ -30,9 +30,13 @@ type Config struct {
 	DecisionsLog        string
 	NginxLogDir         string
 	OpenRestyEventsFile string
+	// LegacySecretsDir is the pre-V1.4 secrets directory. Default: /etc/security-automation/secrets
+	LegacySecretsDir string
+	// CanonicalSecretsDir is the V1.4+ secrets directory. Default: /etc/security-automation-go/secrets
+	CanonicalSecretsDir string
 }
 
-// RunAll runs all 11 health checks and returns their results.
+// RunAll runs all 12 health checks and returns their results.
 func RunAll(cfg Config) []Check {
 	fns := []func(Config) Check{
 		CheckCloudflare,
@@ -46,6 +50,7 @@ func RunAll(cfg Config) []Check {
 		CheckPermissions,
 		CheckStateDir,
 		CheckLogDir,
+		CheckLegacyLayout,
 	}
 	out := make([]Check, 0, len(fns))
 	for _, f := range fns {

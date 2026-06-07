@@ -262,3 +262,41 @@ func CheckLogDir(cfg Config) Check {
 	}
 	return Check{Name: "logs", Status: Green, Reason: "Log directory present"}
 }
+
+// CheckLegacyLayout reports whether a pre-V1.4 config directory exists alongside the canonical path.
+//   - GREEN: canonical secrets dir exists (or neither exists) — correct state
+//   - YELLOW: both legacy and canonical exist — migration in progress
+//   - RED: only legacy exists — operator must migrate before secrets load
+func CheckLegacyLayout(cfg Config) Check {
+	legacy := cfg.LegacySecretsDir
+	if strings.TrimSpace(legacy) == "" {
+		legacy = "/etc/security-automation/secrets"
+	}
+	canonical := cfg.CanonicalSecretsDir
+	if strings.TrimSpace(canonical) == "" {
+		canonical = "/etc/security-automation-go/secrets"
+	}
+	_, legacyErr := os.Stat(legacy)
+	_, canonicalErr := os.Stat(canonical)
+	legacyExists := legacyErr == nil
+	canonicalExists := canonicalErr == nil
+
+	switch {
+	case !legacyExists:
+		return Check{Name: "layout", Status: Green, Reason: "No legacy config directory detected"}
+	case legacyExists && canonicalExists:
+		return Check{
+			Name:        "layout",
+			Status:      Yellow,
+			Reason:      fmt.Sprintf("Legacy secrets directory %s exists alongside canonical %s — migration in progress", legacy, canonical),
+			Remediation: "Complete secret migration to " + canonical + " and remove " + legacy,
+		}
+	default:
+		return Check{
+			Name:        "layout",
+			Status:      Red,
+			Reason:      fmt.Sprintf("Legacy secrets directory %s exists but canonical %s is absent — secrets will not load", legacy, canonical),
+			Remediation: "sudo mkdir -p " + canonical + " && sudo cp " + legacy + "/* " + canonical + "/ && sudo chmod 0600 " + canonical + "/*",
+		}
+	}
+}

@@ -81,7 +81,7 @@ by the local UI:
 Recommended operator setup:
 
 ```bash
-sudo install -d -m 755 -o root -g root /etc/security-automation
+sudo install -d -m 755 -o root -g root /etc/security-automation-go
 sudo install -d -m 755 -o root -g root /etc/security-automation-go/providers
 sudo install -d -m 700 -o root -g root /etc/security-automation-go/secrets
 sudo install -m 640 -o root -g security-automation /dev/null /etc/security-automation-go/providers/ai-providers.env

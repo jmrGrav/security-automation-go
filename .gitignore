@@ -2,6 +2,9 @@
 /bin/
 /dist/
 /cf-sync
+# deb staging dirs populated by `make package` — not source
+/packaging/deb/usr/
+/packaging/deb/lib/
 *.exe
 *.test
 *.out

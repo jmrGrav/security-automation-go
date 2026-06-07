@@ -70,6 +70,8 @@ Also present in `b4a5b17` via the same git blob object.
 - [x] **Rotate the AbuseIPDB API key** — DONE. Old key revoked at abuseipdb.com.
   New key written to `/etc/security-automation/secrets/abuseipdb_api_key`
   (format: `ABUSEIPDB_KEY=<value>`, `root:root 0600`).
+  **Note:** This is the legacy path. Operator must migrate to canonical path
+  `/etc/security-automation-go/secrets/abuseipdb_api_key` — see secret path migration in operator runbook.
   trufflehog `--only-verified` now returns `verified_secrets: 0`.
 - [ ] **Consider `git filter-repo` history scrub** — removes the inactive key from git history.
   Separate operator decision; not blocking since the key is revoked.
@@ -170,6 +172,6 @@ Per standing constraints, the following are manual operator steps:
 | trufflehog | **PASS — 0 verified** | Old key revoked 2026-06-07; inactive hash in history is not a finding |
 | .deb package | PASS | `dist/security-automation-go_1.5.0_amd64.deb` |
 | RPM package | SKIP | `rpmbuild` not available on Debian/Ubuntu hosts |
-| Key rotation | **DONE** | New key at `/etc/security-automation/secrets/abuseipdb_api_key` |
+| Key rotation | **DONE** | New key at `/etc/security-automation/secrets/abuseipdb_api_key` (legacy path — operator migration to `/etc/security-automation-go/secrets/abuseipdb_api_key` required) |
 
 **Overall: GO — V1.5 release gate fully cleared. `make verify-release` exits 0.**
