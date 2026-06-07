@@ -92,6 +92,89 @@ func TestNew_NonExistentParentDir(t *testing.T) {
 	defer l.Close()
 }
 
+func TestCheckLayout_NeitherExists(t *testing.T) {
+	got := CheckLayout("/nonexistent-legacy-xyz-test", "/nonexistent-canonical-xyz-test")
+	if got != LayoutOK {
+		t.Errorf("expected LayoutOK when neither dir exists, got %d", got)
+	}
+}
+
+func TestCheckLayout_OnlyCanonicalExists(t *testing.T) {
+	canonical := t.TempDir()
+	got := CheckLayout("/nonexistent-legacy-xyz-test", canonical)
+	if got != LayoutOK {
+		t.Errorf("expected LayoutOK when only canonical exists, got %d", got)
+	}
+}
+
+func TestCheckLayout_BothExist(t *testing.T) {
+	legacy := t.TempDir()
+	canonical := t.TempDir()
+	got := CheckLayout(legacy, canonical)
+	if got != LayoutBoth {
+		t.Errorf("expected LayoutBoth when both exist, got %d", got)
+	}
+}
+
+func TestCheckLayout_OnlyLegacyExists(t *testing.T) {
+	legacy := t.TempDir()
+	got := CheckLayout(legacy, "/nonexistent-canonical-xyz-test")
+	if got != LayoutLegacy {
+		t.Errorf("expected LayoutLegacy when only legacy exists, got %d", got)
+	}
+}
+
+func TestWriteLayoutWarning_BothExist(t *testing.T) {
+	dir := t.TempDir()
+	l, _ := New(dir)
+	defer l.Close()
+
+	l.WriteLayoutWarning(LayoutBoth, "/etc/security-automation", "/etc/security-automation-go/secrets")
+	l.Close()
+
+	data, _ := os.ReadFile(filepath.Join(dir, "startup.log"))
+	content := string(data)
+	if !strings.Contains(content, "layout_warning") {
+		t.Errorf("expected layout_warning in startup.log, got: %s", content)
+	}
+	if !strings.Contains(content, "status=BOTH_EXIST") {
+		t.Errorf("expected status=BOTH_EXIST, got: %s", content)
+	}
+}
+
+func TestWriteLayoutWarning_LegacyOnly(t *testing.T) {
+	dir := t.TempDir()
+	l, _ := New(dir)
+	defer l.Close()
+
+	l.WriteLayoutWarning(LayoutLegacy, "/etc/security-automation", "/etc/security-automation-go/secrets")
+	l.Close()
+
+	data, _ := os.ReadFile(filepath.Join(dir, "startup.log"))
+	if !strings.Contains(string(data), "status=LEGACY_ONLY") {
+		t.Errorf("expected status=LEGACY_ONLY in startup.log, got: %s", data)
+	}
+}
+
+func TestWriteLayoutWarning_OK_NoWrite(t *testing.T) {
+	dir := t.TempDir()
+	l, _ := New(dir)
+	defer l.Close()
+
+	l.WriteLayoutWarning(LayoutOK, "/etc/security-automation", "/etc/security-automation-go/secrets")
+	l.Close()
+
+	data, _ := os.ReadFile(filepath.Join(dir, "startup.log"))
+	if strings.Contains(string(data), "layout_warning") {
+		t.Errorf("expected no layout_warning for LayoutOK, got: %s", data)
+	}
+}
+
+func TestWriteLayoutWarning_NilLogger_NoPanic(t *testing.T) {
+	var l *Logger
+	l.WriteLayoutWarning(LayoutLegacy, "/etc/security-automation", "/etc/security-automation-go/secrets")
+}
+
 // TestLogger_CopyTruncate_WritesAfterTruncate proves that Logger opened with
 // O_APPEND correctly writes to position 0 after the file is truncated in place
 // by logrotate's copytruncate strategy — no SIGUSR1 or file reopen required.

@@ -141,5 +141,6 @@ Notable archive entries:
 
 All secret files: `root:root 0600`. See [SECRET_LOADING_MODEL.md](security/SECRET_LOADING_MODEL.md) for the full loading chain.
 
-> **Note:** The directory `/etc/security-automation/` (without `-go`) exists on disk as a legacy path
-> from a pre-V1.4 deployment. The code does not read from it. Operator migration required.
+> **Note:** The directory `/etc/security-automation/` (without `-go`) is a pre-V1.4 legacy path.
+> No daemon or wizard reads from it. If it exists on disk, the `layout` health check will report YELLOW (both)
+> or RED (legacy only). See [SECRET_LOADING_MODEL.md](security/SECRET_LOADING_MODEL.md) for the migration command.

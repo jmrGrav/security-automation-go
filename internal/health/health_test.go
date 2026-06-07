@@ -235,10 +235,10 @@ func TestCheckDisk_RedBelow10Pct(t *testing.T) {
 	}
 }
 
-func TestRunAll_ReturnsElevenChecks(t *testing.T) {
+func TestRunAll_ReturnsTwelveChecks(t *testing.T) {
 	results := health.RunAll(health.Config{})
-	if len(results) != 11 {
-		t.Fatalf("expected 11 checks, got %d", len(results))
+	if len(results) != 12 {
+		t.Fatalf("expected 12 checks, got %d", len(results))
 	}
 }
 
@@ -248,5 +248,49 @@ func TestRunAll_AllHaveNames(t *testing.T) {
 		if c.Name == "" {
 			t.Errorf("check[%d] has empty name", i)
 		}
+	}
+}
+
+func TestCheckLegacyLayout_NeitherExists(t *testing.T) {
+	c := health.CheckLegacyLayout(health.Config{
+		LegacySecretsDir:    "/nonexistent-legacy-xyz-test",
+		CanonicalSecretsDir: "/nonexistent-canonical-xyz-test",
+	})
+	if c.Status != health.Green {
+		t.Errorf("expected GREEN when neither dir exists, got %s: %s", c.Status, c.Reason)
+	}
+}
+
+func TestCheckLegacyLayout_OnlyCanonicalExists(t *testing.T) {
+	canonical := t.TempDir()
+	c := health.CheckLegacyLayout(health.Config{
+		LegacySecretsDir:    "/nonexistent-legacy-xyz-test",
+		CanonicalSecretsDir: canonical,
+	})
+	if c.Status != health.Green {
+		t.Errorf("expected GREEN when only canonical exists, got %s: %s", c.Status, c.Reason)
+	}
+}
+
+func TestCheckLegacyLayout_BothExist(t *testing.T) {
+	legacy := t.TempDir()
+	canonical := t.TempDir()
+	c := health.CheckLegacyLayout(health.Config{
+		LegacySecretsDir:    legacy,
+		CanonicalSecretsDir: canonical,
+	})
+	if c.Status != health.Yellow {
+		t.Errorf("expected YELLOW when both dirs exist, got %s: %s", c.Status, c.Reason)
+	}
+}
+
+func TestCheckLegacyLayout_OnlyLegacyExists(t *testing.T) {
+	legacy := t.TempDir()
+	c := health.CheckLegacyLayout(health.Config{
+		LegacySecretsDir:    legacy,
+		CanonicalSecretsDir: "/nonexistent-canonical-xyz-test",
+	})
+	if c.Status != health.Red {
+		t.Errorf("expected RED when only legacy exists, got %s: %s", c.Status, c.Reason)
 	}
 }
