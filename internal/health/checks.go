@@ -129,7 +129,7 @@ func CheckNginx(cfg Config) Check {
 			Name:        "nginx",
 			Status:      Yellow,
 			Reason:      "Nginx log directory configured but missing: " + cfg.NginxLogDir,
-			Remediation: "Install nginx or correct crowdsec.nginx_log_dir",
+			Remediation: "Install nginx or correct nginx_log_dir in configuration",
 		}
 	}
 	return Check{Name: "nginx", Status: Green, Reason: "Nginx log directory present"}
@@ -140,6 +140,9 @@ var diskStatfs = func(path string) (total, free uint64, err error) {
 	var st syscall.Statfs_t
 	if err := syscall.Statfs(path, &st); err != nil {
 		return 0, 0, err
+	}
+	if st.Bsize <= 0 {
+		return 0, 0, fmt.Errorf("invalid block size %d", st.Bsize)
 	}
 	bsize := uint64(st.Bsize)
 	return st.Blocks * bsize, st.Bavail * bsize, nil
