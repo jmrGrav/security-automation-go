@@ -183,3 +183,44 @@ func TestDetectSystemd_NoSystemctl(t *testing.T) {
 		t.Error("expected not healthy when systemctl missing")
 	}
 }
+
+func TestDetectOpenResty_NotConfigured(t *testing.T) {
+	origBin := binaryInstalled
+	origFile := fileExists
+	origSvc := systemdServiceActive
+	binaryInstalled = func(string) bool { return false }
+	fileExists = func(string) bool { return false }
+	systemdServiceActive = func(string) bool { return false }
+	defer func() {
+		binaryInstalled = origBin
+		fileExists = origFile
+		systemdServiceActive = origSvc
+	}()
+
+	r := DetectOpenResty(Config{})
+	if r.Configured {
+		t.Error("expected not configured when OpenRestyEventsFile is empty")
+	}
+	if r.Healthy {
+		t.Error("expected not healthy when not configured")
+	}
+}
+
+func TestDetectNginx_ConfiguredLogDirExists(t *testing.T) {
+	origFile := fileExists
+	origSvc := systemdServiceActive
+	fileExists = func(string) bool { return true }
+	systemdServiceActive = func(string) bool { return false }
+	defer func() {
+		fileExists = origFile
+		systemdServiceActive = origSvc
+	}()
+
+	r := DetectNginx(Config{NginxLogDir: "/var/log/nginx"})
+	if !r.Configured {
+		t.Error("expected configured when NginxLogDir is set")
+	}
+	if !r.Healthy {
+		t.Error("expected healthy when log dir exists (nginx healthy does not require binary)")
+	}
+}
