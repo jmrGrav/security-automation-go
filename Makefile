@@ -42,8 +42,8 @@ build-linux-arm64:
 	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 $(GO) build $(GOFLAGS) $(BUILD_FLAGS) -o bin/linux-arm64/security-automation-mcp ./cmd/security-automation-mcp
 
 # Full pre-release gate: gofmt, vet, test, race, build, govulncheck, gitleaks, trufflehog
-# Requires: govulncheck, gitleaks, trufflehog — see RELEASE_CHECKLIST.md for install instructions
-# govulncheck findings are documented NO-GO (see RELEASE_CHECKLIST.md); all steps always run.
+# Requires: govulncheck, gitleaks, trufflehog — see docs/releases/RELEASE_CHECKLIST.md for install instructions
+# govulncheck findings are documented NO-GO (see docs/releases/RELEASE_CHECKLIST.md); all steps always run.
 verify-release:
 	@FAIL=0; \
 	echo "==> [1/7] gofmt check"; \
@@ -62,7 +62,7 @@ verify-release:
 	if [ ! -x "$$GOVULNCHECK" ]; then \
 		echo "ERROR: govulncheck not found. Install: go install golang.org/x/vuln/cmd/govulncheck@latest"; exit 1; \
 	fi; \
-	"$$GOVULNCHECK" ./... || { FAIL=1; echo "WARN: govulncheck FINDINGS — NO-GO for production. See RELEASE_CHECKLIST.md."; }; \
+	"$$GOVULNCHECK" ./... || { FAIL=1; echo "WARN: govulncheck FINDINGS — NO-GO for production. See docs/releases/RELEASE_CHECKLIST.md."; }; \
 	echo "==> [7a/7] secret scan — gitleaks"; \
 	GITLEAKS=$$(command -v gitleaks 2>/dev/null || echo "$(GOPATH_BIN)/gitleaks"); \
 	if [ ! -x "$$GITLEAKS" ]; then \
@@ -71,7 +71,7 @@ verify-release:
 	"$$GITLEAKS" detect --source . --config .gitleaks.toml || exit 1; \
 	echo "==> [7b/7] secret scan — trufflehog (informational; known pre-existing finding documented)"; \
 	if command -v trufflehog >/dev/null 2>&1; then \
-		echo "NOTE: trufflehog may report a pre-existing AbuseIPDB finding. See RELEASE_CHECKLIST.md."; \
+		echo "NOTE: trufflehog may report a pre-existing AbuseIPDB finding. See docs/releases/RELEASE_CHECKLIST.md."; \
 		trufflehog git file://. --only-verified || true; \
 	else \
 		echo "WARNING: trufflehog not found — scan skipped"; \
@@ -80,10 +80,10 @@ verify-release:
 	if [ $$FAIL -ne 0 ]; then \
 		echo "ERROR: verify-release FAILED — govulncheck found vulnerabilities (see above)."; \
 		echo "       Update OTEL to v1.40.0+/v1.43.0+ and OPA to v0.68.0+ to clear findings."; \
-		echo "       See RELEASE_CHECKLIST.md for full decision record."; \
+		echo "       See docs/releases/RELEASE_CHECKLIST.md for full decision record."; \
 		exit 1; \
 	fi; \
-	echo "==> verify-release COMPLETE — all gates passed. See RELEASE_CHECKLIST.md for GO/NO-GO."
+	echo "==> verify-release COMPLETE — all gates passed. See docs/releases/RELEASE_CHECKLIST.md for GO/NO-GO."
 
 # Build .deb package for linux/amd64
 # RPM: requires rpmbuild (rpm-build package on Fedora/RHEL/SUSE) — skipped if not present

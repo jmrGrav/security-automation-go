@@ -43,7 +43,7 @@ jobs:
 
       - name: govulncheck
         # continue-on-error: known findings in OTEL v1.24.0 and OPA v0.64.1 (pre-existing, deferred).
-        # All stdlib findings cleared by go1.25.11. Remaining: OTEL + OPA. See RELEASE_CHECKLIST.md.
+        # All stdlib findings cleared by go1.25.11. Remaining: OTEL + OPA. See docs/releases/RELEASE_CHECKLIST.md.
         continue-on-error: true
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@latest
