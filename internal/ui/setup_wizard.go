@@ -3,6 +3,7 @@ package ui
 import (
 	"context"
 	"fmt"
+	"html"
 	"net"
 	"net/http"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"github.com/jm/security-automation-go/internal/cloudflare/discovery"
 	"github.com/jm/security-automation-go/internal/cloudflare/transport"
 	"github.com/jm/security-automation-go/internal/config"
+	"github.com/jm/security-automation-go/internal/detect"
 	"github.com/jm/security-automation-go/internal/httpclient"
 	uiauth "github.com/jm/security-automation-go/internal/ui/auth"
 )
@@ -655,6 +657,19 @@ func (s *Server) handleSetupStep8(w http.ResponseWriter, r *http.Request) {
 <a href="/setup/step/9"><button>Continue to production mode</button></a>
 <a href="/setup/complete" style="margin-left:.5rem"><button class="secondary">Finish without enabling production mode</button></a>
 `, uiAddr, s.cfg.StateDir, s.cfg.StateDir, cfPath)
+	results := detect.RunAll(s.buildDetectConfig())
+	var sb strings.Builder
+	sb.WriteString(`<h3>Detected Environment</h3><div class="kv">`)
+	for _, d := range results {
+		healthy := "&#x2717;"
+		if d.Healthy {
+			healthy = "&#x2713;"
+		}
+		fmt.Fprintf(&sb, `<div class="row"><span>%s</span><span>%s installed=%v configured=%v</span></div>`,
+			html.EscapeString(d.Name), healthy, d.Installed, d.Configured)
+	}
+	sb.WriteString(`</div>`)
+	body += sb.String()
 	renderSetupPage(w, 8, "Runtime summary", body, "")
 }
 
