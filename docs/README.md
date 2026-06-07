@@ -45,6 +45,7 @@ Entry point for operators and contributors. Find any document in under 2 minutes
 |----------|---------------|
 | [SECURITY_MODEL.md](SECURITY_MODEL.md) | Overall security model |
 | [SECRET_LOADING_MODEL.md](security/SECRET_LOADING_MODEL.md) | **Canonical secret paths and loading chain** |
+| [SECRET_LOADING_AUDIT.md](security/SECRET_LOADING_AUDIT.md) | **Technical audit — every secret traced from write to consumer** |
 | [SECURITY.md](security/SECURITY.md) | Security policy and disclosures |
 | [TRUSTED_NETWORKS.md](security/TRUSTED_NETWORKS.md) | Protected ASN/CIDR classification |
 | [UI_SECURITY.md](security/UI_SECURITY.md) | UI authentication security |
