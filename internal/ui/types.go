@@ -44,9 +44,19 @@ type StatusItem struct {
 	Detail string
 }
 
+// EnvironmentWidget summarizes detection + health for the dashboard.
+type EnvironmentWidget struct {
+	Green   int
+	Yellow  int
+	Red     int
+	Healthy int // detector healthy count
+	Total   int // total detectors
+}
+
 type DashboardConsoleView struct {
 	Statuses    []StatusItem
 	AIProviders []AIProviderDashboardView
+	Environment EnvironmentWidget // new
 }
 
 type AIProviderDashboardView struct {
