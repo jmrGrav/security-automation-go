@@ -96,7 +96,7 @@ button.secondary{background:#e8edf6;color:#10243e}
 <h2>%s</h2>
 `, step, title, progressPct, step, title)
 	if errorMsg != "" {
-		fmt.Fprintf(w, `<div class="error">%s</div>`, errorMsg)
+		fmt.Fprintf(w, `<div class="error">%s</div>`, html.EscapeString(errorMsg))
 	}
 	fmt.Fprint(w, bodyHTML)
 	fmt.Fprint(w, `</main></body></html>`)
@@ -253,7 +253,7 @@ func (s *Server) handleSetupStep3(w http.ResponseWriter, r *http.Request) {
   <input id="port" name="port" type="number" min="1024" max="65535" value="%s">
   <button type="submit">Confirm &amp; continue</button>
   <button type="submit" name="skip" value="1" class="secondary">Skip (keep default)</button>
-</form>`, currentAddr, csrfTok, currentHost, currentPort)
+</form>`, html.EscapeString(currentAddr), csrfTok, html.EscapeString(currentHost), html.EscapeString(currentPort))
 	renderSetupPage(w, 3, "UI bind address and port", body, "")
 }
 
@@ -290,7 +290,7 @@ func (s *Server) handleSetupStep3Post(w http.ResponseWriter, r *http.Request) {
 	if addr != s.cfg.UI.Addr {
 		body := fmt.Sprintf(`<div class="ok">Port/address saved. The change takes effect after a service restart.</div>
 <p>Configured address: <code>%s</code></p>
-<a href="/setup/step/4"><button>Continue</button></a>`, addr)
+<a href="/setup/step/4"><button>Continue</button></a>`, html.EscapeString(addr))
 		renderSetupPage(w, 3, "UI bind address and port", body, "")
 		return
 	}

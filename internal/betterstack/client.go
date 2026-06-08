@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -37,6 +38,10 @@ func (c *Client) Send(ctx context.Context, event Event) error {
 		return nil
 	}
 
+	const maxPayloadFields = 256
+	if len(event.Payload) > maxPayloadFields {
+		return apperr.Wrap(op, fmt.Errorf("event payload exceeds maximum field count (%d)", maxPayloadFields))
+	}
 	payload := make(map[string]any, len(event.Payload)+4)
 	for k, v := range event.Payload {
 		payload[k] = v
