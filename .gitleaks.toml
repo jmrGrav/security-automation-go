@@ -49,40 +49,6 @@ paths = [
   '''docs/security/SECRET_LOADING_AUDIT\.md$''',
 ]
 
-# ---------------------------------------------------------------------------
-# KNOWN PRE-EXISTING FINDING — EXPLICIT DOCUMENTED DECISION
-#
-# An AbuseIPDB API key was committed to git history before V1.4 and exists
-# in git object 2021b218e13e9f1dfa502035a81893ac4b35c280.
-#
-# This is NOT a silent suppression. This is an explicit documented decision:
-#
-#   Finding:    AbuseIPDB API key in git history
-#   Introduced: Commit 4649a1d ("docs: production cutover runbook with capability audit")
-#               Also in b4a5b17 (same key) and 2aa3646 (report doc embedded the raw
-#               key value; current version of the report has been redacted)
-#   Git object: .git/objects/20/21b218e13e9f1dfa502035a81893ac4b35c280
-#   Status:     Pre-existing — not introduced by V1.4 or V1.5 work
-#   Verified:   trufflehog --only-verified confirmed the key is/was live
-#
-#   Decision (V1.5 Release Validation Pipeline):
-#     - Key rotation is an OPERATOR ACTION (per standing constraints, no
-#       automatic secret rotation). Operator must rotate the AbuseIPDB key.
-#     - Git history rewrite (git filter-repo) was NOT performed in this
-#       mission. It is a separate operator decision requiring explicit request.
-#     - This allowlist entry is the documented exception that allows the
-#       release pipeline to proceed. It does NOT mean the finding is resolved.
-#
-#   Required operator action: rotate AbuseIPDB key before production use.
-#   See docs/releases/RELEASE_CHECKLIST.md — Section: AbuseIPDB Pre-Existing Finding.
-#
-# GO/NO-GO: CONDITIONAL GO — pipeline passes with this documented exception.
-#           Resolution: key rotation (required) + optional history scrub.
-# ---------------------------------------------------------------------------
-[[allowlists]]
-description = "KNOWN PRE-EXISTING FINDING: AbuseIPDB key in git history (commits b4a5b17, 4649a1d, 2aa3646). See docs/releases/RELEASE_CHECKLIST.md. Operator must rotate key."
-commits = [
-  "b4a5b17",
-  "4649a1d",
-  "2aa3646",
-]
+# History purge completed 2026-06-08: AbuseIPDB key and Cloudflare token
+# removed from git history via git-filter-repo. Commit SHAs rewritten.
+# No allowlist entries for old commits needed — history is clean.
