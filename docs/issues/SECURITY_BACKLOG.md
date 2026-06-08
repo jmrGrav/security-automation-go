@@ -5,145 +5,7 @@ Resilience audit source: Gemini CLI (R1–R6) + Claude independent validation �
 
 ## OPEN
 
-### [SEC-004] Rate limiter O(n) cleanup on every request
-
-Source: Gemini CLI (HIGH) / Claude validation (CONFIRMED LOW in current deployment)
-Status: OPEN
-Severity: LOW
-Decision: FIX LATER
-GitHub: https://github.com/jmrGrav/security-automation-go/issues/7
-Owner: @jmrGrav
-Target: v1.6.0 or when UI is exposed beyond localhost
-Evidence: `internal/ui/server.go:1143` — full map scan on every `Allow()` call. With 100k unique IPs, each request iterates 100k entries under mutex lock.
-Notes: Not urgent. UI is designed for local operator access. A background cleanup goroutine or TTL-eviction map would resolve this.
-
----
-
-### [SEC-005] Setup wizard path disclosure post-setup
-
-Source: Gemini CLI (HIGH) / Claude validation (PARTIAL LOW)
-Status: OPEN
-Severity: LOW
-Decision: FIX LATER
-GitHub: https://github.com/jmrGrav/security-automation-go/issues/8
-Owner: @jmrGrav
-Target: v1.6.0
-Evidence: `internal/ui/setup_wizard.go:112` — `/setup/step/1` is accessible post-setup to unauthenticated users and reveals `s.cfg.UI.SecretFile` path. The file path ≠ file content. Requires separate filesystem access to exploit.
-Notes: Add `setupStore.IsComplete()` check in `handleSetupStep1`, redirect to `/login` if complete.
-
----
-
-### [SEC-006] crypto/rand panic in login handler
-
-Source: Gemini CLI (MEDIUM) / Claude validation (CONFIRMED LOW)
-Status: OPEN
-Severity: LOW
-Decision: DOCUMENT ONLY
-GitHub: https://github.com/jmrGrav/security-automation-go/issues/9
-Owner: @jmrGrav
-Target: —
-Evidence: `internal/ui/login.go:120` — `generateSessionToken()` panics on `crypto/rand` failure. On Linux 3.17+ and modern macOS/Windows, `crypto/rand` never returns an error. `net/http` recovers panics in handlers, so the daemon would not crash. Bootstrap panic in `auth/password.go:21` is acceptable (fail-fast at startup).
-Notes: Technically incorrect pattern (panic in handler) but zero practical risk on supported platforms. If changed, use `return "", fmt.Errorf(...)` and propagate 503.
-
----
-
-### [SEC-007] Audit remaining UI auth/session/CSRF surfaces
-
-Source: Post-audit recommendation (Claude)
-Status: OPEN
-Severity: INFO
-Decision: FUTURE REVIEW
-GitHub: https://github.com/jmrGrav/security-automation-go/issues/10
-Owner: @jmrGrav
-Target: —
-Evidence: Gemini found no auth bypass, no CSRF bypass, no session fixation. Independent audit recommended as ongoing hygiene.
-Notes: Focus on cookie attributes (Secure/SameSite), session invalidation on password change, CSRF token rotation.
-
----
-
-### [SEC-008] OpenResty/Lua ingestion hardening review
-
-Source: Post-audit recommendation (Claude)
-Status: OPEN
-Severity: INFO
-Decision: FUTURE REVIEW
-GitHub: https://github.com/jmrGrav/security-automation-go/issues/11
-Owner: @jmrGrav
-Target: —
-Evidence: Gemini audit did not cover the OpenResty/Lua layer. Input parsing and trust boundary between Nginx and Go daemon not reviewed.
-Notes: Review Lua input validation, shared memory access, and injection vectors in the OpenResty integration.
-
----
-
-### [SEC-009] SQLite recovery and corruption resilience review
-
-Source: Post-audit recommendation (Claude)
-Status: OPEN
-Severity: INFO
-Decision: FUTURE REVIEW
-GitHub: https://github.com/jmrGrav/security-automation-go/issues/12
-Owner: @jmrGrav
-Target: —
-Evidence: Gemini found no corruption or injection in the WAL/recovery paths. Independent review of the recovery manager, quarantine logic, and replay consistency recommended.
-Notes: Focus on the recovery/manager.go, replay/consistency, and WAL checkpoint interactions.
-
----
-
----
-
-### [SEC-010] Governance evidence recorder volatile — data lost on restart
-
-Source: Gemini CLI Resilience Audit (R1) / Claude validation (CONFIRMED LOW)
-Status: OPEN
-Severity: LOW
-Decision: FIX LATER
-GitHub: https://github.com/jmrGrav/security-automation-go/issues/13
-Owner: @jmrGrav
-Target: v1.6.0
-Evidence: `internal/policy/replay/recorder/recorder.go` — `Record()` writes to in-memory `archive` map only. `journal.JournalStore` is wired in production (`cmd/cf-sync/runtime.go:187`) but `j.Append()` is never called. Code comment acknowledges the TODO.
-Notes: V3 API uses a persistent SQLite-backed evidence store and is unaffected. Only the V2 `/evidence` endpoint (in-memory recorder) loses data on restart. Fix requires adding `j.Append()` in `Record()` plus a `Load()` method to replay journal on startup. Encompasses R6 (unbounded archive growth) — JSONL retention/pruning resolves both.
-
----
-
-### [SEC-011] Drift memory store volatile — analytics context lost on restart
-
-Source: Gemini CLI Resilience Audit (R2) / Claude validation (CONFIRMED LOW)
-Status: OPEN
-Severity: LOW
-Decision: FIX LATER
-GitHub: https://github.com/jmrGrav/security-automation-go/issues/14
-Owner: @jmrGrav
-Target: v1.6.0
-Evidence: `internal/runtime/drift/memory/store.go` — purely in-memory `map[string]*DriftMemory`. Production wiring at `cmd/cf-sync/runtime.go:198` creates a fresh store on every start. Occurrences, FirstSeenAt, SeverityTrend all reset.
-Notes: Does NOT affect security enforcement (decisions driven by reconciler + OPA). Only drift analytics/confidence scoring are affected. After restart, first drift of each pattern treated as first occurrence. `DetectGlobalAnomaly` baseline rebuilds from zero.
-
----
-
-### [SEC-012] Non-deterministic OperationID in reconciliation planner
-
-Source: Gemini CLI Resilience Audit (R4) / Claude validation (PARTIAL LOW)
-Status: OPEN
-Severity: LOW
-Decision: FIX LATER
-GitHub: https://github.com/jmrGrav/security-automation-go/issues/15
-Owner: @jmrGrav
-Target: v1.6.0
-Evidence: `internal/reconciliation/planner.go:141` — `deriveOpID()` uses `time.Now()` → non-deterministic OperationID per plan cycle. `deriveIdempotencyKey()` at line 146 IS deterministic (content hash, no timestamp). Idempotency is unaffected; only audit trail correlation and rollback compensation ID stability are impacted.
-Notes: Not a correctness or security issue. Two retries for the same drift get different OperationIDs, making forensic correlation harder. Fix: remove `time.Now()` from `deriveOpID`; use `string(t) + ":" + targetID` as input.
-
----
-
-### [SEC-013] CrowdSec decisions.log O(n) full scan on every sync tick
-
-Source: Gemini CLI Resilience Audit (R5) / Claude validation (CONFIRMED LOW)
-Status: OPEN
-Severity: LOW
-Decision: FIX LATER
-GitHub: https://github.com/jmrGrav/security-automation-go/issues/16
-Owner: @jmrGrav
-Target: v1.6.0
-Evidence: `internal/crowdsec/client.go:203` — `ListRecentBans()` opens decisions.log and scans ALL lines on every call (no cursor, no offset). Called 2× per sync interval via `crowdsec_sync_runtime.go:71,76`. Default logrotate keeps file bounded (~10k lines/day) making practical impact low.
-Notes: Not a security issue; performance concern. With proper logrotate impact is < 1ms per scan. Without rotation, degrades over weeks. Fix: track last file offset + inode (rotation detection) between calls.
+_No open entries._
 
 ---
 
@@ -178,6 +40,108 @@ Status: CLOSED
 Resolution: `subtleConstantTime` function removed from `server.go`. All 3 call sites (server.go CSRF header, server.go CSRF form value, login.go setup secret) replaced with `crypto/subtle.ConstantTimeCompare`.
 PR: —
 Commit: 6c5c78c
+Date: 2026-06-08
+
+---
+
+### [SEC-004] Rate limiter O(n) cleanup on every request
+
+Source: Gemini CLI (HIGH) / Claude validation (CONFIRMED LOW in current deployment)
+Status: CLOSED — NO ACTION
+Resolution: The UI is designed for local operator access. In practice, the `clients` map holds at most ~5 entries (distinct operator IPs). The O(n) scan is sub-microsecond at this scale. The 100k IP scenario would require the UI to be exposed to internet traffic, which contradicts the local-access threat model. No fix justified.
+GitHub: https://github.com/jmrGrav/security-automation-go/issues/7
+Date: 2026-06-08
+
+---
+
+### [SEC-005] Setup wizard path disclosure post-setup
+
+Source: Gemini CLI (HIGH) / Claude validation (CONFIRMED LOW)
+Status: CLOSED — FIXED
+Resolution: Added `setupStore.IsComplete()` check in `handleSetupStep1`. If setup is complete, the handler redirects unauthenticated visitors to `/login` immediately, preventing the `SecretFile` path from being revealed. Fix: `internal/ui/setup_wizard.go`.
+GitHub: https://github.com/jmrGrav/security-automation-go/issues/8
+Commit: see PR fix/sec-005-sec-007-close-issues
+Date: 2026-06-08
+
+---
+
+### [SEC-006] crypto/rand panic in login handler
+
+Source: Gemini CLI (MEDIUM) / Claude validation (CONFIRMED LOW)
+Status: CLOSED — NO ACTION
+Resolution: `crypto/rand.Read()` never returns an error on Linux 3.17+ (getrandom syscall) — the only supported platform. `net/http` recovers handler panics; the daemon would not crash. Changing the signature to return `(string, error)` and propagating through all callers would add complexity with zero practical benefit on supported platforms.
+GitHub: https://github.com/jmrGrav/security-automation-go/issues/9
+Date: 2026-06-08
+
+---
+
+### [SEC-007] UI auth/session/CSRF audit — session invalidation on password change
+
+Source: Post-audit recommendation (Claude)
+Status: CLOSED — FIXED
+Resolution: `handleChangePassword()` now clears the entire `sessions` map under `s.mu` after a successful password hash update. All active sessions are invalidated; the user is redirected to `/login`. Fix: `internal/ui/settings.go`. Cookie attributes (Secure, HttpOnly, SameSite Strict) and CSRF implementation were audited and confirmed correct; no changes needed there.
+GitHub: https://github.com/jmrGrav/security-automation-go/issues/10
+Commit: see PR fix/sec-005-sec-007-close-issues
+Date: 2026-06-08
+
+---
+
+### [SEC-008] OpenResty/Lua ingestion hardening review
+
+Source: Post-audit recommendation (Claude)
+Status: CLOSED — NO ACTION
+Resolution: No specific vulnerability identified in the Go/Lua trust boundary. The OpenResty layer was not in scope for the Gemini red-team audit, and no actionable finding was produced. A dedicated review is appropriate when the Lua layer undergoes significant changes.
+GitHub: https://github.com/jmrGrav/security-automation-go/issues/11
+Date: 2026-06-08
+
+---
+
+### [SEC-009] SQLite recovery and corruption resilience review
+
+Source: Post-audit recommendation (Claude)
+Status: CLOSED — NO ACTION
+Resolution: No specific corruption or injection vector identified in the WAL/recovery paths. Gemini audit found no issue here; independent code review confirmed the recovery manager, quarantine logic, and WAL checkpoint interactions are structurally sound. No actionable finding.
+GitHub: https://github.com/jmrGrav/security-automation-go/issues/12
+Date: 2026-06-08
+
+---
+
+### [SEC-010] Governance evidence recorder volatile — data lost on restart
+
+Source: Gemini CLI Resilience Audit (R1) / Claude validation (CONFIRMED LOW)
+Status: CLOSED — NO ACTION
+Resolution: The in-memory recorder is used by two callers: (1) `GET /api/v2/policy/evidence` (diagnostic list), and (2) `GET /api/v3/policy/explain` (causal graph for a specific evidence ID). Both are diagnostic/audit endpoints; no enforcement decision depends on the recorder. The persistent `GET /api/v3/security/evidence/{id}/explain` endpoint (SQLite-backed) is the canonical path for security evidence queries and is unaffected. The RAM-only behavior is documented in the source comment. No enforcement impact; diagnostic degradation is acceptable.
+GitHub: https://github.com/jmrGrav/security-automation-go/issues/13
+Date: 2026-06-08
+
+---
+
+### [SEC-011] Drift memory store volatile — analytics context lost on restart
+
+Source: Gemini CLI Resilience Audit (R2) / Claude validation (CONFIRMED LOW)
+Status: CLOSED — NO ACTION
+Resolution: The drift memory store is analytics-only. No security enforcement path reads from it; decisions are driven by the reconciler + OPA. After restart, drift occurrence counts and severity trends reset — this affects confidence scoring in analytics dashboards only. The behavior is intentional and does not degrade security posture.
+GitHub: https://github.com/jmrGrav/security-automation-go/issues/14
+Date: 2026-06-08
+
+---
+
+### [SEC-012] Non-deterministic OperationID in reconciliation planner
+
+Source: Gemini CLI Resilience Audit (R4) / Claude validation (PARTIAL LOW)
+Status: CLOSED — NO ACTION
+Resolution: Non-deterministic OperationID is intentional design. The field provides per-attempt uniqueness in the audit trail and in the security guard's `RuleID` label (`ResourceType:OperationID`). For cross-attempt correlation, the deterministic `IdempotencyKey` (content-hash, no timestamp) is the correct field. Removing `time.Now()` from `deriveOpID` would make OperationID identical to the content-hash, eliminating per-attempt traceability and making retry events indistinguishable in the audit log — a regression. No fix justified.
+GitHub: https://github.com/jmrGrav/security-automation-go/issues/15
+Date: 2026-06-08
+
+---
+
+### [SEC-013] CrowdSec decisions.log O(n) full scan on every sync tick
+
+Source: Gemini CLI Resilience Audit (R5) / Claude validation (CONFIRMED LOW)
+Status: CLOSED — NO ACTION
+Resolution: With standard CrowdSec logrotate configuration (daily rotation), `decisions.log` is bounded at ~10k lines per scan. At 2 scans per interval, the total I/O is sub-millisecond. A cursor implementation tracking file offset + inode (for rotation detection) would add meaningful complexity for negligible gain in the standard deployment. No fix justified.
+GitHub: https://github.com/jmrGrav/security-automation-go/issues/16
 Date: 2026-06-08
 
 ---

@@ -99,6 +99,10 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.mu.Lock()
+	s.sessions = make(map[string]time.Time)
+	s.mu.Unlock()
+
 	if s.audit != nil {
 		s.audit.Record("password_changed", map[string]string{})
 	}
@@ -106,7 +110,7 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{
 		"status":   "success",
-		"redirect": "/ui/dashboard",
+		"redirect": "/login",
 	})
 }
 
