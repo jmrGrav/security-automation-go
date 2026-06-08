@@ -2,6 +2,34 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v1.5.1] — 2026-06-08
+
+### Summary
+
+Security patch release. Two low-severity UI findings fixed following the June 2026 Gemini red-team audit. All remaining audit findings closed with technical justification. No API or behavioral changes.
+
+### Security
+
+- **SEC-005 fixed** — `handleSetupStep1` now redirects to `/login` when setup is complete, preventing the `SecretFile` path from being revealed to unauthenticated visitors post-setup (`internal/ui/setup_wizard.go`).
+- **SEC-007 fixed** — `handleChangePassword` now invalidates all active sessions immediately after a successful password update. Users must re-authenticate; the response redirects to `/login` (`internal/ui/settings.go`).
+
+### Closed (no action)
+
+Following independent code revalidation, the remaining 8 open audit findings are closed:
+
+| ID | Finding | Rationale |
+|----|---------|-----------|
+| SEC-004 | Rate limiter O(n) | Local UI; ≤5 clients in practice; sub-µs scan |
+| SEC-006 | crypto/rand panic | Never fails on Linux 3.17+; net/http recovers panics |
+| SEC-008 | OpenResty/Lua review | No actionable finding; process recommendation only |
+| SEC-009 | SQLite recovery review | No actionable finding; process recommendation only |
+| SEC-010 | Evidence recorder volatile | Diagnostic only; enforcement unaffected; V3 SQLite path is the system of record |
+| SEC-011 | Drift memory volatile | Analytics only; enforcement unaffected |
+| SEC-012 | Non-deterministic OperationID | Intentional — per-attempt uniqueness; `IdempotencyKey` handles correlation |
+| SEC-013 | decisions.log O(n) scan | Bounded at ~10k lines/day with standard logrotate; sub-ms |
+
+---
+
 ## [v1.5.0] — 2026-06-08
 
 ### Summary
