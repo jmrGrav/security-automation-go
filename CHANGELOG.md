@@ -2,6 +2,28 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v1.5.3] — 2026-06-08
+
+### Summary
+
+Hardening sprint. Brooks Phase 2 review findings addressed. VACUUM INTO SQL construction hardened (parameterized query), API/auth boundary test coverage added, smoke test suite introduced. No API or behavioral changes.
+
+### Security
+
+- **VACUUM INTO hardened** — `ExportHotSnapshot` now uses a parameterized query (`VACUUM INTO ?`) instead of string concatenation. Path validation extended to reject semicolons, null bytes, and newlines in addition to the existing absolute-path, traversal, and quote checks. Fix: `internal/storage/sqlite/db.go`.
+
+### Testing
+
+- **API/auth boundary coverage** — Added targeted tests for `internal/api/auth`, `internal/api/middleware`, `internal/api/handlers`, and `internal/api/handlers/v2`. Coverage: auth=100%, handlers=90.5%, v2=92.6%, middleware=84.4%. Tests verify: auth required, unauthorized rejected, scope enforcement, malformed JSON → 400, state machine transitions via API.
+- **Smoke test suite** — Added `internal/ui/smoke_test.go` (`//go:build smoke`). Scenarios: server boots, anonymous access rejected, wizard accessible before setup, login succeeds, wrong password rejected, authenticated dashboard/health reachable, mutation endpoint requires CSRF. Run with `go test -tags=smoke ./internal/ui/...`.
+
+### Documentation
+
+- `docs/issues/SECURITY_BACKLOG.md`: updated with hardening sprint entries.
+- `docs/COVERAGE_POLICY.md`: added coverage targets and guidance.
+
+---
+
 ## [v1.5.2] — 2026-06-08
 
 ### Summary
