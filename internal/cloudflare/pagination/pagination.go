@@ -16,6 +16,7 @@ type Paginator[T any] func(ctx context.Context, page int) ([]T, *models.ResultIn
 func TraverseAll[T any](ctx context.Context, perPage int, fetch Paginator[T]) ([]T, error) {
 	const op = "cloudflare.pagination.TraverseAll"
 	var all []T
+	var lastInfo *models.ResultInfo
 
 	currentPage := 1
 	for {
@@ -25,6 +26,7 @@ func TraverseAll[T any](ctx context.Context, perPage int, fetch Paginator[T]) ([
 		}
 
 		all = append(all, items...)
+		lastInfo = info
 
 		if info == nil || info.TotalPages == 0 || currentPage >= info.TotalPages {
 			break
@@ -36,6 +38,12 @@ func TraverseAll[T any](ctx context.Context, perPage int, fetch Paginator[T]) ([
 		}
 
 		currentPage++
+	}
+
+	// Defensive check: detect partial delivery (fewer items than API reported).
+	// Does not catch zeroed-metadata false-empty (TotalCount=0 when rules exist).
+	if lastInfo != nil && lastInfo.TotalCount > 0 && len(all) < lastInfo.TotalCount {
+		return nil, apperr.Newf(op, "pagination incomplete: received %d items, API reported %d", len(all), lastInfo.TotalCount)
 	}
 
 	return all, nil
