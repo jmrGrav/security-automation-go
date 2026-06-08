@@ -115,3 +115,12 @@ cat /var/lib/security-automation-go/runtime/initial-admin-password
 
 The file contains the initial one-time bootstrap password used during first
 boot.
+
+## UI routes
+
+- `/` Dashboard
+- `/providers` Provider Management
+- `/forensic` Forensic lookup
+- `/audit` Audit Trail
+- `/intelligence` Security Intelligence (read-only)
+- `/trusted-networks` Trusted Networks Explorer (read-only)

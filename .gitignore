@@ -45,3 +45,5 @@ mem.out
 # Go workspace
 go.work
 go.work.sum
+.codex/
+.claude/worktrees/

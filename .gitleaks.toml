@@ -43,12 +43,5 @@ paths = [
   '''deployments/.*\.timer$''',
 ]
 
-[[allowlists]]
-description = "SECRET_LOADING_AUDIT.md — pedagogical examples of key format (e.g. test_api_key_value_abc); not real credentials"
-paths = [
-  '''docs/security/SECRET_LOADING_AUDIT\.md$''',
-]
-
-# History purge completed 2026-06-08: AbuseIPDB key and Cloudflare token
-# removed from git history via git-filter-repo. Commit SHAs rewritten.
-# No allowlist entries for old commits needed — history is clean.
+# History purge completed 2026-06-08: secrets removed via git-filter-repo.
+# SECRET_LOADING_AUDIT.md deleted 2026-06-08: aggressive docs cleanup.
