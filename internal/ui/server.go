@@ -1053,7 +1053,6 @@ func normalizeAIProviderPreference(value string) string {
 	}
 }
 
-
 func (s *Server) forcePasswordChangeMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Allow access to login and password change endpoints
