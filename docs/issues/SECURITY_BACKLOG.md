@@ -3,6 +3,7 @@
 Audit source: Gemini CLI red-team + Claude independent validation — 2026-06-08
 Resilience audit source: Gemini CLI (R1–R6) + Claude independent validation — 2026-06-08
 Chaos audit source: Gemini CLI adversarial chaos audit (C1–C5) + Claude independent validation — 2026-06-08
+Hardening sprint: Brooks Phase 2 review (B1–B3) — 2026-06-08
 
 ## OPEN
 
@@ -11,6 +12,42 @@ _No open entries._
 ---
 
 ## CLOSED
+
+### [B1] ExportHotSnapshot VACUUM INTO parameterized query
+
+Source: Brooks Phase 2 review (P0 — unsafe SQL construction)
+Status: CLOSED — FIXED
+Resolution: Replaced string-concatenated `VACUUM INTO '"+clean+"'` with parameterized `VACUUM INTO ?` (confirmed supported by modernc.org/sqlite). Path validation extended: now rejects semicolons, null bytes (`\x00`), and newlines in addition to existing checks (absolute, traversal, single/double quotes). Prior SEC-001 entry was a partial fix (blacklist only). Tests added for all rejection cases plus valid backup creation. Fix: `internal/storage/sqlite/db.go`.
+Date: 2026-06-08
+
+---
+
+### [B2] API/auth boundary test coverage at 0%
+
+Source: Brooks Phase 2 review (P1 — 0% coverage on critical auth boundaries)
+Status: CLOSED — FIXED
+Resolution: Added targeted test files for `internal/api/auth`, `internal/api/middleware`, `internal/api/handlers`, `internal/api/handlers/v2`. Coverage raised: auth=100%, handlers=90.5%, v2=92.6%, middleware=84.4%. Tests cover: auth required (no header → 401), invalid token → 401, valid token sets identity, scope enforcement (wrong scope → 403), malformed JSON → 400, state machine transitions via RuntimePause/RuntimeResume API.
+Date: 2026-06-08
+
+---
+
+### [B3] No smoke test suite
+
+Source: Brooks Phase 2 review (P2 — no minimal end-to-end health check)
+Status: CLOSED — FIXED
+Resolution: Added `internal/ui/smoke_test.go` with `//go:build smoke` tag. Scenarios: server boots in test config (no real Cloudflare/CrowdSec), anonymous access rejected (→ login redirect), setup wizard accessible, login with correct secret succeeds (HttpOnly cookie), wrong password rejected, authenticated dashboard and health endpoint reachable, mutation endpoint (ban IP) requires CSRF. Run: `go test -tags=smoke ./internal/ui/...`. Regular `go test ./...` is unaffected.
+Date: 2026-06-08
+
+---
+
+### [B4-DEFER] God Orchestrator — architecture debt
+
+Source: Brooks Phase 2 review
+Status: CLOSED — DEFERRED (architecture debt, not release blocker)
+Resolution: The `Orchestrator` / `pipeline` God Object is a design concern but not a security vulnerability. No single change can address it without a global refactor, which is out of scope per project constraints. Documented as architecture debt for v2.0 planning. No code change in v1.5.3.
+Date: 2026-06-08
+
+---
 
 ### [SEC-001] ExportHotSnapshot path sanitization
 

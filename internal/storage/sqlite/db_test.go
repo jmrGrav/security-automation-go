@@ -167,15 +167,43 @@ func TestExportHotSnapshot_RejectsInvalidPaths(t *testing.T) {
 	}
 	defer db.Close()
 
-	cases := []string{
-		"",
-		"relative/path/db",
-		"/tmp/../etc/passwd",
+	cases := []struct {
+		name string
+		path string
+	}{
+		{"empty", ""},
+		{"relative", "relative/path/db"},
+		{"traversal", "/tmp/../etc/passwd"},
+		{"single_quote", "/tmp/backup'.db"},
+		{"double_quote", `/tmp/backup".db`},
+		{"semicolon", "/tmp/backup;DROP TABLE events"},
+		{"newline", "/tmp/backup\nmalicious"},
+		{"null_byte", "/tmp/backup\x00evil"},
+		{"injection_payload", "'; ATTACH DATABASE '/tmp/evil' AS evil; --"},
 	}
-	for _, p := range cases {
-		if err := db.ExportHotSnapshot(context.Background(), p); err == nil {
-			t.Errorf("ExportHotSnapshot(%q) should have been rejected", p)
-		}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if err := db.ExportHotSnapshot(context.Background(), c.path); err == nil {
+				t.Errorf("ExportHotSnapshot(%q) should have been rejected", c.path)
+			}
+		})
+	}
+}
+
+func TestExportHotSnapshot_AcceptsValidPath(t *testing.T) {
+	tmpDir := t.TempDir()
+	db, err := New(tmpDir)
+	if err != nil {
+		t.Fatalf("new db: %v", err)
+	}
+	defer db.Close()
+
+	snapshotPath := filepath.Join(tmpDir, "backups", "snapshot.db")
+	if err := db.ExportHotSnapshot(context.Background(), snapshotPath); err != nil {
+		t.Fatalf("ExportHotSnapshot rejected valid path: %v", err)
+	}
+	if _, err := os.Stat(snapshotPath); err != nil {
+		t.Fatalf("expected snapshot file at %s: %v", snapshotPath, err)
 	}
 }
 

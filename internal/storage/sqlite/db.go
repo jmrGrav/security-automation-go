@@ -527,13 +527,13 @@ func (s *DB) ExportHotSnapshot(ctx context.Context, targetPath string) error {
 	if clean != targetPath {
 		return apperr.Newf(op, "targetPath contains traversal, got %q", targetPath)
 	}
-	if strings.ContainsAny(clean, "'\"") {
+	if strings.ContainsAny(clean, "'\";"+"\x00\n\r") {
 		return apperr.Newf(op, "targetPath contains invalid characters: %q", targetPath)
 	}
 	if err := os.MkdirAll(filepath.Dir(clean), 0755); err != nil {
 		return apperr.Wrap(op, err)
 	}
-	if _, err := s.conn.ExecContext(ctx, "VACUUM INTO '"+clean+"'"); err != nil {
+	if _, err := s.conn.ExecContext(ctx, "VACUUM INTO ?", clean); err != nil {
 		return apperr.Wrap(op, err)
 	}
 	return nil
