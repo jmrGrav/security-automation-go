@@ -109,13 +109,13 @@ package: build-linux-amd64
 	@chmod 755 packaging/deb/usr/local/bin/*
 	@dpkg-deb --build packaging/deb dist/security-automation-go_$(VERSION)_amd64.deb
 	@echo "==> Built: dist/security-automation-go_$(VERSION)_amd64.deb"
-	@if command -v rpmbuild >/dev/null 2>&1; then \
+	@if [ -z "$(NO_RPM)" ] && command -v rpmbuild >/dev/null 2>&1; then \
 		echo "==> Building RPM..."; \
 		rpmbuild -bb packaging/rpm/security-automation-go.spec \
 			--define "_topdir $$(pwd)/dist/rpm-build" \
 			--define "_rpmdir $$(pwd)/dist" 2>&1; \
 	else \
-		echo "==> SKIP RPM: rpmbuild not available (install rpm-build on Fedora/RHEL/SUSE)"; \
+		echo "==> SKIP RPM: rpmbuild not available or NO_RPM=1 (install rpm-build on Fedora/RHEL/SUSE)"; \
 	fi
 
 test:

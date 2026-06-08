@@ -43,6 +43,12 @@ paths = [
   '''deployments/.*\.timer$''',
 ]
 
+[[allowlists]]
+description = "SECRET_LOADING_AUDIT.md — pedagogical examples of key format (e.g. sk-proj-abc123); not real credentials"
+paths = [
+  '''docs/security/SECRET_LOADING_AUDIT\.md$''',
+]
+
 # ---------------------------------------------------------------------------
 # KNOWN PRE-EXISTING FINDING — EXPLICIT DOCUMENTED DECISION
 #
