@@ -79,14 +79,7 @@ func (s *Server) handleLoginJSON(w http.ResponseWriter, r *http.Request) {
 	s.mu.Unlock()
 
 	// Set session cookie
-	http.SetCookie(w, &http.Cookie{
-		Name:     sessionCookieName,
-		Value:    sessionToken,
-		MaxAge:   int(sessionTTL.Seconds()),
-		HttpOnly: true,
-		SameSite: http.SameSiteStrictMode,
-		Path:     "/",
-	})
+	http.SetCookie(w, s.sessionCookie(r, sessionToken))
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{
