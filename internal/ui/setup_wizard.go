@@ -104,6 +104,12 @@ button.secondary{background:#e8edf6;color:#10243e}
 
 // Step 1: Show the UI setup secret location and redirect to /login.
 func (s *Server) handleSetupStep1(w http.ResponseWriter, r *http.Request) {
+	if s.setupStore != nil {
+		if complete, _ := s.setupStore.IsComplete(r.Context()); complete {
+			http.Redirect(w, r, "/login", http.StatusFound)
+			return
+		}
+	}
 	if _, ok := s.getSession(r); ok {
 		http.Redirect(w, r, "/setup/step/2", http.StatusFound)
 		return

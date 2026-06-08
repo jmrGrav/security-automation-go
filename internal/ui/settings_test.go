@@ -333,8 +333,8 @@ func TestChangePassword_ValidResponseFormat(t *testing.T) {
 		t.Errorf("expected status='success', got %q", resp["status"])
 	}
 
-	if resp["redirect"] != "/ui/dashboard" {
-		t.Errorf("expected redirect='/ui/dashboard', got %q", resp["redirect"])
+	if resp["redirect"] != "/login" {
+		t.Errorf("expected redirect='/login', got %q", resp["redirect"])
 	}
 }
 
