@@ -2,6 +2,27 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v1.5.2] — 2026-06-08
+
+### Summary
+
+Resilience patch release. Two findings from the June 2026 Gemini adversarial chaos audit fixed (C1, C5). Three remaining findings closed with technical justification. No API or behavioral changes.
+
+### Security / Reliability
+
+- **C1 fixed** — Daemon liveness: `Scheduler.Start()` now calls `recoverStaleState()` on startup. If the state file shows a non-terminal status (Discovering, Planning, AwaitingApproval, Executing, Validating, RollbackRequired, RollingBack) — left by a previous crash between `store.Save()` and `PublishEvent()` — it is immediately reset to `StatusFailed` via the state machine. The scheduler can then retry on the next tick via `StatusFailed → StatusDiscovering`. Intentional operator states (Paused, Quarantined) are preserved (`internal/runtime/scheduler/stateful/scheduler.go`).
+- **C5 fixed** — Pagination partial delivery: `TraverseAll()` now compares total items collected against `ResultInfo.TotalCount` after all pages are fetched. If fewer items were received than the API reported, the function fails closed with an error rather than returning a partial snapshot. Note: does not detect zeroed-metadata false-empty responses (TotalCount=0 on a non-empty resource) — documented limitation (`internal/cloudflare/pagination/pagination.go`).
+
+### Closed (no action)
+
+| ID | Finding | Rationale |
+|----|---------|-----------|
+| C2 | Non-deterministic OperationID | Duplicate of SEC-012 — intentional per-attempt uniqueness |
+| C3 | Cloudflare POST idempotency | Snapshot diffing (StableIdentityKey) already prevents duplicates; confirmed via reconciliation planner code path |
+| C4 | Recorder unbounded RAM growth | `AuthorizeFederated` has no production callers; recorder never accumulates entries during normal daemon operation |
+
+---
+
 ## [v1.5.1] — 2026-06-08
 
 ### Summary

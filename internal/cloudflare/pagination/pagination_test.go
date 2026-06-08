@@ -40,3 +40,29 @@ func TestTraverseAllRejectsEmptyIntermediatePage(t *testing.T) {
 		t.Fatal("expected empty intermediate page to fail closed")
 	}
 }
+
+func TestTraverseAllRejectsPartialDelivery(t *testing.T) {
+	t.Parallel()
+
+	// API reports 3 total but only delivers 2 across all pages — partial response.
+	_, err := TraverseAll(context.Background(), 10, func(_ context.Context, page int) ([]string, *models.ResultInfo, error) {
+		return []string{"a", "b"}, &models.ResultInfo{Page: 1, TotalPages: 1, TotalCount: 3}, nil
+	})
+	if err == nil {
+		t.Fatal("expected partial delivery to fail closed")
+	}
+}
+
+func TestTraverseAllAcceptsExactDelivery(t *testing.T) {
+	t.Parallel()
+
+	got, err := TraverseAll(context.Background(), 10, func(_ context.Context, page int) ([]string, *models.ResultInfo, error) {
+		return []string{"a", "b", "c"}, &models.ResultInfo{Page: 1, TotalPages: 1, TotalCount: 3}, nil
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("expected 3 items, got %d", len(got))
+	}
+}

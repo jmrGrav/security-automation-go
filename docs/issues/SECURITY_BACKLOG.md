@@ -2,6 +2,7 @@
 
 Audit source: Gemini CLI red-team + Claude independent validation — 2026-06-08
 Resilience audit source: Gemini CLI (R1–R6) + Claude independent validation — 2026-06-08
+Chaos audit source: Gemini CLI adversarial chaos audit (C1–C5) + Claude independent validation — 2026-06-08
 
 ## OPEN
 
@@ -164,6 +165,56 @@ Status: CLOSED
 Resolution: FALSE POSITIVE — Gemini assumed `os.CreateTemp`; actual code uses `os.OpenFile` with explicit `0o600` mode. The `.tmp` file is created at 0600 from the start; `os.Rename` is atomic; the subsequent `os.Chmod` is redundant but harmless.
 PR: —
 Commit: —
+Date: 2026-06-08
+
+---
+
+### [C1] Daemon liveness: stale non-terminal state after crash
+
+Source: Gemini CLI adversarial chaos audit
+Status: CLOSED — FIXED
+Resolution: `Scheduler.Start()` now calls `recoverStaleState()` before the ticker loop. If the state file shows any non-terminal status (Discovering, Planning, AwaitingApproval, Executing, Validating, RollbackRequired, RollingBack) from a previous crash, it is immediately reset to `StatusFailed` via the state machine. The scheduler can then retry on the next tick via `StatusFailed → StatusDiscovering`. Intentional operator states (Paused, Quarantined) are preserved. Fix: `internal/runtime/scheduler/stateful/scheduler.go`.
+GitHub: https://github.com/jmrGrav/security-automation-go/issues/18
+Date: 2026-06-08
+
+---
+
+### [C2] Non-deterministic OperationID in reconciliation planner
+
+Source: Gemini CLI adversarial chaos audit
+Status: CLOSED — NO ACTION
+Resolution: Duplicate of SEC-012. Non-deterministic OperationID is intentional design — per-attempt uniqueness in the audit trail. Cross-attempt correlation uses the deterministic `IdempotencyKey`. Making OperationID deterministic would make it identical to IdempotencyKey, destroying per-attempt traceability.
+GitHub: https://github.com/jmrGrav/security-automation-go/issues/19
+Date: 2026-06-08
+
+---
+
+### [C3] Cloudflare POST idempotency after crash
+
+Source: Gemini CLI adversarial chaos audit
+Status: CLOSED — NO ACTION
+Resolution: FALSE POSITIVE for duplicate-rule creation. The reconciler uses content-addressed `StableIdentityKey`; the planner diffs the current Cloudflare snapshot against target state. After a crash, the next cycle discovers the already-created rule and generates no create operation. The system is naturally idempotent through snapshot diffing. Note: rollback with empty `ProviderObjectID` (POST timed out before returning an ID) causes rollback failure, but this is a degenerate instance of the C1 stale-state problem — covered by the C1 fix.
+GitHub: https://github.com/jmrGrav/security-automation-go/issues/20
+Date: 2026-06-08
+
+---
+
+### [C4] Recorder unbounded RAM growth
+
+Source: Gemini CLI adversarial chaos audit
+Status: CLOSED — NO ACTION
+Resolution: Duplicate of SEC-010. Independent production-reachability verification confirms `AuthorizeFederated` (the only caller of `recorder.Record()`) has no production callers — the production sync loop calls `admission.Authorize()` which does not touch the recorder. The archive never accumulates entries during normal daemon operation. Diagnostic-only impact; enforcement unaffected.
+GitHub: https://github.com/jmrGrav/security-automation-go/issues/21
+Date: 2026-06-08
+
+---
+
+### [C5] Pagination partial delivery not detected
+
+Source: Gemini CLI adversarial chaos audit
+Status: CLOSED — FIXED
+Resolution: `TraverseAll()` now compares total items collected against `ResultInfo.TotalCount` after all pages are fetched. If fewer items were received than the API reported, the function fails closed with an error rather than returning a partial snapshot, preventing false-convergence on a glitch. Limitation: does not detect zeroed-metadata false-empty responses (TotalCount=0 when rules exist in Cloudflare). Fix: `internal/cloudflare/pagination/pagination.go`.
+GitHub: https://github.com/jmrGrav/security-automation-go/issues/22
 Date: 2026-06-08
 
 ---

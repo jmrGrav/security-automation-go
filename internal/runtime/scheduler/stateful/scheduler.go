@@ -61,6 +61,10 @@ func New(store *state.StateStore, orch *pipeline.Orchestrator, sm *engine.StateM
 func (s *Scheduler) Start(ctx context.Context, zoneID string) error {
 	s.logger.Info("starting stateful multi-worker scheduler", "interval", s.interval)
 
+	if err := s.recoverStaleState(ctx); err != nil {
+		s.logger.Warn("startup: stale state recovery failed (continuing)", "error", err)
+	}
+
 	ticker := time.NewTicker(s.interval)
 	defer ticker.Stop()
 
@@ -186,6 +190,28 @@ func (s *Scheduler) scopeForID(zoneID string, scopeID string) scope.RuntimeScope
 		ZoneID:      zoneID,
 		Environment: "prod",
 	}
+}
+
+// recoverStaleState resets any non-terminal status left by a previous crash so
+// the next tick can proceed via StatusFailed → StatusDiscovering.
+// StatusPaused and StatusQuarantined are intentional operator states and are not reset.
+func (s *Scheduler) recoverStaleState(ctx context.Context) error {
+	curState, err := s.store.Load()
+	if err != nil {
+		return err
+	}
+	switch curState.Lifecycle.Status {
+	case "",
+		models.StatusIdle,
+		models.StatusConverged,
+		models.StatusFailed,
+		models.StatusPaused,
+		models.StatusQuarantined:
+		return nil
+	}
+	s.logger.Warn("startup: stale non-terminal state detected, resetting to failed",
+		"stale_status", curState.Lifecycle.Status)
+	return s.sm.Transition(ctx, models.StatusFailed, "startup: stale state recovery")
 }
 
 func (s *Scheduler) GetPool() *pool.Pool {

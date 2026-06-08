@@ -61,6 +61,79 @@ func TestScheduler_Tick_Cooldown(t *testing.T) {
 	}
 }
 
+func TestScheduler_RecoverStaleState_ResetsToFailed(t *testing.T) {
+	tmpDir := t.TempDir()
+	store := state.NewStateStore(tmpDir)
+	logger := slog.Default()
+	sm := engine.NewStateMachine(store, logger)
+	cm := cooldown.NewManager(store)
+
+	// Simulate a crash that left StatusExecuting in the state file.
+	staleState := models.RuntimeState{}
+	staleState.Lifecycle.Status = models.StatusExecuting
+	if err := store.Save(staleState); err != nil {
+		t.Fatalf("failed to seed stale state: %v", err)
+	}
+
+	s := New(store, nil, sm, cm, logger, time.Minute)
+	defer s.Stop()
+
+	ctx := context.Background()
+	if err := s.recoverStaleState(ctx); err != nil {
+		t.Fatalf("recoverStaleState failed: %v", err)
+	}
+
+	recovered, err := store.Load()
+	if err != nil {
+		t.Fatalf("failed to load state after recovery: %v", err)
+	}
+	if recovered.Lifecycle.Status != models.StatusFailed {
+		t.Errorf("expected StatusFailed after recovery, got %s", recovered.Lifecycle.Status)
+	}
+}
+
+func TestScheduler_RecoverStaleState_PreservesTerminalStates(t *testing.T) {
+	for _, status := range []models.RuntimeStatus{
+		models.StatusIdle,
+		models.StatusConverged,
+		models.StatusFailed,
+		models.StatusPaused,
+		models.StatusQuarantined,
+		"", // fresh start
+	} {
+		t.Run(string(status), func(t *testing.T) {
+			tmpDir := t.TempDir()
+			store := state.NewStateStore(tmpDir)
+			logger := slog.Default()
+			sm := engine.NewStateMachine(store, logger)
+			cm := cooldown.NewManager(store)
+
+			if status != "" {
+				st := models.RuntimeState{}
+				st.Lifecycle.Status = status
+				if err := store.Save(st); err != nil {
+					t.Fatalf("failed to seed state: %v", err)
+				}
+			}
+
+			s := New(store, nil, sm, cm, logger, time.Minute)
+			defer s.Stop()
+
+			if err := s.recoverStaleState(context.Background()); err != nil {
+				t.Fatalf("recoverStaleState unexpectedly failed for %s: %v", status, err)
+			}
+
+			st, err := store.Load()
+			if err != nil {
+				t.Fatalf("load failed: %v", err)
+			}
+			if st.Lifecycle.Status != status {
+				t.Errorf("expected status %q to be preserved, got %q", status, st.Lifecycle.Status)
+			}
+		})
+	}
+}
+
 func TestRetryPolicy_ExponentialBackoff(t *testing.T) {
 	p := RetryPolicy{
 		InitialDelay: time.Second,
