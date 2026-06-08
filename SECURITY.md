@@ -13,7 +13,7 @@
 
 Report privately:
 
-1. **Email**: rohmerjeanmarcel@gmail.com — include `[SECURITY]` in the subject.
+1. **Email**: security@arleo.eu — include `[SECURITY]` in the subject.
 2. **GitHub private advisory**: use the [Security Advisories](https://github.com/jmrGrav/security-automation-go/security/advisories/new) feature.
 
 Expected response: acknowledgement within 72 hours; fix timeline communicated within 7 days.
