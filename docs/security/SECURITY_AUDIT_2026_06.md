@@ -76,8 +76,29 @@ This validates the security architecture at v1.5.0 level.
 
 **Overall residual risk: LOW.** The project is suitable for continued production operation.
 
+## Resilience & Recovery Audit — Counter-Expertise Results (R1–R6)
+
+Second audit pass focused on data durability, idempotency, and recovery.
+
+### Confirmed Findings (Deferred)
+
+| ID | Gemini Severity | Real Severity | Status |
+|----|-----------------|---------------|--------|
+| SEC-010 Recorder RAM-only | HIGH | LOW | DEFERRED v1.6.0 — journal wired but unused in Record() |
+| SEC-011 Drift memory RAM-only | HIGH | LOW | DEFERRED v1.6.0 — analytics only, not enforcement |
+| SEC-012 Non-deterministic OperationID | MEDIUM | LOW | DEFERRED v1.6.0 — audit correlation issue, not idempotency |
+| SEC-013 CrowdSec log O(n) scan | MEDIUM | LOW | DEFERRED v1.6.0 — bounded in practice with logrotate |
+
+### False Positives
+
+| ID | Gemini Claim | Why Wrong |
+|----|-------------|-----------|
+| SEC-R03 Cloudflare non-idempotent POST | Duplicate rule created after crash | `StableIdentityKey` for IP access rules is content-based (`ip:target:value:mode`). The snapshot-based reconciler is naturally idempotent — crash-before-checkpoint recovery works via the next discovery cycle. No HTTP idempotency key needed. |
+
+**False positive rate: 1/6 (17%)**
+
 ## Backlog
 
 Full findings tracked in [docs/issues/SECURITY_BACKLOG.md](../issues/SECURITY_BACKLOG.md).
 
-GitHub issues: #4 (closed), #5 (closed), #6 (closed), #7, #8, #9, #10, #11, #12
+GitHub issues: #4 (closed), #5 (closed), #6 (closed), #7, #8, #9, #10, #11, #12, #13, #14, #15, #16

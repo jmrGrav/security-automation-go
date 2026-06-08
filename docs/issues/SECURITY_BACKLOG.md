@@ -1,6 +1,7 @@
 # Security Backlog
 
 Audit source: Gemini CLI red-team + Claude independent validation — 2026-06-08
+Resilience audit source: Gemini CLI (R1–R6) + Claude independent validation — 2026-06-08
 
 ## OPEN
 
@@ -88,6 +89,64 @@ Notes: Focus on the recovery/manager.go, replay/consistency, and WAL checkpoint 
 
 ---
 
+---
+
+### [SEC-010] Governance evidence recorder volatile — data lost on restart
+
+Source: Gemini CLI Resilience Audit (R1) / Claude validation (CONFIRMED LOW)
+Status: OPEN
+Severity: LOW
+Decision: FIX LATER
+GitHub: https://github.com/jmrGrav/security-automation-go/issues/13
+Owner: @jmrGrav
+Target: v1.6.0
+Evidence: `internal/policy/replay/recorder/recorder.go` — `Record()` writes to in-memory `archive` map only. `journal.JournalStore` is wired in production (`cmd/cf-sync/runtime.go:187`) but `j.Append()` is never called. Code comment acknowledges the TODO.
+Notes: V3 API uses a persistent SQLite-backed evidence store and is unaffected. Only the V2 `/evidence` endpoint (in-memory recorder) loses data on restart. Fix requires adding `j.Append()` in `Record()` plus a `Load()` method to replay journal on startup. Encompasses R6 (unbounded archive growth) — JSONL retention/pruning resolves both.
+
+---
+
+### [SEC-011] Drift memory store volatile — analytics context lost on restart
+
+Source: Gemini CLI Resilience Audit (R2) / Claude validation (CONFIRMED LOW)
+Status: OPEN
+Severity: LOW
+Decision: FIX LATER
+GitHub: https://github.com/jmrGrav/security-automation-go/issues/14
+Owner: @jmrGrav
+Target: v1.6.0
+Evidence: `internal/runtime/drift/memory/store.go` — purely in-memory `map[string]*DriftMemory`. Production wiring at `cmd/cf-sync/runtime.go:198` creates a fresh store on every start. Occurrences, FirstSeenAt, SeverityTrend all reset.
+Notes: Does NOT affect security enforcement (decisions driven by reconciler + OPA). Only drift analytics/confidence scoring are affected. After restart, first drift of each pattern treated as first occurrence. `DetectGlobalAnomaly` baseline rebuilds from zero.
+
+---
+
+### [SEC-012] Non-deterministic OperationID in reconciliation planner
+
+Source: Gemini CLI Resilience Audit (R4) / Claude validation (PARTIAL LOW)
+Status: OPEN
+Severity: LOW
+Decision: FIX LATER
+GitHub: https://github.com/jmrGrav/security-automation-go/issues/15
+Owner: @jmrGrav
+Target: v1.6.0
+Evidence: `internal/reconciliation/planner.go:141` — `deriveOpID()` uses `time.Now()` → non-deterministic OperationID per plan cycle. `deriveIdempotencyKey()` at line 146 IS deterministic (content hash, no timestamp). Idempotency is unaffected; only audit trail correlation and rollback compensation ID stability are impacted.
+Notes: Not a correctness or security issue. Two retries for the same drift get different OperationIDs, making forensic correlation harder. Fix: remove `time.Now()` from `deriveOpID`; use `string(t) + ":" + targetID` as input.
+
+---
+
+### [SEC-013] CrowdSec decisions.log O(n) full scan on every sync tick
+
+Source: Gemini CLI Resilience Audit (R5) / Claude validation (CONFIRMED LOW)
+Status: OPEN
+Severity: LOW
+Decision: FIX LATER
+GitHub: https://github.com/jmrGrav/security-automation-go/issues/16
+Owner: @jmrGrav
+Target: v1.6.0
+Evidence: `internal/crowdsec/client.go:203` — `ListRecentBans()` opens decisions.log and scans ALL lines on every call (no cursor, no offset). Called 2× per sync interval via `crowdsec_sync_runtime.go:71,76`. Default logrotate keeps file bounded (~10k lines/day) making practical impact low.
+Notes: Not a security issue; performance concern. With proper logrotate impact is < 1ms per scan. Without rotation, degrades over weeks. Fix: track last file offset + inode (rotation detection) between calls.
+
+---
+
 ## CLOSED
 
 ### [SEC-001] ExportHotSnapshot path sanitization
@@ -119,6 +178,17 @@ Status: CLOSED
 Resolution: `subtleConstantTime` function removed from `server.go`. All 3 call sites (server.go CSRF header, server.go CSRF form value, login.go setup secret) replaced with `crypto/subtle.ConstantTimeCompare`.
 PR: —
 Commit: 6c5c78c
+Date: 2026-06-08
+
+---
+
+### [SEC-R03] Cloudflare non-idempotent POST after crash
+
+Source: Gemini CLI Resilience Audit (R3)
+Status: CLOSED
+Resolution: FALSE POSITIVE — Gemini assumed HTTP-level idempotency is required. The reconciler uses content-addressed `StableIdentityKey` (`ip:{target}:{value}:{mode}` for IP access rules, verified in `normalize/normalize.go:22`). After a crash-before-checkpoint, the next cycle's discovery fetches Cloudflare state including the already-created rule; the planner sees it exists in the current snapshot and generates no create operation. The system is naturally idempotent through snapshot diffing, not HTTP idempotency keys.
+PR: —
+Commit: —
 Date: 2026-06-08
 
 ---
