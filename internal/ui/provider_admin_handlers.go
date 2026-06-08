@@ -34,7 +34,7 @@ func (s *Server) providerManagementView() (AIProviderManagementView, error) {
 	if err != nil {
 		return AIProviderManagementView{}, err
 	}
-	aiCfg := normalizeAIConfig(applyAIProviderState(s.aiBaseConfig, state, loaded))
+	aiCfg := normalizeAIConfig(s.aiConfigFromCredentialStore(applyAIProviderState(s.aiBaseConfig, state, loaded)))
 	views := providerManagementView(aiCfg, state, loaded)
 	return views, nil
 }
@@ -44,7 +44,7 @@ func (s *Server) providerDashboardViews() []AIProviderDashboardView {
 	if err != nil {
 		return nil
 	}
-	aiCfg := normalizeAIConfig(applyAIProviderState(s.aiBaseConfig, state, loaded))
+	aiCfg := normalizeAIConfig(s.aiConfigFromCredentialStore(applyAIProviderState(s.aiBaseConfig, state, loaded)))
 	return providerDashboardViews(aiCfg, state, loaded)
 }
 
@@ -53,7 +53,7 @@ func (s *Server) rebuildAIExplainFromState() error {
 	if err != nil {
 		return err
 	}
-	effective := normalizeAIConfig(applyAIProviderState(s.aiBaseConfig, state, loaded))
+	effective := normalizeAIConfig(s.aiConfigFromCredentialStore(applyAIProviderState(s.aiBaseConfig, state, loaded)))
 	if s.aiExplainBuilder == nil {
 		s.aiMu.Lock()
 		s.aiConfig = effective
@@ -69,6 +69,23 @@ func (s *Server) rebuildAIExplainFromState() error {
 	s.aiExplain = explain
 	s.aiMu.Unlock()
 	return nil
+}
+
+func (s *Server) aiConfigFromCredentialStore(base ai.Config) ai.Config {
+	if s.credentialStore == nil {
+		return base
+	}
+	ctx := context.Background()
+	if v, ok, err := s.credentialStore.Lookup(ctx, "ai.openai.api_key"); err == nil && ok {
+		base.OpenAI.APIKey = v
+	}
+	if v, ok, err := s.credentialStore.Lookup(ctx, "ai.anthropic.api_key"); err == nil && ok {
+		base.Anthropic.APIKey = v
+	}
+	if v, ok, err := s.credentialStore.Lookup(ctx, "ai.gemini.api_key"); err == nil && ok {
+		base.Gemini.APIKey = v
+	}
+	return base
 }
 
 func (s *Server) providerFactory(name AIProviderName) (ProviderFactory, bool) {
@@ -108,10 +125,16 @@ func (s *Server) handleProviderReplaceKey(w http.ResponseWriter, r *http.Request
 		_ = ProviderManagementPage(view, s.csrfTokenFromRequest(r)).Render(r.Context(), w)
 		return
 	}
-	secretFile := providerSecretPathForName(s.aiBaseConfig, name)
-	if err := writeProviderSecret(secretFile, secret); err != nil {
+	if s.credentialStore == nil {
 		view, _ := s.providerManagementView()
-		view.Error = fmt.Sprintf("%s\n%s", err.Error(), providerStatePathHint(secretFile, true))
+		view.Error = "credential store unavailable"
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = ProviderManagementPage(view, s.csrfTokenFromRequest(r)).Render(r.Context(), w)
+		return
+	}
+	if err := s.credentialStore.Set(r.Context(), providerCredentialKeyForName(name), secret, true); err != nil {
+		view, _ := s.providerManagementView()
+		view.Error = err.Error()
 		w.WriteHeader(http.StatusForbidden)
 		_ = ProviderManagementPage(view, s.csrfTokenFromRequest(r)).Render(r.Context(), w)
 		return
@@ -124,6 +147,41 @@ func (s *Server) handleProviderReplaceKey(w http.ResponseWriter, r *http.Request
 	if err := s.rebuildAIExplainFromState(); err != nil {
 		view, _ := s.providerManagementView()
 		view.Error = fmt.Sprintf("key written but AI explain could not be rebuilt: %v", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = ProviderManagementPage(view, s.csrfTokenFromRequest(r)).Render(r.Context(), w)
+		return
+	}
+	http.Redirect(w, r, "/providers", http.StatusSeeOther)
+}
+
+func (s *Server) handleLegacyCredentialImport(w http.ResponseWriter, r *http.Request) {
+	if !s.validCSRF(r) {
+		http.Error(w, "csrf required", http.StatusForbidden)
+		return
+	}
+	if s.credentialStore == nil {
+		view, _ := s.providerManagementView()
+		view.Error = "credential store unavailable"
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = ProviderManagementPage(view, s.csrfTokenFromRequest(r)).Render(r.Context(), w)
+		return
+	}
+	imported, err := s.credentialStore.ImportLegacyDir(r.Context(), legacySecretsDirPath)
+	if err != nil {
+		view, _ := s.providerManagementView()
+		view.Error = err.Error()
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = ProviderManagementPage(view, s.csrfTokenFromRequest(r)).Render(r.Context(), w)
+		return
+	}
+	s.audit.Record("legacy_credentials_imported", map[string]string{
+		"count":          fmt.Sprintf("%d", imported),
+		"result":         "redacted",
+		"correlation_id": newUIEventID(),
+	})
+	if err := s.rebuildAIExplainFromState(); err != nil {
+		view, _ := s.providerManagementView()
+		view.Error = fmt.Sprintf("legacy credentials imported but AI explain could not be rebuilt: %v", err)
 		w.WriteHeader(http.StatusInternalServerError)
 		_ = ProviderManagementPage(view, s.csrfTokenFromRequest(r)).Render(r.Context(), w)
 		return
@@ -162,16 +220,15 @@ func (s *Server) handleProviderToggle(w http.ResponseWriter, r *http.Request, en
 		return
 	}
 	record := providerStateRecord(state, name)
-	display, secretFile, _ := providerSpec(name)
-	secretFile = providerSecretPathForName(s.aiBaseConfig, name)
-	secret := providerSecretSnapshotForPath(secretFile)
+	display, _ := providerSpec(name)
+	configured := credentialConfigured(r.Context(), s.credentialStore, providerCredentialKeyForName(name))
 	if enabled {
-		if !secret.present {
+		if !configured {
 			record.LastErrorCode = providerStatusMissingSecret
 			setProviderStateRecord(&state, name, record)
 			if err := saveAIProviderState(s.cfg.UI.ProviderStateFile, state); err != nil {
 				view, _ := s.providerManagementView()
-				view.Error = fmt.Sprintf("%s\n%s", err.Error(), providerStatePathHint(s.cfg.UI.ProviderStateFile, false))
+				view.Error = err.Error()
 				w.WriteHeader(http.StatusForbidden)
 				_ = ProviderManagementPage(view, s.csrfTokenFromRequest(r)).Render(r.Context(), w)
 				return
@@ -182,28 +239,7 @@ func (s *Server) handleProviderToggle(w http.ResponseWriter, r *http.Request, en
 				"correlation_id": newUIEventID(),
 			})
 			view, _ := s.providerManagementView()
-			view.Error = fmt.Sprintf("provider %s cannot be enabled: secret file missing at %s\n%s", display, secretFile, providerStatePathHint(secretFile, true))
-			w.WriteHeader(http.StatusForbidden)
-			_ = ProviderManagementPage(view, s.csrfTokenFromRequest(r)).Render(r.Context(), w)
-			return
-		}
-		if secret.state == providerStatusInvalidSecret {
-			record.LastErrorCode = providerStatusInvalidSecret
-			setProviderStateRecord(&state, name, record)
-			if err := saveAIProviderState(s.cfg.UI.ProviderStateFile, state); err != nil {
-				view, _ := s.providerManagementView()
-				view.Error = fmt.Sprintf("%s\n%s", err.Error(), providerStatePathHint(s.cfg.UI.ProviderStateFile, false))
-				w.WriteHeader(http.StatusForbidden)
-				_ = ProviderManagementPage(view, s.csrfTokenFromRequest(r)).Render(r.Context(), w)
-				return
-			}
-			s.audit.Record("provider_config_validation_failed", map[string]string{
-				"provider":       strings.ToLower(string(name)),
-				"result":         providerStatusInvalidSecret,
-				"correlation_id": newUIEventID(),
-			})
-			view, _ := s.providerManagementView()
-			view.Error = fmt.Sprintf("provider %s cannot be enabled: secret file is unreadable or invalid at %s\n%s", display, secretFile, providerStatePathHint(secretFile, true))
+			view.Error = fmt.Sprintf("provider %s cannot be enabled: credential not configured in SQLite", display)
 			w.WriteHeader(http.StatusForbidden)
 			_ = ProviderManagementPage(view, s.csrfTokenFromRequest(r)).Render(r.Context(), w)
 			return
@@ -227,7 +263,7 @@ func (s *Server) handleProviderToggle(w http.ResponseWriter, r *http.Request, en
 	setProviderStateRecord(&state, name, record)
 	if err := saveAIProviderState(s.cfg.UI.ProviderStateFile, state); err != nil {
 		view, _ := s.providerManagementView()
-		view.Error = fmt.Sprintf("%s\n%s", err.Error(), providerStatePathHint(s.cfg.UI.ProviderStateFile, false))
+		view.Error = err.Error()
 		w.WriteHeader(http.StatusForbidden)
 		_ = ProviderManagementPage(view, s.csrfTokenFromRequest(r)).Render(r.Context(), w)
 		return
@@ -265,30 +301,26 @@ func (s *Server) handleProviderTest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	record := providerStateRecord(state, name)
-	display, _, _ := providerSpec(name)
-	secretFile := providerSecretPathForName(s.aiBaseConfig, name)
-	secret := providerSecretSnapshotForPath(secretFile)
+	display, _ := providerSpec(name)
+	providerCfg := providerConfigForName(s.aiConfigFromCredentialStore(applyAIProviderState(s.aiBaseConfig, state, loaded)), name)
+	configured := strings.TrimSpace(providerCfg.APIKey) != ""
 	outcome := providerTestUnknownError
 	errorCode := providerTestUnknownError
 	var latency time.Duration
 
-	if !secret.present {
+	if !configured {
 		outcome = providerTestUnknownError
 		errorCode = providerStatusMissingSecret
-	} else if secret.state == providerStatusInvalidSecret {
-		outcome = providerTestUnknownError
-		errorCode = providerStatusInvalidSecret
 	} else {
 		factory, ok := s.providerFactory(name)
 		if !ok {
 			outcome = providerTestUnknownError
 			errorCode = providerTestUnknownError
 		} else {
-			providerCfg := providerConfigForName(applyAIProviderState(s.aiBaseConfig, state, loaded), name)
 			provider := factory(ai.ProviderConfig{
-				Enabled:    true,
-				Model:      providerCfg.Model,
-				APIKeyFile: secretFile,
+				Enabled: true,
+				Model:   providerCfg.Model,
+				APIKey:  providerCfg.APIKey,
 			})
 			if provider == nil {
 				outcome = providerTestUnknownError
@@ -318,7 +350,7 @@ func (s *Server) handleProviderTest(w http.ResponseWriter, r *http.Request) {
 	setProviderStateRecord(&state, name, record)
 	if err := saveAIProviderState(s.cfg.UI.ProviderStateFile, state); err != nil {
 		view, _ := s.providerManagementView()
-		view.Error = fmt.Sprintf("%s\n%s", err.Error(), providerStatePathHint(s.cfg.UI.ProviderStateFile, false))
+		view.Error = fmt.Sprintf("%s\n%s", err.Error(), providerStatePathHint(s.cfg.UI.ProviderStateFile))
 		w.WriteHeader(http.StatusForbidden)
 		_ = ProviderManagementPage(view, s.csrfTokenFromRequest(r)).Render(r.Context(), w)
 		return

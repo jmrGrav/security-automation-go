@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"sort"
 	"sync/atomic"
+	"syscall"
 
 	"github.com/jm/security-automation-go/internal/apperr"
 	"github.com/jm/security-automation-go/internal/observability/metrics"
@@ -37,6 +38,8 @@ var knownTables = map[string]struct{}{
 	"abuseipdb_report_outbox":      {},
 	"approval_execution_evidence":  {},
 	"rollback_checkpoints":         {},
+	"credential_secrets":           {},
+	"credential_meta":              {},
 	"setup_state":                  {},
 	"ui_settings":                  {},
 }
@@ -45,6 +48,7 @@ var knownTables = map[string]struct{}{
 type DB struct {
 	conn           *sql.DB
 	path           string
+	credentialKey  []byte
 	readOnly       atomic.Bool
 	integrityCheck func(context.Context) error
 }
@@ -57,6 +61,8 @@ func New(dir string) (*DB, error) {
 	}
 
 	path := filepath.Join(dir, "runtime.db")
+	oldUmask := syscall.Umask(0o077)
+	defer syscall.Umask(oldUmask)
 	db, err := sql.Open("sqlite", path)
 	if err != nil {
 		return nil, apperr.Wrap(op, err)
@@ -85,6 +91,10 @@ func New(dir string) (*DB, error) {
 	}
 
 	if err := s.runMigrations(); err != nil {
+		return nil, apperr.Wrap(op, err)
+	}
+	if err := s.ensureCredentialKey(context.Background()); err != nil {
+		_ = db.Close()
 		return nil, apperr.Wrap(op, err)
 	}
 	if err := s.VerifySchema(context.Background()); err != nil {
@@ -369,6 +379,26 @@ func (s *DB) runMigrations() error {
 				);
 			`,
 		},
+		{
+			Version:     16,
+			Description: "Encrypted credential store",
+			SQL: `
+				CREATE TABLE IF NOT EXISTS credential_secrets (
+					name TEXT PRIMARY KEY,
+					ciphertext BLOB NOT NULL,
+					nonce BLOB NOT NULL,
+					enabled INTEGER NOT NULL DEFAULT 1,
+					created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+					updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+					last_validated_at TIMESTAMP
+				);
+				CREATE TABLE IF NOT EXISTS credential_meta (
+					key TEXT PRIMARY KEY,
+					value TEXT NOT NULL,
+					updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+				);
+			`,
+		},
 	}
 
 	return m.Migrate(context.Background(), migrations)
@@ -398,6 +428,7 @@ func (s *DB) Reopen(ctx context.Context) error {
 	if s.conn != nil {
 		_ = s.conn.Close()
 	}
+	s.credentialKey = nil
 
 	db, err := sql.Open("sqlite", s.path)
 	if err != nil {
@@ -424,6 +455,9 @@ func (s *DB) Reopen(ctx context.Context) error {
 	s.conn = db
 
 	if err := s.runMigrations(); err != nil {
+		return apperr.Wrap(op, err)
+	}
+	if err := s.ensureCredentialKey(ctx); err != nil {
 		return apperr.Wrap(op, err)
 	}
 	return s.VerifySchema(ctx)
@@ -567,6 +601,8 @@ func (s *DB) VerifySchema(ctx context.Context) error {
 		"abuseipdb_report_outbox",
 		"approval_execution_evidence",
 		"rollback_checkpoints",
+		"credential_secrets",
+		"credential_meta",
 		"setup_state",
 		"ui_settings",
 	}

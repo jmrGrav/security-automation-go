@@ -69,12 +69,12 @@ func runUI(ctx context.Context, logger *slog.Logger, cfg *config.Config) error {
 
 	logger.Info("instance lock acquired", "lock_file", lockFile)
 
-	// Generate the initial one-time setup password if it doesn't exist yet.
-	// NEVER log the password value — log only the file path.
-	if _, err := uiauth.GenerateInitialPassword(cfg.UI.InitialPasswordFile); err != nil {
-		return fmt.Errorf("generate initial password: %w", err)
+	runtimeDBPath := filepath.Join(cfg.StateDir, "runtime.db")
+	_, runtimeDBExistsErr := os.Stat(runtimeDBPath)
+	runtimeDBExists := runtimeDBExistsErr == nil
+	if runtimeDBExistsErr != nil && !os.IsNotExist(runtimeDBExistsErr) {
+		return fmt.Errorf("check runtime db: %w", runtimeDBExistsErr)
 	}
-	logger.Info("initial setup password available", "path", cfg.UI.InitialPasswordFile)
 
 	// Open SQLite for setup wizard state persistence.
 	setupDB, err := sqlite.New(cfg.StateDir)
@@ -83,6 +83,28 @@ func runUI(ctx context.Context, logger *slog.Logger, cfg *config.Config) error {
 	}
 	defer setupDB.Close()
 	setupStore := sqlite.NewSetupStore(setupDB)
+	credentialStore := sqlite.NewCredentialStore(setupDB)
+
+	// Generate the initial one-time setup password only on first boot.
+	// If a runtime DB already exists, preserve the existing bootstrap file state.
+	if !runtimeDBExists {
+		if _, err := uiauth.GenerateInitialPassword(cfg.UI.InitialPasswordFile); err != nil {
+			return fmt.Errorf("generate initial password: %w", err)
+		}
+		logger.Info("initial setup password available", "path", cfg.UI.InitialPasswordFile)
+	} else {
+		logger.Info("preserving existing setup password for conservative restart", "path", cfg.UI.InitialPasswordFile)
+	}
+
+	if v, ok, _ := credentialStore.Lookup(ctx, "cloudflare.api_token"); ok {
+		cfg.Cloudflare.APIToken = v
+	}
+	if v, ok, _ := credentialStore.Lookup(ctx, "abuseipdb.api_key"); ok {
+		cfg.AbuseIPDB.APIKey = v
+	}
+	if v, ok, _ := credentialStore.Lookup(ctx, "betterstack.source_token"); ok {
+		cfg.BetterStack.SourceToken = v
+	}
 
 	// If SECURITY_AUTOMATION_INITIAL_ADMIN_PASSWORD is set and no permanent password hash
 	// exists yet in SQLite, store its bcrypt hash now. This allows automated deployments
@@ -122,11 +144,21 @@ func runUI(ctx context.Context, logger *slog.Logger, cfg *config.Config) error {
 		return err
 	}
 	aiCfg := ai.FromEnv()
+	if v, ok, _ := credentialStore.Lookup(ctx, "ai.openai.api_key"); ok {
+		aiCfg.OpenAI.APIKey = v
+	}
+	if v, ok, _ := credentialStore.Lookup(ctx, "ai.anthropic.api_key"); ok {
+		aiCfg.Anthropic.APIKey = v
+	}
+	if v, ok, _ := credentialStore.Lookup(ctx, "ai.gemini.api_key"); ok {
+		aiCfg.Gemini.APIKey = v
+	}
 	server, err := ui.NewServer(cfg, ui.Options{
-		SetupStore:     setupStore,
-		SecretProvider: ui.NewFileSecretProvider(cfg.UI.SecretFile),
-		AuditSink:      auditSink,
-		Logger:         logger,
+		SetupStore:      setupStore,
+		CredentialStore: credentialStore,
+		SecretProvider:  ui.NewFileSecretProvider(cfg.UI.SecretFile),
+		AuditSink:       auditSink,
+		Logger:          logger,
 		AIExplainBuilder: func(effective ai.Config) aigateway.Gateway {
 			return aigateway.NewService(effective, buildAIProviders(effective, logger), nil, auditSink)
 		},
@@ -182,31 +214,31 @@ func buildAIProviders(cfg ai.Config, logger *slog.Logger) []providers.Provider {
 		return nil
 	}
 	out := make([]providers.Provider, 0, 3)
-	add := func(name string, enabled bool, model, keyFile string, newProvider func(ai.ProviderConfig) providers.Provider) {
+	add := func(name string, enabled bool, model, apiKey string, newProvider func(ai.ProviderConfig) providers.Provider) {
 		if !enabled {
 			return
 		}
 		provider := newProvider(ai.ProviderConfig{
-			Enabled:    enabled,
-			Model:      model,
-			APIKeyFile: keyFile,
+			Enabled: enabled,
+			Model:   model,
+			APIKey:  apiKey,
 		})
 		if enabler, ok := provider.(interface{ Enabled() bool }); ok && !enabler.Enabled() {
 			if logger != nil {
-				logger.Warn("AI provider unavailable", "provider", name, "reason", "disabled or secret file missing")
+				logger.Warn("AI provider unavailable", "provider", name, "reason", "disabled or credential missing")
 			}
 			return
 		}
 		out = append(out, provider)
 	}
 
-	add("openai", cfg.OpenAI.Enabled, cfg.OpenAI.Model, cfg.OpenAI.APIKeyFile, func(pc ai.ProviderConfig) providers.Provider {
+	add("openai", cfg.OpenAI.Enabled, cfg.OpenAI.Model, cfg.OpenAI.APIKey, func(pc ai.ProviderConfig) providers.Provider {
 		return aiopenai.New(pc)
 	})
-	add("anthropic", cfg.Anthropic.Enabled, cfg.Anthropic.Model, cfg.Anthropic.APIKeyFile, func(pc ai.ProviderConfig) providers.Provider {
+	add("anthropic", cfg.Anthropic.Enabled, cfg.Anthropic.Model, cfg.Anthropic.APIKey, func(pc ai.ProviderConfig) providers.Provider {
 		return aianthropic.New(pc)
 	})
-	add("gemini", cfg.Gemini.Enabled, cfg.Gemini.Model, cfg.Gemini.APIKeyFile, func(pc ai.ProviderConfig) providers.Provider {
+	add("gemini", cfg.Gemini.Enabled, cfg.Gemini.Model, cfg.Gemini.APIKey, func(pc ai.ProviderConfig) providers.Provider {
 		return aigemini.New(pc)
 	})
 

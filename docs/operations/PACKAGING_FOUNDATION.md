@@ -59,8 +59,9 @@ Shell: `/usr/sbin/nologin`
 | Path | Mode | Owner |
 |------|------|-------|
 | `/var/lib/security-automation-go` | 0750 | security-automation |
-| `/var/lib/security-automation-go/diagnostics` | 0750 | security-automation |
-| `/etc/security-automation-go/secrets` | 0700 | security-automation |
+| `/var/lib/security-automation-go/runtime` | 0750 | security-automation |
+| `/var/lib/security-automation-go/secret.key` | 0600 | security-automation |
+| `/etc/security-automation-go/security-automation.env` | 0644 | root |
 | `/var/log/security-automation` | 0755 | security-automation |
 
 ## Multi-Architecture Builds

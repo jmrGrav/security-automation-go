@@ -4,7 +4,6 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"sync/atomic"
 	"testing"
 
@@ -50,7 +49,7 @@ func TestProvidersAreDisabledByDefaultAndSkipNetworkWhenSecretMissing(t *testing
 			}))
 			defer srv.Close()
 
-			disabled := tc.new(ai.ProviderConfig{Enabled: false, Model: "model", APIKeyFile: filepath.Join(t.TempDir(), "missing-key")}, srv.URL, srv)
+			disabled := tc.new(ai.ProviderConfig{Enabled: false, Model: "model", APIKey: "", APIKeyFile: "/tmp/legacy-secret-file"}, srv.URL, srv)
 			if disabled.Enabled() {
 				t.Fatalf("expected %s to remain disabled by default", tc.name)
 			}
@@ -61,7 +60,7 @@ func TestProvidersAreDisabledByDefaultAndSkipNetworkWhenSecretMissing(t *testing
 				t.Fatalf("expected no network call when disabled, got %d hits", got)
 			}
 
-			missingSecret := tc.new(ai.ProviderConfig{Enabled: true, Model: "model", APIKeyFile: filepath.Join(t.TempDir(), "missing-key")}, srv.URL, srv)
+			missingSecret := tc.new(ai.ProviderConfig{Enabled: true, Model: "model", APIKey: "", APIKeyFile: "/tmp/legacy-secret-file"}, srv.URL, srv)
 			if missingSecret.Enabled() {
 				t.Fatalf("expected %s to remain disabled without secret file", tc.name)
 			}

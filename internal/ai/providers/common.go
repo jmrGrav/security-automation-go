@@ -18,8 +18,8 @@ import (
 
 const defaultTimeout = 15 * time.Second
 
-// ReadAPIKeyFile reads a secret from disk after verifying that the file is owner-only.
-// The helper is intentionally strict so provider adapters do not accept world-readable secrets.
+// ReadAPIKeyFile reads a legacy secret file after verifying that the file is owner-only.
+// legacy import/test compatibility only — not runtime credential source.
 func ReadAPIKeyFile(path string) (string, error) {
 	path = strings.TrimSpace(path)
 	if path == "" {
@@ -47,6 +47,15 @@ func ReadAPIKeyFile(path string) (string, error) {
 		return "", errors.New("api key file is empty")
 	}
 	return key, nil
+}
+
+// ReadAPIKey returns the configured API key.
+// File-based credentials are intentionally not consulted at runtime anymore.
+func ReadAPIKey(cfg ai.ProviderConfig) (string, error) {
+	if key := strings.TrimSpace(cfg.APIKey); key != "" {
+		return key, nil
+	}
+	return "", errors.New("api key is not configured")
 }
 
 // RedactPrompt removes obvious secrets from the outbound prompt text.

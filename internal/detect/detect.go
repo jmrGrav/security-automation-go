@@ -2,9 +2,12 @@ package detect
 
 import (
 	"encoding/json"
+	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 )
 
 // Status describes whether a component was found.
@@ -34,6 +37,12 @@ type Config struct {
 	OpenRestyEventsFile string
 	CloudflareToken     string
 	CloudflareZoneID    string
+
+	// CrowdSec detection tunables.
+	LAPIURL       string // if empty, probe defaults (127.0.0.1:8080 then 127.0.0.1:8088)
+	CscliBin      string // if empty, default "cscli"
+	PollerEnabled bool   // from cfg.CrowdSec.PollerEnabled
+	PollerLAPIURL string // from cfg.CrowdSec.PollerLAPIURL (may be empty)
 }
 
 // RunAll runs all detectors and returns their results.
@@ -95,6 +104,28 @@ var dirWritable = func(path string) bool {
 var systemdServiceActive = func(name string) bool {
 	cmd := exec.Command("systemctl", "is-active", "--quiet", name)
 	return cmd.Run() == nil
+}
+
+// httpProbe makes a GET request to url with the given timeout and returns the HTTP status code.
+// A non-nil error means the request could not be completed (connection refused, timeout, etc.).
+var httpProbe = func(url string, timeout time.Duration) (int, error) {
+	client := &http.Client{Timeout: timeout}
+	resp, err := client.Get(url) //nolint:noctx
+	if err != nil {
+		return 0, err
+	}
+	_ = resp.Body.Close()
+	return resp.StatusCode, nil
+}
+
+// tcpDial attempts a TCP connection to addr and returns true if it succeeds within the timeout.
+var tcpDial = func(addr string, timeout time.Duration) bool {
+	conn, err := net.DialTimeout("tcp", addr, timeout)
+	if err != nil {
+		return false
+	}
+	_ = conn.Close()
+	return true
 }
 
 func presentOrMissing(ok bool) string {

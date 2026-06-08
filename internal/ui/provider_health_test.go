@@ -1,23 +1,25 @@
 package ui
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/jm/security-automation-go/internal/storage/sqlite"
 )
 
 func TestProviderHealthCenter_RendersConfiguredMissingAndMasksSecrets(t *testing.T) {
-	secretDir := t.TempDir()
-	srv, _, _ := newTestServer(t, map[string]string{
-		"UI_SECRET":                          "ui-secret-value",
-		"AI_PROVIDER_OPENAI_ENABLED":         "true",
-		"AI_PROVIDER_OPENAI_MODEL":           "gpt-4.1-mini",
-		"AI_PROVIDER_OPENAI_API_KEY_FILE":    filepath.Join(secretDir, "openai_api_key"),
-		"AI_PROVIDER_ANTHROPIC_API_KEY_FILE": filepath.Join(secretDir, "anthropic_api_key"),
-		"AI_PROVIDER_GEMINI_API_KEY_FILE":    filepath.Join(secretDir, "gemini_api_key"),
+	srv, db, _ := newCredentialStoreServer(t, map[string]string{
+		"UI_SECRET":                  "ui-secret-value",
+		"AI_PROVIDER_OPENAI_ENABLED": "true",
+		"AI_PROVIDER_OPENAI_MODEL":   "gpt-4.1-mini",
 	})
+	store := sqlite.NewCredentialStore(db)
+	if err := store.Set(context.Background(), "ai.openai.api_key", "openai-secret", true); err != nil {
+		t.Fatalf("seed openai credential: %v", err)
+	}
 	cookie := loginCookie(t, srv, "ui-secret-value")
 
 	req := httptest.NewRequest(http.MethodGet, "/providers", nil)
@@ -48,13 +50,14 @@ func TestProviderHealthCenter_RendersConfiguredMissingAndMasksSecrets(t *testing
 }
 
 func TestProviderHealthCenter_RendersOperationalFieldsAndQuotaFallback(t *testing.T) {
-	secretDir := t.TempDir()
-	srv, _, _ := newTestServer(t, map[string]string{
-		"UI_SECRET":                       "ui-secret-value",
-		"AI_PROVIDER_OPENAI_ENABLED":      "true",
-		"AI_PROVIDER_OPENAI_MODEL":        "gpt-4.1-mini",
-		"AI_PROVIDER_OPENAI_API_KEY_FILE": filepath.Join(secretDir, "openai_api_key"),
+	srv, db, _ := newCredentialStoreServer(t, map[string]string{
+		"UI_SECRET":                  "ui-secret-value",
+		"AI_PROVIDER_OPENAI_ENABLED": "true",
+		"AI_PROVIDER_OPENAI_MODEL":   "gpt-4.1-mini",
 	})
+	if err := sqlite.NewCredentialStore(db).Set(context.Background(), "ai.openai.api_key", "openai-secret", true); err != nil {
+		t.Fatalf("seed openai credential: %v", err)
+	}
 	cookie := loginCookie(t, srv, "ui-secret-value")
 
 	req := httptest.NewRequest(http.MethodGet, "/providers", nil)
@@ -69,7 +72,7 @@ func TestProviderHealthCenter_RendersOperationalFieldsAndQuotaFallback(t *testin
 		"last test latency",
 		"last error code",
 		"validation",
-		"secret file",
+		"credential store",
 		"provider disabled by operator",
 	} {
 		if !strings.Contains(body, want) {
@@ -79,12 +82,13 @@ func TestProviderHealthCenter_RendersOperationalFieldsAndQuotaFallback(t *testin
 }
 
 func TestProviderHealthCenter_RendersObservedQuotaState(t *testing.T) {
-	secretDir := t.TempDir()
-	srv, _, _ := newTestServer(t, map[string]string{
-		"UI_SECRET":                          "ui-secret-value",
-		"AI_PROVIDER_ANTHROPIC_MODEL":        "claude-3-5-sonnet-latest",
-		"AI_PROVIDER_ANTHROPIC_API_KEY_FILE": filepath.Join(secretDir, "anthropic_api_key"),
+	srv, db, _ := newCredentialStoreServer(t, map[string]string{
+		"UI_SECRET":                   "ui-secret-value",
+		"AI_PROVIDER_ANTHROPIC_MODEL": "claude-3-5-sonnet-latest",
 	})
+	if err := sqlite.NewCredentialStore(db).Set(context.Background(), "ai.anthropic.api_key", "anthropic-secret", true); err != nil {
+		t.Fatalf("seed anthropic credential: %v", err)
+	}
 	cookie := loginCookie(t, srv, "ui-secret-value")
 
 	req := httptest.NewRequest(http.MethodGet, "/providers", nil)
@@ -93,7 +97,7 @@ func TestProviderHealthCenter_RendersObservedQuotaState(t *testing.T) {
 	srv.Handler().ServeHTTP(rr, req)
 
 	body := rr.Body.String()
-	for _, want := range []string{"Anthropic", "secret file", "last test status", "validation"} {
+	for _, want := range []string{"Anthropic", "credential store", "last test status", "validation"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("expected provider field %q in body: %s", want, body)
 		}
@@ -101,13 +105,14 @@ func TestProviderHealthCenter_RendersObservedQuotaState(t *testing.T) {
 }
 
 func TestProviderHealthCenter_RendersQuotaOverviewAndQuotaDetails(t *testing.T) {
-	secretDir := t.TempDir()
-	srv, _, _ := newTestServer(t, map[string]string{
-		"UI_SECRET":                       "ui-secret-value",
-		"AI_PROVIDER_OPENAI_ENABLED":      "true",
-		"AI_PROVIDER_OPENAI_MODEL":        "gpt-4.1-mini",
-		"AI_PROVIDER_OPENAI_API_KEY_FILE": filepath.Join(secretDir, "openai_api_key"),
+	srv, db, _ := newCredentialStoreServer(t, map[string]string{
+		"UI_SECRET":                  "ui-secret-value",
+		"AI_PROVIDER_OPENAI_ENABLED": "true",
+		"AI_PROVIDER_OPENAI_MODEL":   "gpt-4.1-mini",
 	})
+	if err := sqlite.NewCredentialStore(db).Set(context.Background(), "ai.openai.api_key", "openai-secret", true); err != nil {
+		t.Fatalf("seed openai credential: %v", err)
+	}
 	cookie := loginCookie(t, srv, "ui-secret-value")
 
 	req := httptest.NewRequest(http.MethodGet, "/providers", nil)

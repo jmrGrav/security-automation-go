@@ -127,21 +127,17 @@ Notable archive entries:
 
 ## Secret Path Quick Reference
 
-**Canonical install root: `/etc/security-automation-go/`**
+**Bootstrap root: `/etc/security-automation-go/`**
 
-| Secret | Path | Format |
-|--------|------|--------|
-| Cloudflare API token | `/etc/security-automation-go/secrets/cloudflare_api_token` | `CF_API_TOKEN=<value>` |
-| AbuseIPDB key | `/etc/security-automation-go/secrets/abuseipdb_api_key` | `ABUSEIPDB_KEY=<value>` |
-| BetterStack token | `/etc/security-automation-go/secrets/betterstack_source_token` | `BETTERSTACK_SOURCE_TOKEN=<value>` |
-| OpenAI key | `/etc/security-automation-go/secrets/openai_api_key` | raw value |
-| Anthropic key | `/etc/security-automation-go/secrets/anthropic_api_key` | raw value |
-| Gemini key | `/etc/security-automation-go/secrets/gemini_api_key` | raw value |
-| Admin password | `/etc/security-automation-go/secrets/admin_password` | bcrypt hash |
-| Initial password | `/etc/security-automation-go/runtime/initial-admin-password` | plaintext (one-time) |
+| Item | Location | Format |
+|------|----------|--------|
+| Bootstrap env | `/etc/security-automation-go/security-automation.env` | non-secret env |
+| SQLite runtime DB | `/var/lib/security-automation-go/runtime.db` | settings + encrypted credentials |
+| Master key | `/var/lib/security-automation-go/secret.key` | 32-byte local key |
+| Cloudflare / AbuseIPDB / BetterStack / AI provider tokens | SQLite `credential_secrets` | encrypted at rest |
+| UI setup secret | `/var/lib/security-automation-go/runtime/ui_secret` | internal HMAC secret used for step 1 login |
+| Initial password | `/var/lib/security-automation-go/runtime/initial-admin-password` | plaintext one-time seed used in step 2 |
 
-All secret files: `security-automation:security-automation 0600`. See [SECRET_LOADING_MODEL.md](security/SECRET_LOADING_MODEL.md) for the full loading chain.
+All runtime secret files: `security-automation:security-automation 0600`. See [SECRET_LOADING_MODEL.md](security/SECRET_LOADING_MODEL.md) for the full loading chain.
 
-> **Note:** The directory `/etc/security-automation/` (without `-go`) is a pre-V1.4 legacy path.
-> No daemon or wizard reads from it. If it exists on disk, the `layout` health check will report YELLOW (both)
-> or RED (legacy only). See [SECRET_LOADING_MODEL.md](security/SECRET_LOADING_MODEL.md) for the migration command.
+> **Note:** The directory `/etc/security-automation-go/secrets/` is legacy-import only. The runtime does not read operator tokens from it.

@@ -32,6 +32,8 @@ func NewFileSecretProvider(path string) *FileSecretProvider {
 	return &FileSecretProvider{path: path}
 }
 
+// WriteSecretFile is retained for UI bootstrap/session-secret handling only.
+// It is not a source for operator credentials.
 func WriteSecretFile(path string, secrets map[string]string) error {
 	if path == "" {
 		return errors.New("secret file path is required")

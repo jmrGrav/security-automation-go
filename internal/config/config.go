@@ -67,6 +67,12 @@ type CrowdSecConfig struct {
 	BinPath       string        `yaml:"bin_path"`       // cscli binary path; default "cscli"
 	Timeout       time.Duration `yaml:"timeout"`        // per-command timeout; default 15s
 	AllowlistName string        `yaml:"allowlist_name"` // CrowdSec allowlist name; default "my_allowlist"
+
+	// Poller — Go replacement for crowdsec-poller.py.
+	PollerEnabled  bool          `yaml:"poller_enabled"`  // opt-in; default false until cutover
+	PollerLAPIURL  string        `yaml:"poller_lapi_url"` // default http://127.0.0.1:8080
+	PollerLAPIKey  string        // set from encrypted CredentialStore at runtime; never via YAML or env
+	PollerInterval time.Duration `yaml:"poller_interval"` // default 30s
 }
 
 type OpenRestyConfig struct {
@@ -159,7 +165,7 @@ func DefaultConfig() *Config {
 		Global: GlobalConfig{
 			AppEnv:         "production",
 			ServiceName:    "cf-sync",
-			AdminTokenFile: "/etc/security-automation-go/secrets/admin_token",
+			AdminTokenFile: "/var/lib/security-automation-go/runtime/admin_token",
 			Log: LogConfig{
 				Level:  "info",
 				Format: "json",
@@ -182,9 +188,9 @@ func DefaultConfig() *Config {
 			Enabled:             false,
 			Addr:                "127.0.0.1:6969",
 			Port:                6969,
-			SecretFile:          "/etc/security-automation-go/secrets/ui_secret",
-			InitialPasswordFile: "/etc/security-automation-go/runtime/initial-admin-password",
-			ProviderStateFile:   "/etc/security-automation-go/providers/ai-providers.env",
+			SecretFile:          "/var/lib/security-automation-go/runtime/ui_secret",
+			InitialPasswordFile: "/var/lib/security-automation-go/runtime/initial-admin-password",
+			ProviderStateFile:   "/var/lib/security-automation-go/runtime/ai-providers.env",
 			MutationsEnabled:    false,
 		},
 		Enrichment: EnrichmentConfig{
@@ -269,6 +275,19 @@ func applyEnvOverrides(cfg *Config) {
 	}
 	if v := os.Getenv("DECISIONS_LOG"); v != "" {
 		cfg.CrowdSec.DecisionsLog = v
+	}
+	if v := os.Getenv("CS_POLLER_ENABLED"); v != "" {
+		if enabled, err := strconv.ParseBool(v); err == nil {
+			cfg.CrowdSec.PollerEnabled = enabled
+		}
+	}
+	if v := os.Getenv("CS_POLLER_LAPI_URL"); v != "" {
+		cfg.CrowdSec.PollerLAPIURL = v
+	}
+	if v := os.Getenv("CS_POLLER_INTERVAL"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			cfg.CrowdSec.PollerInterval = d
+		}
 	}
 	if v := os.Getenv("NGINX_LOG_DIR"); v != "" {
 		cfg.CrowdSec.NginxLogDir = v
@@ -382,12 +401,6 @@ func applyEnvOverrides(cfg *Config) {
 func validate(cfg *Config) error {
 	if cfg.Version != SchemaVersion {
 		return fmt.Errorf("unsupported config schema version: %s (expected %s)", cfg.Version, SchemaVersion)
-	}
-	if cfg.Cloudflare.APIToken == "" {
-		return errors.New("cloudflare.api_token is required (set CF_API_TOKEN or cloudflare.api_token in the config file)")
-	}
-	if cfg.Cloudflare.ZoneID == "" {
-		return errors.New("cloudflare.zone_id is required (set CF_ZONE_ID or cloudflare.zone_id in the config file)")
 	}
 	if cfg.UI.Enabled && cfg.UI.Addr == "" {
 		return errors.New("ui.addr is required when UI is enabled (set UI_ADDR or ui.addr in the config file)")

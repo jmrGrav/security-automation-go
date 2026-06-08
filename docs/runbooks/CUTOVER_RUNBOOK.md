@@ -267,6 +267,7 @@ sudo journalctl -u cf-sync -n 20 --no-pager
 - `to_add > 0` on first cycle (unexpected additions)
 - Any error from ListActiveBans or ListIPAccessRulesByTag
 - `shadow_mode: true` (misconfiguration)
+- Any warning about missing bootstrap env or missing SQLite master key
 
 ### Step 2 — Verify 3 consecutive cycles
 

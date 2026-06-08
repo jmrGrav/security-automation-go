@@ -280,8 +280,11 @@ func TestCleanupAppStopsBetweenDeletesWhenContextIsCanceled(t *testing.T) {
 func TestCleanupAppFailsClosedOnInvalidConfigViaLoader(t *testing.T) {
 	t.Setenv("CF_API_TOKEN", "")
 	t.Setenv("CF_ZONE_ID", "")
-	_, err := config.Load("")
-	if err == nil {
-		t.Fatal("expected config loader to fail closed without token/zone")
+	cfg, err := config.Load("")
+	if err != nil {
+		t.Fatalf("expected config loader to allow missing Cloudflare bootstrap secrets: %v", err)
+	}
+	if cfg.Cloudflare.APIToken != "" || cfg.Cloudflare.ZoneID != "" {
+		t.Fatalf("expected cloudflare bootstrap values to remain empty, got %+v", cfg.Cloudflare)
 	}
 }

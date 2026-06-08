@@ -11,6 +11,7 @@ import (
 	"github.com/jm/security-automation-go/internal/cloudflare"
 	"github.com/jm/security-automation-go/internal/config"
 	"github.com/jm/security-automation-go/internal/crowdsec"
+	cspoller "github.com/jm/security-automation-go/internal/crowdsec/poller"
 	"github.com/jm/security-automation-go/internal/httpclient"
 	luastate "github.com/jm/security-automation-go/internal/openresty/state"
 	"github.com/jm/security-automation-go/internal/recidive"
@@ -53,6 +54,9 @@ type CrowdSecSyncApp struct {
 
 	// luaWriter publishes bans.json for the OpenResty Lua bouncer (optional).
 	luaWriter *luastate.Writer
+
+	// poller is the Go replacement for crowdsec-poller.py. Nil when disabled.
+	poller *cspoller.Poller
 }
 
 type AllowlistSyncApp struct {
@@ -120,6 +124,15 @@ func NewCrowdSecSyncApp(logger *slog.Logger, cfg *config.Config) *CrowdSecSyncAp
 		shadowStore:  shadow.NewStore(cfg.StateDir),
 		shadowReport: filepath.Join(cfg.StateDir, "SHADOW_MODE_REPORT.md"),
 		luaWriter:    newLuaWriter(cfg),
+		poller: cspoller.New(cspoller.Config{
+			Enabled:  cfg.CrowdSec.PollerEnabled,
+			LAPIURL:  cfg.CrowdSec.PollerLAPIURL,
+			LAPIKey:  cfg.CrowdSec.PollerLAPIKey,
+			Interval: cfg.CrowdSec.PollerInterval,
+			LogPath:  cfg.CrowdSec.DecisionsLog,
+			CscliBin: cfg.CrowdSec.BinPath,
+			Timeout:  cfg.CrowdSec.Timeout,
+		}, logger),
 	}
 }
 

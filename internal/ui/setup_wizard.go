@@ -6,7 +6,6 @@ import (
 	"html"
 	"net"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 
@@ -14,8 +13,8 @@ import (
 	"github.com/jm/security-automation-go/internal/cloudflare/transport"
 	"github.com/jm/security-automation-go/internal/config"
 	"github.com/jm/security-automation-go/internal/detect"
+	"github.com/jm/security-automation-go/internal/health"
 	"github.com/jm/security-automation-go/internal/httpclient"
-	"github.com/jm/security-automation-go/internal/startuplog"
 	uiauth "github.com/jm/security-automation-go/internal/ui/auth"
 )
 
@@ -61,18 +60,20 @@ func (s *Server) registerSetupRoutes() {
 	s.mux.HandleFunc("GET /setup/step/7", s.handleSetupStep7)
 	s.mux.HandleFunc("POST /setup/step/7", s.handleSetupStep7Post)
 	s.mux.HandleFunc("GET /setup/step/8", s.handleSetupStep8)
+	s.mux.HandleFunc("POST /setup/step/8", s.handleSetupStep8Post)
 	s.mux.HandleFunc("GET /setup/step/9", s.handleSetupStep9)
-	s.mux.HandleFunc("POST /setup/step/9", s.handleSetupStep9Post)
+	s.mux.HandleFunc("GET /setup/step/10", s.handleSetupStep10)
+	s.mux.HandleFunc("POST /setup/step/10", s.handleSetupStep10Post)
 	s.mux.HandleFunc("GET /setup/complete", s.handleSetupComplete)
 }
 
 // renderSetupPage writes a full-page HTML response for a wizard step.
 func renderSetupPage(w http.ResponseWriter, step int, title, bodyHTML, errorMsg string) {
-	progressPct := (step * 100) / 9
+	progressPct := (step * 100) / 10
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	fmt.Fprintf(w, `<!doctype html><html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Setup — Step %d of 9: %s</title>
+<title>Setup — Step %d of 10: %s</title>
 <style>
 body{font-family:system-ui,sans-serif;margin:0;background:#f5f7fb;color:#10243e}
 header{padding:1rem 1.25rem;background:#10243e;color:white}
@@ -89,7 +90,7 @@ button.secondary{background:#e8edf6;color:#10243e}
 .ok{color:#065f46;background:#ecfdf5;border:1px solid #a7f3d0;border-radius:6px;padding:.75rem;margin:.75rem 0}
 </style>
 </head><body>
-<header><strong>Security Automation — First-Run Setup</strong><div style="margin-top:.35rem;font-size:.85rem">Step %d of 9</div></header>
+<header><strong>Security Automation — First-Run Setup</strong><div style="margin-top:.35rem;font-size:.85rem">Step %d of 10</div></header>
 <div class="prog"></div>
 <main>
 <h2>%s</h2>
@@ -101,22 +102,22 @@ button.secondary{background:#e8edf6;color:#10243e}
 	fmt.Fprint(w, `</main></body></html>`)
 }
 
-// Step 1: Show the initial setup password location and redirect to /login.
+// Step 1: Show the UI setup secret location and redirect to /login.
 func (s *Server) handleSetupStep1(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.getSession(r); ok {
 		http.Redirect(w, r, "/setup/step/2", http.StatusFound)
 		return
 	}
 	body := fmt.Sprintf(`
-<p class="note">A one-time setup password was written to:</p>
+<p class="note">A one-time UI setup secret was written to:</p>
 <pre style="background:#f4f7fb;padding:.75rem;border-radius:6px;overflow:auto">%s</pre>
 <p class="note">Read it with: <code>cat %s</code></p>
 <form action="/login" method="post">
-  <label for="secret">Setup password</label>
+  <label for="secret">Setup secret</label>
   <input id="secret" name="secret" type="password" autocomplete="current-password" required>
   <button type="submit">Continue</button>
-</form>`, s.cfg.UI.InitialPasswordFile, s.cfg.UI.InitialPasswordFile)
-	renderSetupPage(w, 1, "Login with setup password", body, "")
+</form>`, s.cfg.UI.SecretFile, s.cfg.UI.SecretFile)
+	renderSetupPage(w, 1, "Login with setup secret", body, "")
 }
 
 // Step 2 GET: force password change form.
@@ -296,18 +297,6 @@ func (s *Server) handleSetupStep3Post(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/setup/step/4", http.StatusFound)
 }
 
-// Secret paths are vars (not consts) so tests can redirect them to temp dirs.
-// Production defaults are the canonical paths; nothing should change them at runtime.
-var cfTokenSecretPath = "/etc/security-automation-go/secrets/cloudflare_api_token"
-
-var (
-	abuseIPDBSecretPath   = "/etc/security-automation-go/secrets/abuseipdb_api_key"
-	betterStackSecretPath = "/etc/security-automation-go/secrets/betterstack_source_token"
-	openAISecretPath      = "/etc/security-automation-go/secrets/openai_api_key"
-	anthropicSecretPath   = "/etc/security-automation-go/secrets/anthropic_api_key"
-	geminiSecretPath      = "/etc/security-automation-go/secrets/gemini_api_key"
-)
-
 // validateCFToken verifies the token is active and can list zones.
 func (s *Server) validateCFToken(ctx context.Context, token, zoneID string) error {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
@@ -393,8 +382,8 @@ func (s *Server) handleSetupStep4(w http.ResponseWriter, r *http.Request) {
 	}
 	body := fmt.Sprintf(`
 <p>Paste your Cloudflare API token below. It will be stored at:</p>
-<pre style="background:#f4f7fb;padding:.75rem;border-radius:6px">%s</pre>
-<p class="note">Mode 0600. The token will not be displayed again.</p>
+<pre style="background:#f4f7fb;padding:.75rem;border-radius:6px">SQLite credential store</pre>
+<p class="note">Stored encrypted in SQLite. The token will not be displayed again.</p>
 <p class="note">Required permissions: Zone / Firewall Services / Edit</p>
 <form action="/setup/step/4" method="post">
   <input type="hidden" name="csrf_token" value="%s">
@@ -404,7 +393,7 @@ func (s *Server) handleSetupStep4(w http.ResponseWriter, r *http.Request) {
   <input id="zone_id" name="zone_id" type="text" placeholder="d2f7807c2c5b7c9737da45f538072423" value="%s">
   <button type="submit">Validate &amp; save</button>
   <button type="submit" name="skip" value="1" class="secondary">Skip (configure later)</button>
-</form>`, cfTokenSecretPath, csrfTok, s.cfg.Cloudflare.ZoneID)
+</form>`, csrfTok, s.cfg.Cloudflare.ZoneID)
 	renderSetupPage(w, 4, "Cloudflare API token", body, "")
 }
 
@@ -432,21 +421,25 @@ func (s *Server) handleSetupStep4Post(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := s.validateCFToken(r.Context(), cfToken, zoneID); err != nil {
+	validateCF := s.validateCloudflare
+	if validateCF == nil {
+		validateCF = s.validateCFToken
+	}
+	if err := validateCF(r.Context(), cfToken, zoneID); err != nil {
 		renderSetupPage(w, 4, "Cloudflare API token", "", "Token validation failed: "+err.Error())
 		return
 	}
 
-	if err := WriteSecretFile(cfTokenSecretPath, map[string]string{"CF_API_TOKEN": cfToken}); err != nil {
-		if s.logger != nil {
-			s.logger.Error("write CF token secret", "err", err)
-		}
+	if s.credentialStore == nil {
+		renderSetupPage(w, 4, "Cloudflare API token", "", "Credential store unavailable — cannot save token.")
+		return
+	}
+	if err := s.credentialStore.Set(r.Context(), "cloudflare.api_token", cfToken, true); err != nil {
 		renderSetupPage(w, 4, "Cloudflare API token", "", "Failed to store token: "+err.Error())
 		return
 	}
 
 	if s.setupStore != nil {
-		_ = s.setupStore.SetSetting(r.Context(), "cf_token_path", cfTokenSecretPath)
 		if zoneID != "" {
 			_ = s.setupStore.SetSetting(r.Context(), "cf_zone_id", zoneID)
 		}
@@ -472,10 +465,10 @@ func (s *Server) handleSetupStep5(w http.ResponseWriter, r *http.Request) {
   <input type="hidden" name="csrf_token" value="%s">
   <label for="abuseipdb_key">AbuseIPDB API key</label>
   <input id="abuseipdb_key" name="abuseipdb_key" type="password" autocomplete="off" placeholder="paste key here">
-  <p class="note">Leave blank to skip. Stored at: <code>%s</code> (0600)</p>
+  <p class="note">Leave blank to skip. Stored encrypted in SQLite.</p>
   <button type="submit">Validate &amp; save</button>
   <button type="submit" name="skip" value="1" class="secondary">Skip</button>
-</form>`, csrfTok, abuseIPDBSecretPath)
+</form>`, csrfTok)
 	renderSetupPage(w, 5, "AbuseIPDB API key (optional)", body, "")
 }
 
@@ -496,11 +489,19 @@ func (s *Server) handleSetupStep5Post(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/setup/step/6", http.StatusFound)
 		return
 	}
-	if err := validateAbuseIPDB(r.Context(), key); err != nil {
+	validateAbuse := s.validateAbuseIPDB
+	if validateAbuse == nil {
+		validateAbuse = validateAbuseIPDB
+	}
+	if err := validateAbuse(r.Context(), key); err != nil {
 		renderSetupPage(w, 5, "AbuseIPDB API key (optional)", "", "Validation failed: "+err.Error())
 		return
 	}
-	if err := WriteSecretFile(abuseIPDBSecretPath, map[string]string{"ABUSEIPDB_KEY": key}); err != nil {
+	if s.credentialStore == nil {
+		renderSetupPage(w, 5, "AbuseIPDB API key (optional)", "", "Credential store unavailable — cannot save key.")
+		return
+	}
+	if err := s.credentialStore.Set(r.Context(), "abuseipdb.api_key", key, true); err != nil {
 		renderSetupPage(w, 5, "AbuseIPDB API key (optional)", "", "Failed to store key: "+err.Error())
 		return
 	}
@@ -525,10 +526,10 @@ func (s *Server) handleSetupStep6(w http.ResponseWriter, r *http.Request) {
   <input type="hidden" name="csrf_token" value="%s">
   <label for="bs_token">BetterStack source token</label>
   <input id="bs_token" name="bs_token" type="password" autocomplete="off" placeholder="paste token here">
-  <p class="note">Leave blank to skip. Stored at: <code>%s</code> (0600)</p>
+  <p class="note">Leave blank to skip. Stored encrypted in SQLite.</p>
   <button type="submit">Validate &amp; save</button>
   <button type="submit" name="skip" value="1" class="secondary">Skip</button>
-</form>`, csrfTok, betterStackSecretPath)
+</form>`, csrfTok)
 	renderSetupPage(w, 6, "BetterStack source token (optional)", body, "")
 }
 
@@ -549,11 +550,19 @@ func (s *Server) handleSetupStep6Post(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/setup/step/7", http.StatusFound)
 		return
 	}
-	if err := validateBetterStack(r.Context(), token); err != nil {
+	validateBetter := s.validateBetterStack
+	if validateBetter == nil {
+		validateBetter = validateBetterStack
+	}
+	if err := validateBetter(r.Context(), token); err != nil {
 		renderSetupPage(w, 6, "BetterStack source token (optional)", "", "Validation failed: "+err.Error())
 		return
 	}
-	if err := WriteSecretFile(betterStackSecretPath, map[string]string{"BETTERSTACK_SOURCE_TOKEN": token}); err != nil {
+	if s.credentialStore == nil {
+		renderSetupPage(w, 6, "BetterStack source token (optional)", "", "Credential store unavailable — cannot save token.")
+		return
+	}
+	if err := s.credentialStore.Set(r.Context(), "betterstack.source_token", token, true); err != nil {
 		renderSetupPage(w, 6, "BetterStack source token (optional)", "", "Failed to store token: "+err.Error())
 		return
 	}
@@ -582,7 +591,7 @@ func (s *Server) handleSetupStep7(w http.ResponseWriter, r *http.Request) {
   <input id="anthropic_key" name="anthropic_key" type="password" autocomplete="off" placeholder="sk-ant-...">
   <label for="gemini_key">Gemini API key</label>
   <input id="gemini_key" name="gemini_key" type="password" autocomplete="off" placeholder="AIza...">
-  <p class="note">Leave all blank to skip. Keys are stored individually (0600 each).</p>
+  <p class="note">Leave all blank to skip. Keys are stored encrypted in SQLite.</p>
   <button type="submit">Save &amp; continue</button>
   <button type="submit" name="skip" value="1" class="secondary">Skip all</button>
 </form>`, csrfTok)
@@ -605,11 +614,11 @@ func (s *Server) handleSetupStep7Post(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/setup/step/8", http.StatusFound)
 		return
 	}
-	type aiSecret struct{ field, path, name string }
+	type aiSecret struct{ field, key, name string }
 	secrets := []aiSecret{
-		{"openai_key", openAISecretPath, "OPENAI_API_KEY"},
-		{"anthropic_key", anthropicSecretPath, "ANTHROPIC_API_KEY"},
-		{"gemini_key", geminiSecretPath, "GEMINI_API_KEY"},
+		{"openai_key", "ai.openai.api_key", "OPENAI_API_KEY"},
+		{"anthropic_key", "ai.anthropic.api_key", "ANTHROPIC_API_KEY"},
+		{"gemini_key", "ai.gemini.api_key", "GEMINI_API_KEY"},
 	}
 	var errs []string
 	for _, sec := range secrets {
@@ -617,10 +626,11 @@ func (s *Server) handleSetupStep7Post(w http.ResponseWriter, r *http.Request) {
 		if val == "" {
 			continue
 		}
-		// AI keys are consumed by ReadAPIKeyFile which reads raw file content.
-		// writeProviderSecret writes the raw value (no KEY=VALUE prefix) — same
-		// format as the provider admin UI, ensuring wizard and UI outputs are identical.
-		if err := writeProviderSecret(sec.path, val); err != nil {
+		if s.credentialStore == nil {
+			errs = append(errs, fmt.Sprintf("%s: credential store unavailable", sec.name))
+			continue
+		}
+		if err := s.credentialStore.Set(r.Context(), sec.key, val, true); err != nil {
 			errs = append(errs, fmt.Sprintf("%s: %v", sec.name, err))
 		}
 	}
@@ -633,7 +643,117 @@ func (s *Server) handleSetupStep7Post(w http.ResponseWriter, r *http.Request) {
 	}
 	http.Redirect(w, r, "/setup/step/8", http.StatusFound)
 }
+
+// crowdSecLAPIKeySecretPath is a var so tests can redirect it to a temp dir.
+var crowdSecLAPIKeySecretPath = "/etc/security-automation-go/secrets/crowdsec_lapi_key"
+
+// Step 8: CrowdSec LAPI key (optional).
 func (s *Server) handleSetupStep8(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.getSession(r); !ok {
+		http.Redirect(w, r, "/setup/step/1", http.StatusFound)
+		return
+	}
+	csrfTok := ""
+	if tok, ok := s.getSession(r); ok {
+		csrfTok = s.csrfTokenFor(tok)
+	}
+
+	keyConfigured := false
+	if s.credentialStore != nil {
+		if _, ok, _ := s.credentialStore.Lookup(r.Context(), crowdSecLAPIKey); ok {
+			keyConfigured = true
+		}
+	}
+
+	det := detect.DetectCrowdSec(s.buildDetectConfig())
+	detectedLAPIURL := det.Details["lapi_url"]
+	if detectedLAPIURL == string(detect.Missing) {
+		detectedLAPIURL = ""
+	}
+	savedLAPIURL := ""
+	if s.setupStore != nil {
+		if v, ok, _ := s.setupStore.GetSetting(r.Context(), "crowdsec_lapi_url"); ok {
+			savedLAPIURL = v
+		}
+	}
+	lapiURL := savedLAPIURL
+	if lapiURL == "" {
+		lapiURL = detectedLAPIURL
+	}
+
+	var detectionBanner string
+	if det.Installed {
+		detectionBanner = `<div class="ok">CrowdSec detected on this host.</div>`
+	} else {
+		detectionBanner = `<div class="note">CrowdSec not detected on this host. You can still configure the LAPI key if CrowdSec is installed elsewhere.</div>`
+	}
+
+	var alreadyConfiguredMsg string
+	if keyConfigured {
+		alreadyConfiguredMsg = `<div class="ok">CrowdSec LAPI key already configured. You can overwrite it below or skip to continue.</div>`
+	}
+
+	body := fmt.Sprintf(`
+%s
+%s
+<p class="note">Optional. Provide the CrowdSec LAPI key so the daemon can query blocked IPs from CrowdSec.</p>
+<form action="/setup/step/8" method="post">
+  <input type="hidden" name="csrf_token" value="%s">
+  <label for="lapi_url">CrowdSec LAPI URL</label>
+  <input id="lapi_url" name="lapi_url" type="text" value="%s" placeholder="http://127.0.0.1:8080">
+  <label for="lapi_key">CrowdSec LAPI key</label>
+  <input id="lapi_key" name="lapi_key" type="password" autocomplete="off" placeholder="paste key here">
+  <p class="note">Leave blank to skip. Key stored in the encrypted credential store — never displayed again.</p>
+  <button type="submit">Save &amp; continue</button>
+  <button type="submit" name="skip" value="1" class="secondary">Skip</button>
+</form>`, detectionBanner, alreadyConfiguredMsg, csrfTok, html.EscapeString(lapiURL))
+	renderSetupPage(w, 8, "CrowdSec LAPI (optional)", body, "")
+}
+
+func (s *Server) handleSetupStep8Post(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.getSession(r); !ok {
+		http.Redirect(w, r, "/setup/step/1", http.StatusFound)
+		return
+	}
+	if !s.validCSRF(r) {
+		http.Error(w, "csrf required", http.StatusForbidden)
+		return
+	}
+	if r.FormValue("skip") == "1" {
+		if s.setupStore != nil {
+			_ = s.setupStore.SetCurrentStep(r.Context(), 9)
+		}
+		http.Redirect(w, r, "/setup/step/9", http.StatusFound)
+		return
+	}
+	lapiKey := strings.TrimSpace(r.FormValue("lapi_key"))
+	if lapiKey == "" {
+		if s.setupStore != nil {
+			_ = s.setupStore.SetCurrentStep(r.Context(), 9)
+		}
+		http.Redirect(w, r, "/setup/step/9", http.StatusFound)
+		return
+	}
+	if s.credentialStore == nil {
+		renderSetupPage(w, 8, "CrowdSec LAPI (optional)", "", "Credential store unavailable — cannot save key.")
+		return
+	}
+	if err := s.credentialStore.Set(r.Context(), crowdSecLAPIKey, lapiKey, true); err != nil {
+		renderSetupPage(w, 8, "CrowdSec LAPI (optional)", "", "Failed to store LAPI key: "+err.Error())
+		return
+	}
+	if s.setupStore != nil {
+		lapiURL := strings.TrimSpace(r.FormValue("lapi_url"))
+		if lapiURL != "" {
+			_ = s.setupStore.SetSetting(r.Context(), "crowdsec_lapi_url", lapiURL)
+		}
+		_ = s.setupStore.SetCurrentStep(r.Context(), 9)
+	}
+	http.Redirect(w, r, "/setup/step/9", http.StatusFound)
+}
+
+// Step 9: Runtime summary (was step 8).
+func (s *Server) handleSetupStep9(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.getSession(r); !ok {
 		http.Redirect(w, r, "/setup/step/1", http.StatusFound)
 		return
@@ -644,10 +764,10 @@ func (s *Server) handleSetupStep8(w http.ResponseWriter, r *http.Request) {
 			uiAddr = v
 		}
 	}
-	cfPath := "(not configured)"
-	if s.setupStore != nil {
-		if v, ok, _ := s.setupStore.GetSetting(r.Context(), "cf_token_path"); ok {
-			cfPath = v
+	cfState := "(not configured)"
+	if s.credentialStore != nil {
+		if _, ok, _ := s.credentialStore.Lookup(r.Context(), "cloudflare.api_token"); ok {
+			cfState = "configured in SQLite"
 		}
 	}
 	body := fmt.Sprintf(`
@@ -661,9 +781,9 @@ func (s *Server) handleSetupStep8(w http.ResponseWriter, r *http.Request) {
 <tr><td style="padding:.4rem .2rem;color:#5f6b7a">Mutations</td><td><code>disabled (default)</code></td></tr>
 </table>
 <br>
-<a href="/setup/step/9"><button>Continue to production mode</button></a>
+<a href="/setup/step/10"><button>Continue to production mode</button></a>
 <a href="/setup/complete" style="margin-left:.5rem"><button class="secondary">Finish without enabling production mode</button></a>
-`, uiAddr, s.cfg.StateDir, s.cfg.StateDir, cfPath)
+`, uiAddr, s.cfg.StateDir, s.cfg.StateDir, cfState)
 	results := detect.RunAll(s.buildDetectConfig())
 	var sb strings.Builder
 	sb.WriteString(`<h3>Detected Environment</h3><div class="kv">`)
@@ -677,10 +797,11 @@ func (s *Server) handleSetupStep8(w http.ResponseWriter, r *http.Request) {
 	}
 	sb.WriteString(`</div>`)
 	body += sb.String()
-	renderSetupPage(w, 8, "Runtime summary", body, "")
+	renderSetupPage(w, 9, "Runtime summary", body, "")
 }
 
-func (s *Server) handleSetupStep9(w http.ResponseWriter, r *http.Request) {
+// Step 10: Enable production mode (was step 9).
+func (s *Server) handleSetupStep10(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.getSession(r); !ok {
 		http.Redirect(w, r, "/setup/step/1", http.StatusFound)
 		return
@@ -692,7 +813,7 @@ func (s *Server) handleSetupStep9(w http.ResponseWriter, r *http.Request) {
 	body := fmt.Sprintf(`
 <div class="warn">⚠ Enabling production mode will allow the daemon to write firewall rules to Cloudflare.</div>
 <p>By default the service runs in <strong>dry-run mode</strong> with mutations disabled.</p>
-<form action="/setup/step/9" method="post">
+<form action="/setup/step/10" method="post">
   <input type="hidden" name="csrf_token" value="%s">
   <label style="display:flex;gap:.5rem;align-items:center;margin:.75rem 0">
     <input type="checkbox" name="enable_production" value="1" style="width:auto">
@@ -701,10 +822,10 @@ func (s *Server) handleSetupStep9(w http.ResponseWriter, r *http.Request) {
   <button type="submit">Finish setup</button>
 </form>
 <p class="note">Or: <a href="/setup/complete">Finish without enabling production mode</a></p>`, csrfTok)
-	renderSetupPage(w, 9, "Enable production mode", body, "")
+	renderSetupPage(w, 10, "Enable production mode", body, "")
 }
 
-func (s *Server) handleSetupStep9Post(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleSetupStep10Post(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.getSession(r); !ok {
 		http.Redirect(w, r, "/setup/step/1", http.StatusFound)
 		return
@@ -715,8 +836,8 @@ func (s *Server) handleSetupStep9Post(w http.ResponseWriter, r *http.Request) {
 	}
 	enableProd := r.FormValue("enable_production") == "1"
 	if enableProd {
-		if err := checkProductionEnableReady(s.setupStore, r.Context()); err != nil {
-			renderSetupPage(w, 9, "Enable production mode", "", err.Error())
+		if err := checkProductionEnableReady(s.setupStore, s.credentialStore, r.Context()); err != nil {
+			renderSetupPage(w, 10, "Enable production mode", "", err.Error())
 			return
 		}
 	}
@@ -732,29 +853,22 @@ func (s *Server) handleSetupStep9Post(w http.ResponseWriter, r *http.Request) {
 
 // checkProductionEnableReady validates the minimum prerequisites before the
 // operator can enable production mode (live Cloudflare mutations):
-//   - CF token secret file must exist on disk (written by step 4)
+//   - CF token must exist in the encrypted credential store
 //   - Zone ID must have been configured during step 4
-//   - Legacy-only layout must not be active (secrets can't load from old path)
-func checkProductionEnableReady(store SetupStorer, ctx context.Context) error {
-	// 1. CF token file must exist.
-	if _, err := os.Stat(cfTokenSecretPath); err != nil {
-		return fmt.Errorf("Cloudflare API token not configured. Complete step 4 first.")
-	}
-
-	// 2. Zone ID must be set.
+func checkProductionEnableReady(store SetupStorer, credentials CredentialStorer, ctx context.Context) error {
+	zoneID := ""
 	if store != nil {
-		if zoneID, ok, _ := store.GetSetting(ctx, "cf_zone_id"); !ok || strings.TrimSpace(zoneID) == "" {
-			return fmt.Errorf("Cloudflare Zone ID not configured. Return to step 4 and enter your zone ID.")
+		if v, ok, _ := store.GetSetting(ctx, "cf_zone_id"); ok {
+			zoneID = strings.TrimSpace(v)
 		}
 	}
-
-	// 3. Block if only the legacy config dir exists — secrets cannot load.
-	layout := startuplog.CheckLayout(startuplog.DefaultLegacyRoot, startuplog.DefaultCanonicalRoot+"/secrets")
-	if layout == startuplog.LayoutLegacy {
-		return fmt.Errorf("Legacy config directory detected and canonical path absent. " +
-			"Migrate secrets to /etc/security-automation-go/secrets/ before enabling production mode.")
+	check := health.CheckProductionReady(health.Config{
+		CloudflareTokenConfigured: credentialConfigured(ctx, credentials, "cloudflare.api_token"),
+		CloudflareZoneID:          zoneID,
+	})
+	if check.Status != health.Green {
+		return fmt.Errorf("%s", check.Reason)
 	}
-
 	return nil
 }
 

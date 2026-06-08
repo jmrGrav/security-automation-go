@@ -64,21 +64,29 @@ type AIProviderState struct {
 	Gemini    AIProviderRecord
 }
 
-type providerSecretSnapshot struct {
-	present bool
-	state   string
-}
-
-func providerSpec(name AIProviderName) (display string, secretFile string, prefix string) {
+func providerSpec(name AIProviderName) (display string, prefix string) {
 	switch name {
 	case AIProviderOpenAI:
-		return "OpenAI", "/etc/security-automation-go/secrets/openai_api_key", "AI_PROVIDER_OPENAI"
+		return "OpenAI", "AI_PROVIDER_OPENAI"
 	case AIProviderAnthropic:
-		return "Anthropic", "/etc/security-automation-go/secrets/anthropic_api_key", "AI_PROVIDER_ANTHROPIC"
+		return "Anthropic", "AI_PROVIDER_ANTHROPIC"
 	case AIProviderGemini:
-		return "Gemini", "/etc/security-automation-go/secrets/gemini_api_key", "AI_PROVIDER_GEMINI"
+		return "Gemini", "AI_PROVIDER_GEMINI"
 	default:
-		return strings.Title(string(name)), "", ""
+		return strings.Title(string(name)), ""
+	}
+}
+
+func providerCredentialKeyForName(name AIProviderName) string {
+	switch name {
+	case AIProviderOpenAI:
+		return "ai.openai.api_key"
+	case AIProviderAnthropic:
+		return "ai.anthropic.api_key"
+	case AIProviderGemini:
+		return "ai.gemini.api_key"
+	default:
+		return ""
 	}
 }
 
@@ -227,7 +235,7 @@ func providerStatePrefix(name AIProviderName) string {
 	case AIProviderGemini:
 		return "GEMINI"
 	default:
-		_, _, prefix := providerSpec(name)
+		_, prefix := providerSpec(name)
 		return prefix
 	}
 }
@@ -314,77 +322,38 @@ func syncDir(dir string) error {
 	return nil
 }
 
-func providerStatePathHint(path string, secret bool) string {
+func providerStatePathHint(path string) string {
 	lines := []string{
-		fmt.Sprintf("impossible to write %s at %s", ternary(secret, "the secret", "the provider state"), path),
+		fmt.Sprintf("impossible to write the provider state at %s", path),
 		"Run:",
 		"sudo install -d -m 755 -o root -g root /etc/security-automation-go",
 	}
-	if secret {
-		lines = append(lines,
-			"sudo install -d -m 700 -o root -g root /etc/security-automation-go/secrets",
-			fmt.Sprintf("sudo install -m 600 -o root -g root /dev/null %s", path),
-		)
-	} else {
-		lines = append(lines,
-			"sudo install -d -m 755 -o root -g root /etc/security-automation-go/providers",
-			fmt.Sprintf("sudo install -m 640 -o root -g security-automation /dev/null %s", path),
-		)
-	}
+	lines = append(lines,
+		"sudo install -d -m 750 -o security-automation -g security-automation /var/lib/security-automation-go/runtime",
+		fmt.Sprintf("sudo install -m 0640 -o security-automation -g security-automation /dev/null %s", path),
+	)
 	return strings.Join(lines, "\n")
 }
 
-func ternary(ok bool, a, b string) string {
-	if ok {
-		return a
+func providerManagementEntry(name AIProviderName, cfg ai.ProviderConfig, configured bool, record AIProviderRecord) AIProviderManagementEntry {
+	display, _ := providerSpec(name)
+	secretState := providerStatusMissingSecret
+	if configured {
+		secretState = "configured"
 	}
-	return b
-}
-
-func providerSecretSnapshotForPath(path string) providerSecretSnapshot {
-	path = strings.TrimSpace(path)
-	if path == "" {
-		return providerSecretSnapshot{state: providerStatusMissingSecret}
-	}
-	info, err := os.Stat(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return providerSecretSnapshot{state: providerStatusMissingSecret}
-		}
-		return providerSecretSnapshot{state: providerStatusInvalidSecret}
-	}
-	if info.IsDir() {
-		return providerSecretSnapshot{state: providerStatusInvalidSecret}
-	}
-	if info.Mode().Perm()&0o077 != 0 {
-		return providerSecretSnapshot{state: providerStatusInvalidSecret}
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return providerSecretSnapshot{state: providerStatusInvalidSecret}
-	}
-	if strings.TrimSpace(string(data)) == "" {
-		return providerSecretSnapshot{state: providerStatusInvalidSecret}
-	}
-	return providerSecretSnapshot{present: true, state: providerStatusReady}
-}
-
-func providerManagementEntry(name AIProviderName, cfg ai.ProviderConfig, secretPath string, record AIProviderRecord) AIProviderManagementEntry {
-	display, _, _ := providerSpec(name)
-	secret := providerSecretSnapshotForPath(secretPath)
-	status := providerManagementStatus(record.Enabled, secret.state, record.LastTestStatus)
+	status := providerManagementStatus(record.Enabled, secretState, record.LastTestStatus)
 	return AIProviderManagementEntry{
 		Name:              display,
 		Status:            status,
 		Model:             valueOrFallback(cfg.Model, "unconfigured"),
 		Enabled:           record.Enabled,
-		SecretState:       secret.state,
-		SecretPathDisplay: maskSecretPath(secretPath),
+		SecretState:       secretState,
+		SecretPathDisplay: "SQLite credential store",
 		LastTestAt:        formatProviderTime(record.LastTestAt),
 		LastTestStatus:    valueOrFallback(record.LastTestStatus, "never"),
 		LastTestLatencyMS: formatLatencyMS(record.LastTestLatencyMS),
 		LastErrorCode:     valueOrFallback(record.LastErrorCode, "none"),
-		ValidationMessage: providerValidationMessage(status, secret.state, record),
+		ValidationMessage: providerValidationMessage(status, secretState, record),
 	}
 }
 
@@ -411,9 +380,9 @@ func providerManagementStatus(enabled bool, secretState string, lastTest string)
 func providerValidationMessage(status, secretState string, record AIProviderRecord) string {
 	switch status {
 	case providerStatusMissingSecret:
-		return "secret file missing"
+		return "credential missing from SQLite"
 	case providerStatusInvalidSecret:
-		return "secret file unreadable or invalid"
+		return "credential unreadable from SQLite"
 	case providerStatusDisabled:
 		return "provider disabled by operator"
 	case providerStatusRateLimited:
@@ -424,14 +393,15 @@ func providerValidationMessage(status, secretState string, record AIProviderReco
 		}
 		return "last test reported an error"
 	case providerStatusReady:
-		return "secret present and configuration valid"
+		return "credential present and configuration valid"
 	default:
 		return providerStatusError
 	}
 }
 
-func providerDashboardEntry(name AIProviderName, cfg ai.ProviderConfig, secretPath string, record AIProviderRecord) AIProviderDashboardView {
-	entry := providerManagementEntry(name, cfg, secretPath, record)
+func providerDashboardEntry(name AIProviderName, cfg ai.ProviderConfig, credentialKey string, record AIProviderRecord) AIProviderDashboardView {
+	_ = credentialKey
+	entry := providerManagementEntry(name, cfg, strings.TrimSpace(cfg.APIKey) != "", record)
 	return AIProviderDashboardView{
 		Name:         entry.Name,
 		Status:       entry.Status,
@@ -441,23 +411,6 @@ func providerDashboardEntry(name AIProviderName, cfg ai.ProviderConfig, secretPa
 		SecretState:  entry.SecretState,
 		EnabledState: enabledText(record.Enabled),
 	}
-}
-
-func maskSecretPath(path string) string {
-	path = strings.TrimSpace(path)
-	if path == "" {
-		return "missing"
-	}
-	if strings.HasSuffix(path, "openai_api_key") {
-		return "…/openai_api_key"
-	}
-	if strings.HasSuffix(path, "anthropic_api_key") {
-		return "…/anthropic_api_key"
-	}
-	if strings.HasSuffix(path, "gemini_api_key") {
-		return "…/gemini_api_key"
-	}
-	return filepath.Base(path)
 }
 
 func formatProviderTime(t time.Time) string {
@@ -533,17 +486,21 @@ func providerRecordForName(state *AIProviderState, name AIProviderName) *AIProvi
 }
 
 func providerStatusFromRecordAndConfig(record AIProviderRecord, cfg ai.ProviderConfig) string {
-	return providerManagementStatus(record.Enabled, providerSecretSnapshotForPath(cfg.APIKeyFile).state, record.LastTestStatus)
+	secretState := providerStatusMissingSecret
+	if strings.TrimSpace(cfg.APIKey) != "" {
+		secretState = "configured"
+	}
+	return providerManagementStatus(record.Enabled, secretState, record.LastTestStatus)
 }
 
 func providerManagementView(cfg ai.Config, state AIProviderState, loaded bool) AIProviderManagementView {
 	effective := applyAIProviderState(cfg, state, loaded)
 	views := make([]AIProviderManagementEntry, 0, 3)
 	for _, name := range providerNames() {
-		display, _, _ := providerSpec(name)
+		display, _ := providerSpec(name)
 		record := providerStateRecord(state, name)
 		providerCfg := providerConfigForName(effective, name)
-		entry := providerManagementEntry(name, providerCfg, providerSecretPathForName(effective, name), record)
+		entry := providerManagementEntry(name, providerCfg, strings.TrimSpace(providerCfg.APIKey) != "", record)
 		entry.Name = display
 		views = append(views, entry)
 	}
@@ -555,7 +512,7 @@ func providerDashboardViews(cfg ai.Config, state AIProviderState, loaded bool) [
 	effective := applyAIProviderState(cfg, state, loaded)
 	views := make([]AIProviderDashboardView, 0, 3)
 	for _, name := range providerNames() {
-		views = append(views, providerDashboardEntry(name, providerConfigForName(effective, name), providerSecretPathForName(effective, name), providerStateRecord(state, name)))
+		views = append(views, providerDashboardEntry(name, providerConfigForName(effective, name), providerCredentialKeyForName(name), providerStateRecord(state, name)))
 	}
 	sort.SliceStable(views, func(i, j int) bool { return views[i].Name < views[j].Name })
 	return views
@@ -574,26 +531,9 @@ func providerConfigForName(cfg ai.Config, name AIProviderName) ai.ProviderConfig
 	}
 }
 
-func providerSecretPathForName(cfg ai.Config, name AIProviderName) string {
-	providerCfg := providerConfigForName(cfg, name)
-	if strings.TrimSpace(providerCfg.APIKeyFile) != "" {
-		return providerCfg.APIKeyFile
-	}
-	_, secretFile, _ := providerSpec(name)
-	return secretFile
-}
-
-func writeProviderSecret(path, secret string) error {
-	secret = strings.TrimSpace(secret)
-	if secret == "" {
-		return errors.New("secret is required")
-	}
-	return atomicWriteFile(path, []byte(secret), 0o600, -1, -1)
-}
-
 func providerConfigValidationError(path string, err error) error {
 	if os.IsPermission(err) || errors.Is(err, os.ErrPermission) {
-		return fmt.Errorf("%s: %w\n%s", err.Error(), err, providerStatePathHint(path, strings.Contains(path, "secrets/")))
+		return fmt.Errorf("%s: %w\n%s", err.Error(), err, providerStatePathHint(path))
 	}
 	return err
 }
@@ -602,10 +542,13 @@ func ProviderManagementPage(view AIProviderManagementView, csrfToken string) tem
 	return ConsoleLayout(shellView{
 		Title:    "Providers",
 		Headline: "Provider Management",
-		Subtitle: "Manage OpenAI, Anthropic, and Gemini locally with file-backed secrets and redacted operator state.",
+		Subtitle: "Manage OpenAI, Anthropic, and Gemini locally with encrypted SQLite credentials and redacted operator state.",
 		Active:   "/providers",
 		Body: templ.ComponentFunc(func(ctx context.Context, w io.Writer) error {
-			if _, err := fmt.Fprint(w, `<div class="panel"><p class="muted">Provider management is local-only. Keys are never rendered, never prefilled, and never stored in SQLite. Replace Key writes only the secret file; Enable/Disable touches only the provider state file.</p></div>`); err != nil {
+			if _, err := fmt.Fprint(w, `<div class="panel"><p class="muted">Provider management is local-only. Keys are never rendered, never prefilled, and are stored encrypted in SQLite. Enable/Disable touches only provider state; the legacy import action is one-shot and explicit.</p></div>`); err != nil {
+				return err
+			}
+			if _, err := fmt.Fprintf(w, `<div class="panel"><p class="muted">Legacy file import is one-shot and explicit. It copies old secret files into the encrypted SQLite store, then the runtime continues from DB only.</p><form action="/admin/providers/import-legacy" method="post"><input type="hidden" name="csrf_token" value="%s"/><button type="submit">Import Legacy Secrets</button></form></div>`, html.EscapeString(csrfToken)); err != nil {
 				return err
 			}
 			if strings.TrimSpace(view.Error) != "" {
@@ -657,7 +600,7 @@ func renderProviderManagementCard(w io.Writer, p AIProviderManagementEntry, csrf
 		value string
 	}{
 		{label: "model", value: p.Model},
-		{label: "secret file", value: p.SecretPathDisplay},
+		{label: "credential store", value: p.SecretPathDisplay},
 		{label: "last test at", value: p.LastTestAt},
 		{label: "last test status", value: p.LastTestStatus},
 		{label: "last test latency", value: p.LastTestLatencyMS},

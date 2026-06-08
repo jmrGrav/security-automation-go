@@ -3,8 +3,6 @@ package main
 import (
 	"bytes"
 	"log/slog"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -33,9 +31,9 @@ func TestBuildAIProvidersActivatesConfiguredProvider(t *testing.T) {
 			cfg: ai.Config{
 				Enabled: true,
 				OpenAI: ai.ProviderConfig{
-					Enabled:    true,
-					Model:      "gpt-4.1-mini",
-					APIKeyFile: writeKeyFile(t, "test-openai-key"),
+					Enabled: true,
+					Model:   "gpt-4.1-mini",
+					APIKey:  "test-openai-key",
 				},
 			},
 			want: providers.OpenAI,
@@ -45,9 +43,9 @@ func TestBuildAIProvidersActivatesConfiguredProvider(t *testing.T) {
 			cfg: ai.Config{
 				Enabled: true,
 				Anthropic: ai.ProviderConfig{
-					Enabled:    true,
-					Model:      "claude-3-5-sonnet-latest",
-					APIKeyFile: writeKeyFile(t, "test-anthropic-key"),
+					Enabled: true,
+					Model:   "claude-3-5-sonnet-latest",
+					APIKey:  "test-anthropic-key",
 				},
 			},
 			want: providers.Anthropic,
@@ -57,9 +55,9 @@ func TestBuildAIProvidersActivatesConfiguredProvider(t *testing.T) {
 			cfg: ai.Config{
 				Enabled: true,
 				Gemini: ai.ProviderConfig{
-					Enabled:    true,
-					Model:      "gemini-1.5-pro",
-					APIKeyFile: writeKeyFile(t, "test-gemini-key"),
+					Enabled: true,
+					Model:   "gemini-1.5-pro",
+					APIKey:  "test-gemini-key",
 				},
 			},
 			want: providers.Gemini,
@@ -82,43 +80,23 @@ func TestBuildAIProvidersActivatesConfiguredProvider(t *testing.T) {
 	}
 }
 
-func TestBuildAIProvidersSkipsUnreadableSecretAndRedactsLogs(t *testing.T) {
-	dir := t.TempDir()
-	secretFile := filepath.Join(dir, "openai_api_key")
-	if err := os.WriteFile(secretFile, []byte("super-secret-token"), 0o644); err != nil {
-		t.Fatalf("write secret file: %v", err)
-	}
-
+func TestBuildAIProvidersSkipsMissingCredentialAndLogsProviderName(t *testing.T) {
 	var buf bytes.Buffer
 	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn}))
 	got := buildAIProviders(ai.Config{
 		Enabled: true,
 		OpenAI: ai.ProviderConfig{
-			Enabled:    true,
-			Model:      "gpt-4.1-mini",
-			APIKeyFile: secretFile,
+			Enabled: true,
+			Model:   "gpt-4.1-mini",
 		},
 	}, logger)
 	if len(got) != 0 {
-		t.Fatalf("expected unreadable secret to keep provider unavailable, got %d providers", len(got))
+		t.Fatalf("expected missing credential to keep provider unavailable, got %d providers", len(got))
 	}
 	out := buf.String()
 	if !strings.Contains(out, "openai") {
 		t.Fatalf("expected warning to mention provider name, got %q", out)
 	}
-	if strings.Contains(out, "super-secret-token") {
-		t.Fatalf("logger leaked secret content: %q", out)
-	}
-}
-
-func writeKeyFile(t *testing.T, secret string) string {
-	t.Helper()
-	dir := t.TempDir()
-	path := filepath.Join(dir, "api-key.txt")
-	if err := os.WriteFile(path, []byte(secret), 0o600); err != nil {
-		t.Fatalf("write key file: %v", err)
-	}
-	return path
 }
 
 var _ = anthropic.New

@@ -7,6 +7,17 @@ import (
 	"github.com/jm/security-automation-go/internal/health"
 )
 
+func checkByName(t *testing.T, results []health.Check, name string) health.Check {
+	t.Helper()
+	for _, c := range results {
+		if c.Name == name {
+			return c
+		}
+	}
+	t.Fatalf("missing health check %q", name)
+	return health.Check{}
+}
+
 func TestCheckCloudflare_BothPresent(t *testing.T) {
 	c := health.CheckCloudflare(health.Config{CloudflareToken: "tok", CloudflareZoneID: "zone"})
 	if c.Status != health.Green {
@@ -80,7 +91,7 @@ func TestCheckSQLite_StateDirExistsNoDB(t *testing.T) {
 
 func TestCheckSQLite_DBPresent(t *testing.T) {
 	dir := t.TempDir()
-	f, _ := os.Create(dir + "/state.db")
+	f, _ := os.Create(dir + "/runtime.db")
 	_ = f.Close()
 	c := health.CheckSQLite(health.Config{StateDir: dir})
 	if c.Status != health.Green {
@@ -95,14 +106,49 @@ func TestCheckSQLite_EmptyStateDir(t *testing.T) {
 	}
 }
 
+// --- CheckCrowdSec tests ---
+
 func TestCheckCrowdSec_NotConfigured(t *testing.T) {
 	c := health.CheckCrowdSec(health.Config{})
 	if c.Status != health.Green {
-		t.Errorf("expected GREEN for optional unconfigured, got %s", c.Status)
+		t.Errorf("expected GREEN for optional unconfigured, got %s: %s", c.Status, c.Reason)
+	}
+}
+
+func TestCheckCrowdSec_InstalledServiceDown(t *testing.T) {
+	c := health.CheckCrowdSec(health.Config{
+		CrowdSecInstalled:      true,
+		CrowdSecServiceRunning: false,
+	})
+	if c.Status != health.Yellow {
+		t.Errorf("expected YELLOW when installed but service not running, got %s: %s", c.Status, c.Reason)
+	}
+}
+
+func TestCheckCrowdSec_RunningKeyMissing(t *testing.T) {
+	c := health.CheckCrowdSec(health.Config{
+		CrowdSecInstalled:         true,
+		CrowdSecServiceRunning:    true,
+		CrowdSecLAPIKeyConfigured: false,
+	})
+	if c.Status != health.Yellow {
+		t.Errorf("expected YELLOW when running but LAPI key missing, got %s: %s", c.Status, c.Reason)
+	}
+}
+
+func TestCheckCrowdSec_FullyConfigured(t *testing.T) {
+	c := health.CheckCrowdSec(health.Config{
+		CrowdSecInstalled:         true,
+		CrowdSecServiceRunning:    true,
+		CrowdSecLAPIKeyConfigured: true,
+	})
+	if c.Status != health.Green {
+		t.Errorf("expected GREEN when fully configured, got %s: %s", c.Status, c.Reason)
 	}
 }
 
 func TestCheckCrowdSec_ConfiguredLogMissing(t *testing.T) {
+	// Legacy fallback: decisions log configured but file missing.
 	c := health.CheckCrowdSec(health.Config{DecisionsLog: "/nonexistent-log-xyz-test"})
 	if c.Status != health.Yellow {
 		t.Errorf("expected YELLOW when log configured but missing, got %s", c.Status)
@@ -110,12 +156,58 @@ func TestCheckCrowdSec_ConfiguredLogMissing(t *testing.T) {
 }
 
 func TestCheckCrowdSec_LogPresent(t *testing.T) {
+	// Legacy fallback: decisions log present.
 	dir := t.TempDir()
 	f, _ := os.Create(dir + "/decisions.json")
 	_ = f.Close()
 	c := health.CheckCrowdSec(health.Config{DecisionsLog: dir + "/decisions.json"})
 	if c.Status != health.Green {
 		t.Errorf("expected GREEN when log exists, got %s", c.Status)
+	}
+}
+
+// --- CheckCrowdSecPoller tests ---
+
+func TestCheckCrowdSecPoller_NotEnabled(t *testing.T) {
+	c := health.CheckCrowdSecPoller(health.Config{})
+	if c.Status != health.Green {
+		t.Errorf("expected GREEN when poller not enabled, got %s: %s", c.Status, c.Reason)
+	}
+}
+
+func TestCheckCrowdSecPoller_EnabledKeyMissing(t *testing.T) {
+	c := health.CheckCrowdSecPoller(health.Config{
+		CrowdSecPollerEnabled:     true,
+		CrowdSecLAPIKeyConfigured: false,
+	})
+	if c.Status != health.Yellow {
+		t.Errorf("expected YELLOW when poller enabled but key missing, got %s: %s", c.Status, c.Reason)
+	}
+}
+
+func TestCheckCrowdSecPoller_EnabledKeyPresent(t *testing.T) {
+	c := health.CheckCrowdSecPoller(health.Config{
+		CrowdSecPollerEnabled:     true,
+		CrowdSecLAPIKeyConfigured: true,
+	})
+	if c.Status != health.Green {
+		t.Errorf("expected GREEN when poller enabled and key present, got %s: %s", c.Status, c.Reason)
+	}
+}
+
+// --- CheckCrowdSecAppSec tests ---
+
+func TestCheckCrowdSecAppSec_NotDetected(t *testing.T) {
+	c := health.CheckCrowdSecAppSec(health.Config{})
+	if c.Status != health.Green {
+		t.Errorf("expected GREEN when AppSec not detected, got %s: %s", c.Status, c.Reason)
+	}
+}
+
+func TestCheckCrowdSecAppSec_Detected(t *testing.T) {
+	c := health.CheckCrowdSecAppSec(health.Config{CrowdSecAppSecDetected: true})
+	if c.Status != health.Green {
+		t.Errorf("expected GREEN when AppSec active, got %s: %s", c.Status, c.Reason)
 	}
 }
 
@@ -182,8 +274,9 @@ func TestCheckPermissions_GroupAccessible(t *testing.T) {
 	dir := t.TempDir()
 	_ = os.Chmod(dir, 0o750)
 	c := health.CheckPermissions(health.Config{SecretDir: dir})
-	if c.Status != health.Yellow {
-		t.Errorf("expected YELLOW for group-accessible dir (750), got %s: %s", c.Status, c.Reason)
+	// 750 has no world bits — GREEN (group-read is acceptable for the runtime dir).
+	if c.Status != health.Green {
+		t.Errorf("expected GREEN for group-accessible dir (750), got %s: %s", c.Status, c.Reason)
 	}
 }
 
@@ -235,10 +328,10 @@ func TestCheckDisk_RedBelow10Pct(t *testing.T) {
 	}
 }
 
-func TestRunAll_ReturnsTwelveChecks(t *testing.T) {
+func TestRunAll_ReturnsEighteenChecks(t *testing.T) {
 	results := health.RunAll(health.Config{})
-	if len(results) != 12 {
-		t.Fatalf("expected 12 checks, got %d", len(results))
+	if len(results) != 18 {
+		t.Fatalf("expected 18 checks, got %d", len(results))
 	}
 }
 
@@ -292,5 +385,108 @@ func TestCheckLegacyLayout_OnlyLegacyExists(t *testing.T) {
 	})
 	if c.Status != health.Red {
 		t.Errorf("expected RED when only legacy exists, got %s: %s", c.Status, c.Reason)
+	}
+}
+
+func TestCheckCanonicalSecretsDir_Missing(t *testing.T) {
+	c := health.CheckCanonicalSecretsDir(health.Config{CanonicalSecretsDir: "/nonexistent-canonical-xyz-test"})
+	if c.Status != health.Green {
+		t.Fatalf("expected GREEN when canonical secrets dir is missing, got %s: %s", c.Status, c.Reason)
+	}
+}
+
+func TestCheckCanonicalSecretsDir_Present(t *testing.T) {
+	dir := t.TempDir()
+	c := health.CheckCanonicalSecretsDir(health.Config{CanonicalSecretsDir: dir})
+	if c.Status != health.Green {
+		t.Fatalf("expected GREEN when canonical secrets dir exists, got %s: %s", c.Status, c.Reason)
+	}
+}
+
+func TestCheckSetupComplete_Green(t *testing.T) {
+	c := health.CheckSetupComplete(health.Config{SetupComplete: true})
+	if c.Status != health.Green {
+		t.Fatalf("expected GREEN when setup is complete, got %s: %s", c.Status, c.Reason)
+	}
+}
+
+func TestCheckSetupComplete_Yellow(t *testing.T) {
+	c := health.CheckSetupComplete(health.Config{})
+	if c.Status != health.Yellow {
+		t.Fatalf("expected YELLOW when setup is incomplete, got %s: %s", c.Status, c.Reason)
+	}
+}
+
+func TestCheckAISecrets_GreenWhenAllConfigured(t *testing.T) {
+	c := health.CheckAISecrets(health.Config{
+		OpenAIEnabled:       true,
+		AnthropicEnabled:    true,
+		GeminiEnabled:       true,
+		OpenAIConfigured:    true,
+		AnthropicConfigured: true,
+		GeminiConfigured:    true,
+	})
+	if c.Status != health.Green {
+		t.Fatalf("expected GREEN when all AI secrets are valid, got %s: %s", c.Status, c.Reason)
+	}
+}
+
+func TestCheckAISecrets_YellowWhenEnabledMissingKey(t *testing.T) {
+	c := health.CheckAISecrets(health.Config{
+		OpenAIEnabled: true,
+	})
+	if c.Status != health.Yellow {
+		t.Fatalf("expected YELLOW when an enabled AI secret is missing, got %s: %s", c.Status, c.Reason)
+	}
+}
+
+func TestCheckAISecrets_GreenWhenNoneEnabled(t *testing.T) {
+	c := health.CheckAISecrets(health.Config{})
+	if c.Status != health.Green {
+		t.Fatalf("expected GREEN when no AI providers enabled, got %s: %s", c.Status, c.Reason)
+	}
+}
+
+func TestCheckProductionReady_Green(t *testing.T) {
+	c := health.CheckProductionReady(health.Config{
+		CloudflareTokenConfigured: true,
+		CloudflareZoneID:          "zone-123",
+	})
+	if c.Status != health.Green {
+		t.Fatalf("expected GREEN when production is ready, got %s: %s", c.Status, c.Reason)
+	}
+}
+
+func TestCheckProductionReady_RedWhenCloudflareTokenMissing(t *testing.T) {
+	c := health.CheckProductionReady(health.Config{
+		CloudflareZoneID: "zone-123",
+	})
+	if c.Status != health.Red {
+		t.Fatalf("expected RED when Cloudflare token is missing, got %s: %s", c.Status, c.Reason)
+	}
+}
+
+func TestCheckProductionReady_RedWhenZoneMissing(t *testing.T) {
+	c := health.CheckProductionReady(health.Config{
+		CloudflareTokenConfigured: true,
+	})
+	if c.Status != health.Red {
+		t.Fatalf("expected RED when Cloudflare zone ID is missing, got %s: %s", c.Status, c.Reason)
+	}
+}
+
+func TestRunAll_HealthChecksExposeSetupAndReadyState(t *testing.T) {
+	results := health.RunAll(health.Config{
+		SetupComplete:             true,
+		CloudflareTokenConfigured: true,
+		CloudflareZoneID:          "zone-123",
+		OpenAIEnabled:             true,
+		OpenAIConfigured:          true,
+	})
+	if got := checkByName(t, results, "setup").Status; got != health.Green {
+		t.Fatalf("expected setup GREEN, got %s", got)
+	}
+	if got := checkByName(t, results, "production").Status; got != health.Green {
+		t.Fatalf("expected production GREEN, got %s", got)
 	}
 }

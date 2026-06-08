@@ -21,7 +21,9 @@ keeps all provider lookups behind explicit toggles and short timeouts.
 
 ## Secrets
 
-- Provider keys may come from env or the local secret file.
+- Provider keys are stored in the encrypted SQLite credential store.
+- The legacy `/etc/security-automation-go/secrets/` layout is import-only and
+  is not used at runtime.
 - UI rendering must mask any configured key.
 - Logs, evidence, and docs must never contain full keys.
 

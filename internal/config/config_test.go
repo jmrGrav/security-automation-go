@@ -79,12 +79,13 @@ abuseipdb:
 }
 
 func TestConfig_Validation(t *testing.T) {
-	os.Unsetenv("CF_API_TOKEN")
-	os.Unsetenv("CF_ZONE_ID")
-
-	_, err := Load("")
-	if err == nil {
-		t.Error("expected error when missing required fields")
+	// Cloudflare bootstrap secrets are optional at startup now.
+	cfg, err := Load("")
+	if err != nil {
+		t.Fatalf("expected config to load without Cloudflare bootstrap secrets: %v", err)
+	}
+	if cfg.Cloudflare.APIToken != "" || cfg.Cloudflare.ZoneID != "" {
+		t.Fatalf("expected optional Cloudflare fields to remain empty, got %+v", cfg.Cloudflare)
 	}
 }
 

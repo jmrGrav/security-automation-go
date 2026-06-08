@@ -30,8 +30,8 @@ explicitly approved actions. It is not a public API.
 ## Secrets
 
 - Provider API keys must never be logged or rendered in full.
-- Provider keys may be read from env or the local secret file.
-- The local secret file must be written with `0600` permissions.
+- Provider keys are stored in the encrypted SQLite credential store.
+- Legacy `/etc/security-automation-go/secrets/` files are import-only and are not a runtime source.
 - If a secret has been pasted into a prompt or temporary note, rotate it.
 
 ## Operator expectations

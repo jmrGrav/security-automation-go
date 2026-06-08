@@ -26,6 +26,18 @@ func (a *CrowdSecSyncApp) Run(ctx context.Context) error {
 	logger := logging.FromContext(ctx, a.logger)
 	logger.InfoContext(ctx, "starting crowdsec sync daemon", "interval", a.cfg.Interval)
 
+	if a.poller != nil {
+		go func() {
+			if err := a.poller.Run(ctx); err != nil {
+				logger.ErrorContext(ctx, "crowdsec poller stopped", "error", err)
+			}
+		}()
+		logger.InfoContext(ctx, "crowdsec poller started",
+			"interval", a.cfg.CrowdSec.PollerInterval,
+			"lapi_url", a.cfg.CrowdSec.PollerLAPIURL,
+		)
+	}
+
 	wafRuntime := newWAFReportingRuntime(ctx, logger, a.cfg, a.abuse, a.better)
 	defer wafRuntime.close()
 

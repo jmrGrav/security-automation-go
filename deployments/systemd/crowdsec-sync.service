@@ -22,7 +22,7 @@ ProtectControlGroups=yes
 RestrictNamespaces=yes
 RestrictRealtime=yes
 LockPersonality=yes
-ReadWritePaths=/var/lib/security-automation-go /var/log/crowdsec /etc/security-automation-go/secrets
+ReadWritePaths=/var/lib/security-automation-go /var/log/crowdsec
 
 [Install]
 WantedBy=multi-user.target

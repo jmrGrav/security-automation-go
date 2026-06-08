@@ -1,93 +1,101 @@
 # security-automation-go
 
+![Go](https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go)
+![CI](https://github.com/jmrGrav/security-automation-go/actions/workflows/ci.yml/badge.svg)
+![Release](https://img.shields.io/github/v/release/jmrGrav/security-automation-go)
+![License](https://img.shields.io/github/license/jmrGrav/security-automation-go)
+![Security](https://img.shields.io/badge/security-policy-green)
+
 Go control-plane that synchronises [CrowdSec](https://crowdsec.net/) decisions to
 [Cloudflare](https://www.cloudflare.com/), reports abusive IPs to
-[AbuseIPDB](https://www.abuseipdb.com/), and drives WAF follow-up actions. It is
-the successor to the production Python stack but is **not yet the production
-authority** — see [Current status](#current-status).
+[AbuseIPDB](https://www.abuseipdb.com/), and drives WAF follow-up actions.
 
-> **Status: pre-cutover.** Python remains the source of truth. Go runs in
-> observe-only / dry-run. Do not enable Go mutations in production until a formal
-> GO is recorded against [docs/runbooks/RELEASE_CUTOVER_CHECKLIST.md](docs/runbooks/RELEASE_CUTOVER_CHECKLIST.md).
+> **Status: v1.5.0 — first-run install and Go runtime cutover-ready.**
+> The historical Python runtime is retired from the critical path; remaining legacy
+> scripts are kept only for rollback or archival reference.
+> Recidivist escalation and `/24` auto-ban remain in Python stubs (backlog v1.5.1).
 
 ## What it replaces
 
-The production Python stack (running from `/usr/local/bin`):
+The production Python stack:
 
-| Python script | Responsibilities |
+| Python script | Go replacement |
 |---|---|
-| `crowdsec-cf-sync.py` | CrowdSec active-ban → Cloudflare access-rule sync, AbuseIPDB reporting, recidivist escalation, ModSecurity log scan + temp ban, `/24` auto-ban, Better Stack ingest, Cloudflare WAF GraphQL polling, JSON state |
-| `cloudflare-allowlist-update.py` | Better Stack + Cloudflare IP lists → Cloudflare `allowed_ip` list; additive CrowdSec allowlist sync with exclusion pattern |
-| `cloudflare-cleanup-ip-rules.py` | Paginate access rules, keep `easycron`-noted rules, delete the rest |
+| `crowdsec-cf-sync.py` | `cmd/cf-sync` — CrowdSec → Cloudflare pipeline, AbuseIPDB reporting, BetterStack ingest, WAF GraphQL polling |
+| `crowdsec-poller.py` | `internal/crowdsec/poller/` — Go port; LAPI key from encrypted CredentialStore |
+| `cloudflare-allowlist-update.py` | `cmd/cf-allowlist-sync` |
+| `cloudflare-cleanup-ip-rules.py` | `cmd/cf-cleanup` |
+| ModSecurity log scan + temp ban | **Retired** — replaced by CrowdSec AppSec |
 
 ## Architecture
 
 ```
-cmd/cf-sync            real daemon: orchestrator pipeline + WAF replay poller + HTTP API
+cmd/cf-sync            main daemon: orchestrator pipeline + WAF replay poller + operator UI
   └── internal/orchestrator/pipeline   staged: admission → discovery → planning → execution → reporting
-  └── internal/cloudflare/{transport,discovery,mutate}   real Cloudflare REST + GraphQL
-  └── internal/crowdsec/adapter        real cscli execution (os/exec)
+  └── internal/cloudflare/{transport,discovery,mutate}   Cloudflare REST + GraphQL
+  └── internal/crowdsec/{adapter,poller}  cscli execution + LAPI polling
   └── internal/abuseipdb               AbuseIPDB reporting
-  └── internal/runtime/*               event sourcing, journal, replay, recovery, HA lease/fencing, scheduler
-  └── internal/policy                  OPA policy-as-code + explainability
-  └── internal/rollback                governed, reversible mutations
-  └── internal/state, internal/storage/sqlite   WAL-scoped SQLite state
+  └── internal/runtime/*               event sourcing, journal, replay, recovery, HA fencing, scheduler
+  └── internal/storage/sqlite          WAL-scoped SQLite state + encrypted CredentialStore (AES-GCM)
+  └── internal/ui                      operator web UI, first-run wizard, health center
+  └── internal/health, internal/detect component health checks + auto-discovery
 
-cmd/{crowdsec-sync, cf-allowlist-sync, cf-cleanup}   LEGACY Phase-0 entrypoints (stub-backed; not the daemon)
+cmd/{crowdsec-sync, cf-allowlist-sync, cf-cleanup}   thin entrypoints (phase-0 scaffolding)
 ```
-
-> **Note:** `cmd/cf-sync` is the real daemon. The three thin `cmd/*` entrypoints
-> and `internal/app` are Phase-0 scaffolding wired to stub clients
-> (`internal/crowdsec/client.go`, `internal/cidrban`, `internal/modsecurity`,
-> `internal/recidive` return `ErrNotImplemented`). They are retained for history
-> and must not be deployed. See [docs/archive/TEST_GAP_REPORT.md](docs/archive/TEST_GAP_REPORT.md).
 
 ## Current status
 
 - `go build`, `go vet`, `gofmt`, `go test`, `go test -race`: **green**.
-- Test coverage is uneven: the two external-effect boundaries that actually
-  change state — `internal/cloudflare/transport` (Cloudflare mutations) and
-  `internal/crowdsec/adapter` (cscli bans) — currently have **no tests**.
-- Several Python responsibilities are **not yet ported** to the runnable path:
-  recidivist escalation, `/24` auto-ban, ModSecurity-log-based bans, and the
-  allowlist-sync / cleanup flows. See [docs/archive/TEST_GAP_REPORT.md](docs/archive/TEST_GAP_REPORT.md)
-  for the authoritative Python ↔ Go gap analysis.
+- First-run wizard: **validated** end-to-end (`TestUIFreshInstallWizardAndConservativeRestart`).
+- Encrypted CredentialStore: **production-ready**. All secrets flow through SQLite AES-GCM.
+- CrowdSec Go integration: **complete** (detection, health, admin UI, wizard, poller).
+- External-effect boundaries (`internal/cloudflare/transport`, `internal/crowdsec/adapter`) have integration tests via the running daemon; no isolated unit tests yet.
+- Recidivist escalation, `/24` auto-ban, and ModSecurity-based bans: Python stubs (`ErrNotImplemented`), backlog v1.5.1.
 
 ## Build & verify
 
 ```bash
 go build ./...
 go vet ./...
-gofmt -l .          # must print nothing
+gofmt -l .           # must print nothing
 go test ./...
 go test -race ./...
+make package         # builds dist/security-automation-go_1.5.0_amd64.deb
 ```
 
-Static binaries target `CGO_ENABLED=0` (SQLite via `modernc.org/sqlite`, pure Go).
+Static binaries (`CGO_ENABLED=0`). SQLite via `modernc.org/sqlite` (pure Go, no CGo).
 
 ## Configuration
 
-Environment-driven. See [pkg/configs/*.env.example](pkg/configs/). Secrets are
-delivered at runtime via environment / systemd `EnvironmentFile=`; nothing
-sensitive is committed.
+Secrets are delivered exclusively via the **encrypted CredentialStore** (SQLite AES-GCM).
+The first-run wizard writes all secrets interactively; nothing sensitive is committed.
+
+See [docs/configuration/](docs/configuration/) for provider-specific guides.
 
 ## Deployment
 
-Observe-only first. See [docs/runbooks/RUNBOOK.md](docs/runbooks/RUNBOOK.md) and the systemd
-examples in [deployments/systemd](deployments/systemd/).
+```bash
+# Install .deb
+sudo dpkg -i dist/security-automation-go_1.5.0_amd64.deb
+sudo systemctl start cf-sync
+
+# Or run the wizard manually
+cf-sync --setup
+```
+
+First-run wizard runs automatically on fresh install. See [docs/runbooks/FIRST_BOOT.md](docs/runbooks/FIRST_BOOT.md).
 
 ## Documentation
 
 | Doc | Purpose |
 |---|---|
-| [docs/architecture/ARCHITECTURE.md](docs/architecture/ARCHITECTURE.md) | Module layout |
-| [docs/runbooks/CUTOVER_RUNBOOK.md](docs/runbooks/CUTOVER_RUNBOOK.md) | Primary operational guide for the Go-Live transition |
-| [docs/security/SECURITY.md](docs/security/SECURITY.md) | Reporting + operational safety |
-| [docs/testing/TESTING.md](docs/testing/TESTING.md) | Guide for running and writing tests |
-| [docs/archive/TEST_GAP_REPORT.md](docs/archive/TEST_GAP_REPORT.md) | Python ↔ Go gap analysis (Historical) |
-| [docs/archive/MIGRATION_PLAN.md](docs/archive/MIGRATION_PLAN.md) | Migration strategy (Historical) |
-| [docs/archive/RISK_ANALYSIS.md](docs/archive/RISK_ANALYSIS.md) | Migration risk register (Historical) |
-
+| [docs/AI_HANDOFF.md](docs/AI_HANDOFF.md) | Rapid context for AI assistants and contributors |
+| [docs/runbooks/FIRST_BOOT.md](docs/runbooks/FIRST_BOOT.md) | First-boot install procedure |
+| [docs/runbooks/RUNBOOK.md](docs/runbooks/RUNBOOK.md) | Primary operational guide |
+| [docs/runbooks/CUTOVER_RUNBOOK.md](docs/runbooks/CUTOVER_RUNBOOK.md) | Python → Go cutover runbook |
+| [docs/security/SECRET_LOADING_MODEL.md](docs/security/SECRET_LOADING_MODEL.md) | Secret loading audit |
+| [CHANGELOG.md](CHANGELOG.md) | Release history |
+| [SECURITY.md](SECURITY.md) | Vulnerability reporting |
 
 ## License
 

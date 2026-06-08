@@ -3,6 +3,7 @@ package detect
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestRunAll_ReturnsNineResults(t *testing.T) {
@@ -222,5 +223,131 @@ func TestDetectNginx_ConfiguredLogDirExists(t *testing.T) {
 	}
 	if !r.Healthy {
 		t.Error("expected healthy when log dir exists (nginx healthy does not require binary)")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// CrowdSec extended detection tests
+// ---------------------------------------------------------------------------
+
+func setupCrowdSecOverrides(binOK, svcOK, fileOK bool) (restore func()) {
+	origBin := binaryInstalled
+	origSvc := systemdServiceActive
+	origFile := fileExists
+	origHTTP := httpProbe
+	origTCP := tcpDial
+	binaryInstalled = func(string) bool { return binOK }
+	systemdServiceActive = func(string) bool { return svcOK }
+	fileExists = func(string) bool { return fileOK }
+	// Default: LAPI and AppSec are not reachable.
+	httpProbe = func(string, time.Duration) (int, error) { return 0, errRefused }
+	tcpDial = func(string, time.Duration) bool { return false }
+	return func() {
+		binaryInstalled = origBin
+		systemdServiceActive = origSvc
+		fileExists = origFile
+		httpProbe = origHTTP
+		tcpDial = origTCP
+	}
+}
+
+// stubErr is a minimal error type for test fakes.
+type stubErr struct{ msg string }
+
+func (e *stubErr) Error() string { return e.msg }
+
+var errRefused = &stubErr{"connection refused"}
+
+// TestDetectCrowdSec_Absent: binary missing, service missing → Installed=false, lapi_reachable=missing.
+func TestDetectCrowdSec_Absent(t *testing.T) {
+	restore := setupCrowdSecOverrides(false, false, false)
+	defer restore()
+
+	r := DetectCrowdSec(Config{})
+	if r.Installed {
+		t.Error("expected Installed=false when cscli not found")
+	}
+	if r.Details["lapi_reachable"] != "missing" {
+		t.Errorf("expected lapi_reachable=missing, got %q", r.Details["lapi_reachable"])
+	}
+	if r.Healthy {
+		t.Error("expected Healthy=false when absent")
+	}
+}
+
+// TestDetectCrowdSec_InstalledServiceDown: cscli present, service down, LAPI unreachable → Healthy=false.
+func TestDetectCrowdSec_InstalledServiceDown(t *testing.T) {
+	restore := setupCrowdSecOverrides(true, false, false)
+	defer restore()
+
+	r := DetectCrowdSec(Config{DecisionsLog: "/var/log/crowdsec/decisions.json"})
+	if !r.Installed {
+		t.Error("expected Installed=true when cscli found")
+	}
+	if r.Healthy {
+		t.Errorf("expected Healthy=false when service is down")
+	}
+	if r.Details["service"] != "missing" {
+		t.Errorf("expected service=missing, got %q", r.Details["service"])
+	}
+}
+
+// TestDetectCrowdSec_LAPIReachable: cscli present, service active, probe returns 401 →
+// lapi_reachable=present, lapi_url=http://127.0.0.1:8080.
+func TestDetectCrowdSec_LAPIReachable(t *testing.T) {
+	restore := setupCrowdSecOverrides(true, true, true)
+	defer restore()
+	httpProbe = func(url string, _ time.Duration) (int, error) {
+		if strings.Contains(url, "8080") {
+			return 401, nil
+		}
+		return 0, errRefused
+	}
+
+	r := DetectCrowdSec(Config{DecisionsLog: "/var/log/crowdsec/decisions.json"})
+	if r.Details["lapi_reachable"] != "present" {
+		t.Errorf("expected lapi_reachable=present, got %q", r.Details["lapi_reachable"])
+	}
+	if r.Details["lapi_url"] != "http://127.0.0.1:8080" {
+		t.Errorf("expected lapi_url=http://127.0.0.1:8080, got %q", r.Details["lapi_url"])
+	}
+	if !r.Healthy {
+		t.Error("expected Healthy=true when installed+configured+service active")
+	}
+}
+
+// TestDetectCrowdSec_LAPIFallback: first URL (8080) not reachable, second (8088) returns 401 →
+// lapi_url=http://127.0.0.1:8088.
+func TestDetectCrowdSec_LAPIFallback(t *testing.T) {
+	restore := setupCrowdSecOverrides(true, true, true)
+	defer restore()
+	httpProbe = func(url string, _ time.Duration) (int, error) {
+		if strings.Contains(url, "8088") {
+			return 401, nil
+		}
+		return 0, errRefused
+	}
+
+	r := DetectCrowdSec(Config{DecisionsLog: "/var/log/crowdsec/decisions.json"})
+	if r.Details["lapi_reachable"] != "present" {
+		t.Errorf("expected lapi_reachable=present, got %q", r.Details["lapi_reachable"])
+	}
+	if r.Details["lapi_url"] != "http://127.0.0.1:8088" {
+		t.Errorf("expected lapi_url=http://127.0.0.1:8088, got %q", r.Details["lapi_url"])
+	}
+}
+
+// TestDetectCrowdSecLAPIURL_NoneReachable: both fail → returns ("", false).
+func TestDetectCrowdSecLAPIURL_NoneReachable(t *testing.T) {
+	origHTTP := httpProbe
+	httpProbe = func(string, time.Duration) (int, error) { return 0, errRefused }
+	defer func() { httpProbe = origHTTP }()
+
+	url, ok := DetectCrowdSecLAPIURL(100 * time.Millisecond)
+	if ok {
+		t.Errorf("expected ok=false, got url=%q", url)
+	}
+	if url != "" {
+		t.Errorf("expected empty url, got %q", url)
 	}
 }
