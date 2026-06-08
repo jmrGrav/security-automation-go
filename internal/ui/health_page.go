@@ -7,6 +7,7 @@ import (
 	"html"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/a-h/templ"
@@ -21,25 +22,48 @@ type healthPageView struct {
 }
 
 func (s *Server) buildHealthConfig() health.Config {
-	abuseKey := ""
-	if s.secretProvider != nil {
-		abuseKey, _ = s.secretProvider.Lookup("ABUSEIPDB_KEY")
+	runtimeDir := "/var/lib/security-automation-go/runtime"
+	setupComplete := false
+	if s.setupStore != nil {
+		if ok, err := s.setupStore.IsComplete(context.Background()); err == nil {
+			setupComplete = ok
+		}
 	}
-	if abuseKey == "" {
-		abuseKey = s.cfg.AbuseIPDB.APIKey
+	cloudflareConfigured := false
+	abuseConfigured := false
+	betterstackConfigured := false
+	openAIConfigured := false
+	anthropicConfigured := false
+	geminiConfigured := false
+	if s.credentialStore != nil {
+		cloudflareConfigured = credentialConfigured(context.Background(), s.credentialStore, "cloudflare.api_token")
+		abuseConfigured = credentialConfigured(context.Background(), s.credentialStore, "abuseipdb.api_key")
+		betterstackConfigured = credentialConfigured(context.Background(), s.credentialStore, "betterstack.source_token")
+		openAIConfigured = credentialConfigured(context.Background(), s.credentialStore, "ai.openai.api_key")
+		anthropicConfigured = credentialConfigured(context.Background(), s.credentialStore, "ai.anthropic.api_key")
+		geminiConfigured = credentialConfigured(context.Background(), s.credentialStore, "ai.gemini.api_key")
 	}
 	return health.Config{
-		CloudflareToken:     s.cfg.Cloudflare.APIToken,
-		CloudflareZoneID:    s.cfg.Cloudflare.ZoneID,
-		AbuseIPDBKey:        abuseKey,
-		AbuseIPDBEnabled:    s.cfg.AbuseIPDB.Enabled,
-		BetterStackToken:    s.cfg.BetterStack.SourceToken,
-		StateDir:            s.cfg.StateDir,
-		LogDir:              "/var/log/security-automation",
-		SecretDir:           "/etc/security-automation-go/secrets",
-		DecisionsLog:        s.cfg.CrowdSec.DecisionsLog,
-		NginxLogDir:         s.cfg.CrowdSec.NginxLogDir,
-		OpenRestyEventsFile: s.cfg.OpenResty.EventsFile,
+		CloudflareTokenConfigured: cloudflareConfigured,
+		CloudflareZoneID:          s.cfZoneIDFromSetup(context.Background()),
+		AbuseIPDBConfigured:       abuseConfigured,
+		AbuseIPDBEnabled:          s.cfg.AbuseIPDB.Enabled,
+		BetterStackConfigured:     betterstackConfigured,
+		StateDir:                  s.cfg.StateDir,
+		LogDir:                    "/var/log/security-automation",
+		SecretDir:                 runtimeDir,
+		CanonicalSecretsDir:       runtimeDir,
+		LegacySecretsDir:          "/etc/security-automation/secrets",
+		DecisionsLog:              s.cfg.CrowdSec.DecisionsLog,
+		NginxLogDir:               s.cfg.CrowdSec.NginxLogDir,
+		OpenRestyEventsFile:       s.cfg.OpenResty.EventsFile,
+		OpenAIEnabled:             s.aiConfig.OpenAI.Enabled,
+		OpenAIConfigured:          openAIConfigured,
+		AnthropicEnabled:          s.aiConfig.Anthropic.Enabled,
+		AnthropicConfigured:       anthropicConfigured,
+		GeminiEnabled:             s.aiConfig.Gemini.Enabled,
+		GeminiConfigured:          geminiConfigured,
+		SetupComplete:             setupComplete,
 	}
 }
 
@@ -47,7 +71,7 @@ func (s *Server) buildDetectConfig() detect.Config {
 	return detect.Config{
 		StateDir:            s.cfg.StateDir,
 		LogDir:              "/var/log/security-automation",
-		SecretDir:           "/etc/security-automation-go/secrets",
+		SecretDir:           "/var/lib/security-automation-go/runtime",
 		DecisionsLog:        s.cfg.CrowdSec.DecisionsLog,
 		NginxLogDir:         s.cfg.CrowdSec.NginxLogDir,
 		OpenRestyEventsFile: s.cfg.OpenResty.EventsFile,
@@ -63,6 +87,24 @@ func (s *Server) handleHealthPage(w http.ResponseWriter, r *http.Request) {
 		ReportTime: time.Now().UTC().Format(time.RFC3339),
 	}
 	_ = HealthPage(view, s.csrfTokenFromRequest(r)).Render(r.Context(), w)
+}
+
+func credentialConfigured(ctx context.Context, store CredentialStorer, key string) bool {
+	if store == nil {
+		return false
+	}
+	_, ok, err := store.Lookup(ctx, key)
+	return err == nil && ok
+}
+
+func (s *Server) cfZoneIDFromSetup(ctx context.Context) string {
+	if s.setupStore == nil {
+		return s.cfg.Cloudflare.ZoneID
+	}
+	if v, ok, err := s.setupStore.GetSetting(ctx, "cf_zone_id"); err == nil && ok && strings.TrimSpace(v) != "" {
+		return v
+	}
+	return s.cfg.Cloudflare.ZoneID
 }
 
 func (s *Server) handleHealthJSON(w http.ResponseWriter, r *http.Request) {

@@ -7,21 +7,22 @@ All normal routes are blocked until setup is complete.
 
 | Step | Title | Required? | What it does |
 |------|-------|-----------|-------------|
-| 1 | Login | Yes | Accepts the one-time setup password from `/etc/security-automation-go/runtime/initial-admin-password` |
+| 1 | Login | Yes | Accepts the one-time UI setup secret from `/var/lib/security-automation-go/runtime/ui_secret` |
 | 2 | Set admin password | Yes | Replaces the one-time password with a bcrypt-hashed permanent password. Invalidates the initial-password file. |
 | 3 | UI bind/port | No | Confirms or changes the UI listen address. Port changes require a service restart. |
-| 4 | Cloudflare token | No | Validates and stores the CF API token. Required for CF mutations. |
-| 5 | AbuseIPDB key | No | Validates and stores the AbuseIPDB API key for IP reputation reporting. |
-| 6 | BetterStack token | No | Validates and stores the BetterStack source token for log forwarding. |
-| 7 | AI provider keys | No | Stores OpenAI / Anthropic / Gemini API keys for AI-powered explanations. |
+| 4 | Cloudflare token | No | Validates and stores the CF API token in encrypted SQLite. |
+| 5 | AbuseIPDB key | No | Validates and stores the AbuseIPDB API key in encrypted SQLite. |
+| 6 | BetterStack token | No | Validates and stores the BetterStack source token in encrypted SQLite. |
+| 7 | AI provider keys | No | Stores OpenAI / Anthropic / Gemini API keys in encrypted SQLite. |
 | 8 | Runtime summary | No | Read-only view of current configuration before going live. |
-| 9 | Production mode | No | Explicitly enables `dry_run=false` and `mutations_enabled=true`. Requires checkbox confirmation. |
+| 9 | Production mode | No | Explicitly enables `dry_run=false` and `mutations_enabled=true`. Requires Cloudflare token + Zone ID in DB and checkbox confirmation. |
 
 ## After Setup
 
 - Normal UI routes become accessible
 - The wizard is inaccessible (redirects to dashboard)
 - To re-enter setup: stop the service, delete the setup state, restart
+- Tokens are optional during setup and can be added later in the Providers UI
 
 ## Dry-Run Default
 

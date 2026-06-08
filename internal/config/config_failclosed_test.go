@@ -7,28 +7,24 @@ import (
 	"time"
 )
 
-// TestValidate_FailClosed covers all validation error paths to ensure the system
-// refuses to start with an insecure or incomplete configuration.
-
-func TestValidate_MissingToken_FailClosed(t *testing.T) {
+// TestValidate_OptionalCloudflareSecretsAllowFreshInstall verifies that the
+// bootstrap config can start without Cloudflare credentials; production enable
+// is still gated elsewhere.
+func TestValidate_MissingToken_AllowsFreshInstall(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.Cloudflare.APIToken = ""
 	cfg.Cloudflare.ZoneID = "z"
-	if err := validate(cfg); err == nil {
-		t.Error("missing API token must be rejected (fail-closed)")
-	} else if !strings.Contains(err.Error(), "CF_API_TOKEN") {
-		t.Fatalf("missing token error should mention operator hint, got %v", err)
+	if err := validate(cfg); err != nil {
+		t.Fatalf("bootstrap config should allow missing Cloudflare token: %v", err)
 	}
 }
 
-func TestValidate_MissingZoneID_FailClosed(t *testing.T) {
+func TestValidate_MissingZoneID_AllowsFreshInstall(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.Cloudflare.APIToken = "tok"
 	cfg.Cloudflare.ZoneID = ""
-	if err := validate(cfg); err == nil {
-		t.Error("missing zone ID must be rejected (fail-closed)")
-	} else if !strings.Contains(err.Error(), "CF_ZONE_ID") {
-		t.Fatalf("missing zone error should mention operator hint, got %v", err)
+	if err := validate(cfg); err != nil {
+		t.Fatalf("bootstrap config should allow missing Cloudflare zone ID: %v", err)
 	}
 }
 

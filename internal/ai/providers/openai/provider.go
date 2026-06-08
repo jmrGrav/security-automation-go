@@ -92,10 +92,10 @@ func (p *Provider) Enabled() bool {
 	if p == nil || !p.cfg.Enabled {
 		return false
 	}
-	if strings.TrimSpace(p.cfg.Model) == "" || strings.TrimSpace(p.cfg.APIKeyFile) == "" {
+	if strings.TrimSpace(p.cfg.Model) == "" || strings.TrimSpace(p.cfg.APIKey) == "" {
 		return false
 	}
-	if _, err := providers.ReadAPIKeyFile(p.cfg.APIKeyFile); err != nil {
+	if _, err := providers.ReadAPIKey(p.cfg); err != nil {
 		return false
 	}
 	return true
@@ -125,10 +125,7 @@ func (p *Provider) Explain(ctx context.Context, req ai.ExplainRequest) (ai.Expla
 		defer cancel()
 	}
 
-	apiKey, err := providers.ReadAPIKeyFile(p.cfg.APIKeyFile)
-	if err != nil {
-		return ai.ExplainResponse{}, &providers.Error{Provider: providers.OpenAI, Reason: "api key unavailable", Err: err}
-	}
+	apiKey := strings.TrimSpace(p.cfg.APIKey)
 
 	maxTokens := req.MaxOutputTokens
 	if maxTokens <= 0 {

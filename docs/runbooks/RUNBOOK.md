@@ -30,8 +30,8 @@
    - `UI_SECRET_FILE=/var/lib/security-automation-go/secrets.local`
 2. Confirm the local secret file exists or can be created by the service user
    and is `0600`.
-3. Confirm provider keys are configured only through env or the local secret
-   file; do not paste them into logs, docs, or evidence.
+3. Confirm provider keys are configured only through the UI and are stored in
+   encrypted SQLite; do not paste them into logs, docs, or evidence.
 4. Start the UI in local mode:
    - `cf-sync -mode ui`
 5. Expected status strings on the dashboard:

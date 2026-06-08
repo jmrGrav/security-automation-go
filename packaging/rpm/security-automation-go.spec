@@ -20,9 +20,10 @@ exit 0
 %systemd_post cf-sync.service
 install -d -m 750 -o security-automation -g security-automation \
     /var/lib/security-automation-go \
-    /var/lib/security-automation-go/diagnostics
-install -d -m 700 -o security-automation -g security-automation \
-    /etc/security-automation-go/secrets
+    /var/lib/security-automation-go/runtime
+install -d -m 755 -o root -g root /etc/security-automation-go
+touch /etc/security-automation-go/security-automation.env
+chmod 0644 /etc/security-automation-go/security-automation.env
 install -d -m 755 -o security-automation -g security-automation \
     /var/log/security-automation
 
@@ -37,5 +38,5 @@ install -d -m 755 -o security-automation -g security-automation \
 /lib/systemd/system/cf-sync.service
 %config(noreplace) %attr(0640, root, security-automation) /etc/security-automation-go/security-automation.yaml
 %dir %attr(0750, security-automation, security-automation) /var/lib/security-automation-go
-%dir %attr(0700, security-automation, security-automation) /etc/security-automation-go/secrets
+%dir %attr(0750, security-automation, security-automation) /var/lib/security-automation-go/runtime
 %dir %attr(0755, security-automation, security-automation) /var/log/security-automation

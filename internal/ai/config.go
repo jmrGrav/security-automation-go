@@ -8,8 +8,11 @@ import (
 
 // ProviderConfig reserves future provider-specific settings without wiring calls.
 type ProviderConfig struct {
-	Enabled    bool
-	Model      string
+	Enabled bool
+	Model   string
+	APIKey  string
+	// APIKeyFile is kept only for legacy import/test compatibility.
+	// Runtime credential lookup uses encrypted SQLite CredentialStore.
 	APIKeyFile string
 }
 
@@ -42,17 +45,20 @@ func FromEnv() Config {
 		OpenAI: ProviderConfig{
 			Enabled:    envBool("AI_PROVIDER_OPENAI_ENABLED", false),
 			Model:      envString("AI_PROVIDER_OPENAI_MODEL", ""),
-			APIKeyFile: envString("AI_PROVIDER_OPENAI_API_KEY_FILE", ""),
+			APIKey:     "",
+			APIKeyFile: "",
 		},
 		Anthropic: ProviderConfig{
 			Enabled:    envBool("AI_PROVIDER_ANTHROPIC_ENABLED", false),
 			Model:      envString("AI_PROVIDER_ANTHROPIC_MODEL", ""),
-			APIKeyFile: envString("AI_PROVIDER_ANTHROPIC_API_KEY_FILE", ""),
+			APIKey:     "",
+			APIKeyFile: "",
 		},
 		Gemini: ProviderConfig{
 			Enabled:    envBool("AI_PROVIDER_GEMINI_ENABLED", false),
 			Model:      envString("AI_PROVIDER_GEMINI_MODEL", ""),
-			APIKeyFile: envString("AI_PROVIDER_GEMINI_API_KEY_FILE", ""),
+			APIKey:     "",
+			APIKeyFile: "",
 		},
 	}
 	if cfg.MaxContextBytes <= 0 {

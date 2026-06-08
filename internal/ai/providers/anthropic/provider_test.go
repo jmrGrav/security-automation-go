@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -53,8 +51,7 @@ func TestProviderExplainSuccess(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	keyFile := writeSecretFile(t, "test-anthropic-key")
-	provider := New(ai.ProviderConfig{Enabled: true, Model: "claude-test", APIKeyFile: keyFile}, WithBaseURL(srv.URL), WithHTTPClient(srv.Client()), WithTimeout(250*time.Millisecond))
+	provider := New(ai.ProviderConfig{Enabled: true, Model: "claude-test", APIKey: "test-anthropic-key"}, WithBaseURL(srv.URL), WithHTTPClient(srv.Client()), WithTimeout(250*time.Millisecond))
 
 	got, err := provider.Explain(context.Background(), ai.ExplainRequest{
 		SubjectType:        ai.SubjectProvider,
@@ -76,14 +73,4 @@ func TestProviderExplainSuccess(t *testing.T) {
 	if quota.State != aiquota.Warning || quota.RequestsRemain != 3 || quota.TokensRemain != 80 {
 		t.Fatalf("unexpected quota observation: %+v", quota)
 	}
-}
-
-func writeSecretFile(t *testing.T, secret string) string {
-	t.Helper()
-	dir := t.TempDir()
-	path := filepath.Join(dir, "api-key.txt")
-	if err := os.WriteFile(path, []byte(secret), 0o600); err != nil {
-		t.Fatalf("write secret file: %v", err)
-	}
-	return path
 }

@@ -6,6 +6,7 @@ import (
 	"testing"
 )
 
+// FileSecretProvider remains for UI bootstrap/session-secret handling only.
 func TestWriteSecretFile_Uses0600Permissions(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "secrets.local")

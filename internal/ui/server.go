@@ -46,40 +46,57 @@ type SetupStorer interface {
 	SetSetting(ctx context.Context, key, value string) error
 }
 
+type CredentialStorer interface {
+	Lookup(ctx context.Context, key string) (string, bool, error)
+	Set(ctx context.Context, key, value string, enabled bool) error
+	Delete(ctx context.Context, key string) error
+	ImportLegacyDir(ctx context.Context, legacyDir string) (int, error)
+}
+
+var legacySecretsDirPath = "/etc/security-automation-go/secrets"
+
 type Options struct {
-	SecretProvider    SecretProvider
-	AuditSink         AuditSink
-	Logger            *slog.Logger
-	Enrichment        *enrichment.Service
-	AIExplain         aigateway.Gateway
-	AIExplainBuilder  func(ai.Config) aigateway.Gateway
-	AIConfig          ai.Config
-	ProviderFactories map[string]ProviderFactory
-	SetupStore        SetupStorer
+	SecretProvider      SecretProvider
+	CredentialStore     CredentialStorer
+	AuditSink           AuditSink
+	Logger              *slog.Logger
+	Enrichment          *enrichment.Service
+	AIExplain           aigateway.Gateway
+	AIExplainBuilder    func(ai.Config) aigateway.Gateway
+	AIConfig            ai.Config
+	ProviderFactories   map[string]ProviderFactory
+	SetupStore          SetupStorer
+	ValidateCloudflare  func(context.Context, string, string) error
+	ValidateAbuseIPDB   func(context.Context, string) error
+	ValidateBetterStack func(context.Context, string) error
 }
 
 type Server struct {
-	cfg               *config.Config
-	secretProvider    SecretProvider
-	audit             AuditSink
-	logger            *slog.Logger
-	mux               *http.ServeMux
-	sessions          map[string]time.Time
-	mu                sync.Mutex
-	sessionMax        int
-	lastSessionSweep  time.Time
-	sessionSweepEvery time.Duration
-	limiter           *rateLimiter
-	aiLimiter         *rateLimiter
-	aiMu              sync.RWMutex
-	uiSecret          string
-	enrichment        *enrichment.Service
-	aiBaseConfig      ai.Config
-	aiExplain         aigateway.Gateway
-	aiConfig          ai.Config
-	aiExplainBuilder  func(ai.Config) aigateway.Gateway
-	providerFactories map[string]ProviderFactory
-	setupStore        SetupStorer
+	cfg                 *config.Config
+	secretProvider      SecretProvider
+	credentialStore     CredentialStorer
+	audit               AuditSink
+	logger              *slog.Logger
+	mux                 *http.ServeMux
+	sessions            map[string]time.Time
+	mu                  sync.Mutex
+	sessionMax          int
+	lastSessionSweep    time.Time
+	sessionSweepEvery   time.Duration
+	limiter             *rateLimiter
+	aiLimiter           *rateLimiter
+	aiMu                sync.RWMutex
+	uiSecret            string
+	enrichment          *enrichment.Service
+	aiBaseConfig        ai.Config
+	aiExplain           aigateway.Gateway
+	aiConfig            ai.Config
+	aiExplainBuilder    func(ai.Config) aigateway.Gateway
+	providerFactories   map[string]ProviderFactory
+	setupStore          SetupStorer
+	validateCloudflare  func(context.Context, string, string) error
+	validateAbuseIPDB   func(context.Context, string) error
+	validateBetterStack func(context.Context, string) error
 }
 
 func NewServer(cfg *config.Config, opts Options) (*Server, error) {
@@ -107,22 +124,26 @@ func NewServer(cfg *config.Config, opts Options) (*Server, error) {
 	}
 	effectiveAIConfig := applyAIProviderState(opts.AIConfig, state, loaded)
 	s := &Server{
-		cfg:               cfg,
-		secretProvider:    opts.SecretProvider,
-		audit:             opts.AuditSink,
-		logger:            opts.Logger,
-		mux:               http.NewServeMux(),
-		sessions:          make(map[string]time.Time),
-		sessionMax:        4096,
-		sessionSweepEvery: time.Minute,
-		limiter:           newRateLimiter(20, time.Minute),
-		uiSecret:          uiSecret,
-		enrichment:        opts.Enrichment,
-		aiBaseConfig:      opts.AIConfig,
-		aiConfig:          effectiveAIConfig,
-		aiExplainBuilder:  opts.AIExplainBuilder,
-		providerFactories: opts.ProviderFactories,
-		setupStore:        opts.SetupStore,
+		cfg:                 cfg,
+		secretProvider:      opts.SecretProvider,
+		credentialStore:     opts.CredentialStore,
+		audit:               opts.AuditSink,
+		logger:              opts.Logger,
+		mux:                 http.NewServeMux(),
+		sessions:            make(map[string]time.Time),
+		sessionMax:          4096,
+		sessionSweepEvery:   time.Minute,
+		limiter:             newRateLimiter(20, time.Minute),
+		uiSecret:            uiSecret,
+		enrichment:          opts.Enrichment,
+		aiBaseConfig:        opts.AIConfig,
+		aiConfig:            effectiveAIConfig,
+		aiExplainBuilder:    opts.AIExplainBuilder,
+		providerFactories:   opts.ProviderFactories,
+		setupStore:          opts.SetupStore,
+		validateCloudflare:  opts.ValidateCloudflare,
+		validateAbuseIPDB:   opts.ValidateAbuseIPDB,
+		validateBetterStack: opts.ValidateBetterStack,
 	}
 	if s.aiConfig.MaxContextBytes <= 0 {
 		s.aiConfig.MaxContextBytes = 12_000
@@ -140,6 +161,7 @@ func NewServer(cfg *config.Config, opts Options) (*Server, error) {
 		s.aiExplain = opts.AIExplain
 	}
 	s.routes()
+	_ = s.rebuildAIExplainFromState()
 	return s, nil
 }
 
@@ -175,6 +197,7 @@ func (s *Server) routes() {
 	s.mux.Handle("GET /", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleDashboard)))))
 	s.mux.Handle("GET /providers", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleProviders)))))
 	s.mux.Handle("POST /admin/providers/{name}/key", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleProviderReplaceKey)))))
+	s.mux.Handle("POST /admin/providers/import-legacy", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleLegacyCredentialImport)))))
 	s.mux.Handle("POST /admin/providers/{name}/test", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleProviderTest)))))
 	s.mux.Handle("POST /admin/providers/{name}/enable", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleProviderEnable)))))
 	s.mux.Handle("POST /admin/providers/{name}/disable", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleProviderDisable)))))
@@ -202,6 +225,7 @@ func (s *Server) routes() {
 	s.mux.Handle("GET /health/json", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleHealthJSON)))))
 	s.mux.Handle("POST /health/diagnostic", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleRunDiagnostic)))))
 	s.mux.Handle("GET /health/support-bundle", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleSupportBundle)))))
+	s.registerCrowdSecAdminRoutes()
 }
 
 func (s *Server) handleLoginPage(w http.ResponseWriter, r *http.Request) {

@@ -104,6 +104,26 @@ func runCFSync(configPath, mode string, dryRun bool, format string, metricsAddr 
 		}
 		return
 	}
+	bootstrapDB, err := sqlite.New(cfg.StateDir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+	defer bootstrapDB.Close()
+	setupStore := sqlite.NewSetupStore(bootstrapDB)
+	credentialStore := sqlite.NewCredentialStore(bootstrapDB)
+	if v, ok, _ := setupStore.GetSetting(ctx, "cf_zone_id"); ok && strings.TrimSpace(v) != "" {
+		cfg.Cloudflare.ZoneID = v
+	}
+	if v, ok, _ := credentialStore.Lookup(ctx, "cloudflare.api_token"); ok {
+		cfg.Cloudflare.APIToken = v
+	}
+	if v, ok, _ := credentialStore.Lookup(ctx, "abuseipdb.api_key"); ok {
+		cfg.AbuseIPDB.APIKey = v
+	}
+	if v, ok, _ := credentialStore.Lookup(ctx, "betterstack.source_token"); ok {
+		cfg.BetterStack.SourceToken = v
+	}
 	hc := initHTTPClient(cfg)
 	abuse, cf, betterClient := initExternalClients(cfg, hc)
 

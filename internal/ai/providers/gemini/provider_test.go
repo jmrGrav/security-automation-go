@@ -6,8 +6,6 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -52,8 +50,7 @@ func TestProviderExplainSuccess(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	keyFile := writeSecretFile(t, "test-gemini-key")
-	provider := New(ai.ProviderConfig{Enabled: true, Model: "gemini-test", APIKeyFile: keyFile}, WithBaseURL(srv.URL), WithHTTPClient(srv.Client()), WithTimeout(250*time.Millisecond))
+	provider := New(ai.ProviderConfig{Enabled: true, Model: "gemini-test", APIKey: "test-gemini-key"}, WithBaseURL(srv.URL), WithHTTPClient(srv.Client()), WithTimeout(250*time.Millisecond))
 
 	got, err := provider.Explain(context.Background(), ai.ExplainRequest{
 		SubjectType:        ai.SubjectProvider,
@@ -81,8 +78,7 @@ func TestProviderExplain429SetsExhaustedAndSkipsFutureUse(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	keyFile := writeSecretFile(t, "test-gemini-key")
-	provider := New(ai.ProviderConfig{Enabled: true, Model: "gemini-test", APIKeyFile: keyFile}, WithBaseURL(srv.URL), WithHTTPClient(srv.Client()), WithTimeout(250*time.Millisecond))
+	provider := New(ai.ProviderConfig{Enabled: true, Model: "gemini-test", APIKey: "test-gemini-key"}, WithBaseURL(srv.URL), WithHTTPClient(srv.Client()), WithTimeout(250*time.Millisecond))
 
 	_, err := provider.Explain(context.Background(), ai.ExplainRequest{SubjectType: ai.SubjectProvider, SubjectID: "quota"})
 	if err == nil {
@@ -102,14 +98,4 @@ func TestProviderExplain429SetsExhaustedAndSkipsFutureUse(t *testing.T) {
 	if aiquota.CanUse(quota) {
 		t.Fatalf("expected exhausted quota to be skipped: %+v", quota)
 	}
-}
-
-func writeSecretFile(t *testing.T, secret string) string {
-	t.Helper()
-	dir := t.TempDir()
-	path := filepath.Join(dir, "api-key.txt")
-	if err := os.WriteFile(path, []byte(secret), 0o600); err != nil {
-		t.Fatalf("write secret file: %v", err)
-	}
-	return path
 }

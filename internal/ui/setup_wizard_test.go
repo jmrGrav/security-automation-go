@@ -40,8 +40,8 @@ func newTestServerWithSetup(t *testing.T, store ui.SetupStorer) *ui.Server {
 	cfg := config.DefaultConfig()
 	cfg.UI.Enabled = true
 	cfg.UI.Addr = "127.0.0.1:0"
-	cfg.UI.InitialPasswordFile = dataDir + "/initial-admin-password"
-	cfg.UI.SecretFile = dataDir + "/secret"
+	cfg.UI.InitialPasswordFile = dataDir + "/runtime/initial-admin-password"
+	cfg.UI.SecretFile = dataDir + "/runtime/ui_secret"
 	cfg.UI.ProviderStateFile = dataDir + "/ai-providers.env"
 	cfg.StateDir = dataDir
 	srv, err := ui.NewServer(cfg, ui.Options{
@@ -108,6 +108,26 @@ func TestSetupGuard_NilStoreAllsThrough(t *testing.T) {
 
 	if w.Code == http.StatusFound && strings.HasPrefix(w.Header().Get("Location"), "/setup") {
 		t.Error("nil SetupStore must not redirect to setup")
+	}
+}
+
+func TestSetupStep1MentionsUISecret(t *testing.T) {
+	store := &fakeSetupStore{step: 1, complete: false}
+	srv := newTestServerWithSetup(t, store)
+
+	req := httptest.NewRequest("GET", "/setup/step/1", nil)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, "runtime/ui_secret") {
+		t.Fatalf("step 1 should point to ui_secret, body=%s", body)
+	}
+	if strings.Contains(body, "initial-admin-password") {
+		t.Fatalf("step 1 must not mention initial-admin-password, body=%s", body)
 	}
 }
 

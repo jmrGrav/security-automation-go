@@ -20,7 +20,7 @@ ProtectControlGroups=yes
 RestrictNamespaces=yes
 RestrictRealtime=yes
 LockPersonality=yes
-ReadWritePaths=/var/lib/security-automation-go /etc/security-automation-go/secrets
+ReadWritePaths=/var/lib/security-automation-go
 
 [Install]
 WantedBy=multi-user.target

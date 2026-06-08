@@ -6,8 +6,6 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -64,8 +62,7 @@ func TestProviderExplainSuccessRedactsPromptAndParsesQuota(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	keyFile := writeSecretFile(t, "test-openai-key")
-	provider := New(ai.ProviderConfig{Enabled: true, Model: "gpt-test", APIKeyFile: keyFile}, WithBaseURL(srv.URL), WithHTTPClient(srv.Client()), WithTimeout(250*time.Millisecond))
+	provider := New(ai.ProviderConfig{Enabled: true, Model: "gpt-test", APIKey: "test-openai-key"}, WithBaseURL(srv.URL), WithHTTPClient(srv.Client()), WithTimeout(250*time.Millisecond))
 
 	got, err := provider.Explain(context.Background(), ai.ExplainRequest{
 		SubjectType:        ai.SubjectProvider,
@@ -104,8 +101,7 @@ func TestProviderExplainParses429RetryAfter(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	keyFile := writeSecretFile(t, "test-openai-key")
-	provider := New(ai.ProviderConfig{Enabled: true, Model: "gpt-test", APIKeyFile: keyFile}, WithBaseURL(srv.URL), WithHTTPClient(srv.Client()), WithTimeout(250*time.Millisecond))
+	provider := New(ai.ProviderConfig{Enabled: true, Model: "gpt-test", APIKey: "test-openai-key"}, WithBaseURL(srv.URL), WithHTTPClient(srv.Client()), WithTimeout(250*time.Millisecond))
 
 	_, err := provider.Explain(context.Background(), ai.ExplainRequest{SubjectType: ai.SubjectProvider, SubjectID: "quota"})
 	if err == nil {
@@ -137,8 +133,7 @@ func TestProviderExplainRejectsInvalidJSON(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	keyFile := writeSecretFile(t, "test-openai-key")
-	provider := New(ai.ProviderConfig{Enabled: true, Model: "gpt-test", APIKeyFile: keyFile}, WithBaseURL(srv.URL), WithHTTPClient(srv.Client()), WithTimeout(250*time.Millisecond))
+	provider := New(ai.ProviderConfig{Enabled: true, Model: "gpt-test", APIKey: "test-openai-key"}, WithBaseURL(srv.URL), WithHTTPClient(srv.Client()), WithTimeout(250*time.Millisecond))
 
 	_, err := provider.Explain(context.Background(), ai.ExplainRequest{SubjectType: ai.SubjectProvider, SubjectID: "bad-json"})
 	if err == nil {
@@ -163,8 +158,7 @@ func TestProviderExplainTimesOut(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	keyFile := writeSecretFile(t, "test-openai-key")
-	provider := New(ai.ProviderConfig{Enabled: true, Model: "gpt-test", APIKeyFile: keyFile}, WithBaseURL(srv.URL), WithHTTPClient(srv.Client()), WithTimeout(10*time.Millisecond))
+	provider := New(ai.ProviderConfig{Enabled: true, Model: "gpt-test", APIKey: "test-openai-key"}, WithBaseURL(srv.URL), WithHTTPClient(srv.Client()), WithTimeout(10*time.Millisecond))
 
 	_, err := provider.Explain(context.Background(), ai.ExplainRequest{SubjectType: ai.SubjectProvider, SubjectID: "timeout"})
 	if err == nil {
@@ -188,8 +182,7 @@ func TestProviderExplainMissingOutputText(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	keyFile := writeSecretFile(t, "test-openai-key")
-	provider := New(ai.ProviderConfig{Enabled: true, Model: "gpt-test", APIKeyFile: keyFile}, WithBaseURL(srv.URL), WithHTTPClient(srv.Client()), WithTimeout(250*time.Millisecond))
+	provider := New(ai.ProviderConfig{Enabled: true, Model: "gpt-test", APIKey: "test-openai-key"}, WithBaseURL(srv.URL), WithHTTPClient(srv.Client()), WithTimeout(250*time.Millisecond))
 
 	_, err := provider.Explain(context.Background(), ai.ExplainRequest{SubjectType: ai.SubjectProvider, SubjectID: "missing-token"})
 	if err == nil {
@@ -202,14 +195,4 @@ func TestProviderExplainMissingOutputText(t *testing.T) {
 	if perr.Reason != "parse response" {
 		t.Fatalf("unexpected error reason: %+v", perr)
 	}
-}
-
-func writeSecretFile(t *testing.T, secret string) string {
-	t.Helper()
-	dir := t.TempDir()
-	path := filepath.Join(dir, "api-key.txt")
-	if err := os.WriteFile(path, []byte(secret), 0o600); err != nil {
-		t.Fatalf("write secret file: %v", err)
-	}
-	return path
 }

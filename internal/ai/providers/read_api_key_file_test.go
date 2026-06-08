@@ -8,9 +8,8 @@ import (
 	"github.com/jm/security-automation-go/internal/ai/providers"
 )
 
-// TestReadAPIKeyFile_RawValue verifies that ReadAPIKeyFile returns raw file content
-// with leading/trailing whitespace stripped. This is the format that wizard step 7
-// now writes via writeProviderSecret.
+// TestReadAPIKeyFile_RawValue covers the legacy import helper only.
+// Runtime credential lookup does not call ReadAPIKeyFile.
 func TestReadAPIKeyFile_RawValue(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "openai_api_key")
@@ -28,14 +27,13 @@ func TestReadAPIKeyFile_RawValue(t *testing.T) {
 	}
 }
 
-// TestReadAPIKeyFile_KeyValueFormatReturnsWrongValue demonstrates that the old
-// wizard code (WriteSecretFile which writes KEY=VALUE) was broken: ReadAPIKeyFile
-// would return the entire "OPENAI_API_KEY=sk-..." string as the bearer token.
+// TestReadAPIKeyFile_KeyValueFormatReturnsWrongValue documents why KEY=VALUE is
+// not suitable for raw API keys in the legacy import path.
 func TestReadAPIKeyFile_KeyValueFormatReturnsWrongValue(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "openai_api_key")
 	rawKey := "sk-proj-abc123"
-	// Simulate the old WriteSecretFile output:
+	// Simulate old env-file style output used by legacy imports.
 	content := "OPENAI_API_KEY=" + rawKey
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatal(err)
@@ -55,7 +53,7 @@ func TestReadAPIKeyFile_KeyValueFormatReturnsWrongValue(t *testing.T) {
 	}
 }
 
-// TestReadAPIKeyFile_EmptyFileFails verifies that an empty file is rejected.
+// TestReadAPIKeyFile_EmptyFileFails verifies that the legacy helper rejects empty files.
 func TestReadAPIKeyFile_EmptyFileFails(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "empty_key")
@@ -68,7 +66,7 @@ func TestReadAPIKeyFile_EmptyFileFails(t *testing.T) {
 	}
 }
 
-// TestReadAPIKeyFile_WorldReadableFails verifies that group/world-readable files are rejected.
+// TestReadAPIKeyFile_WorldReadableFails verifies that the legacy helper rejects loose permissions.
 func TestReadAPIKeyFile_WorldReadableFails(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "loose_key")
@@ -81,7 +79,7 @@ func TestReadAPIKeyFile_WorldReadableFails(t *testing.T) {
 	}
 }
 
-// TestReadAPIKeyFile_MissingFileFails verifies that a missing file returns an error.
+// TestReadAPIKeyFile_MissingFileFails verifies that a missing legacy file returns an error.
 func TestReadAPIKeyFile_MissingFileFails(t *testing.T) {
 	_, err := providers.ReadAPIKeyFile("/tmp/nonexistent-key-file-xyz987")
 	if err == nil {
@@ -89,7 +87,7 @@ func TestReadAPIKeyFile_MissingFileFails(t *testing.T) {
 	}
 }
 
-// TestReadAPIKeyFile_UnconfiguredFails verifies that an empty path is rejected.
+// TestReadAPIKeyFile_UnconfiguredFails verifies that an empty path is rejected for the legacy helper.
 func TestReadAPIKeyFile_UnconfiguredFails(t *testing.T) {
 	_, err := providers.ReadAPIKeyFile("")
 	if err == nil {

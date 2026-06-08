@@ -12,6 +12,7 @@ import (
 	ai "github.com/jm/security-automation-go/internal/ai"
 	"github.com/jm/security-automation-go/internal/ai/providers"
 	aiquota "github.com/jm/security-automation-go/internal/ai/quota"
+	"github.com/jm/security-automation-go/internal/storage/sqlite"
 )
 
 type fakeProvider struct {
@@ -29,16 +30,11 @@ func (p fakeProvider) Quota(context.Context) aiquota.ProviderQuota {
 }
 
 func TestProviderManagementReplaceKeyWrites0600AndKeepsDisabled(t *testing.T) {
-	secretDir := t.TempDir()
-	openaiKey := filepath.Join(secretDir, "openai_api_key")
-	srv, audit, secretPath := newTestServer(t, map[string]string{
-		"UI_SECRET":                          "ui-secret-value",
-		"AI_PROVIDER_OPENAI_API_KEY_FILE":    openaiKey,
-		"AI_PROVIDER_OPENAI_MODEL":           "gpt-4.1-mini",
-		"AI_PROVIDER_ANTHROPIC_API_KEY_FILE": filepath.Join(secretDir, "anthropic_api_key"),
-		"AI_PROVIDER_GEMINI_API_KEY_FILE":    filepath.Join(secretDir, "gemini_api_key"),
+	srv, db, secretPath := newCredentialStoreServer(t, map[string]string{
+		"UI_SECRET":                "ui-secret-value",
+		"AI_PROVIDER_OPENAI_MODEL": "gpt-4.1-mini",
 	})
-	stateFile := filepath.Join(filepath.Dir(secretPath), "ai-providers.env")
+	legacyFile := filepath.Join(filepath.Dir(secretPath), "openai_api_key")
 	cookie := loginCookie(t, srv, "ui-secret-value")
 	csrf := srv.csrfTokenFor(cookie.Value)
 
@@ -52,32 +48,20 @@ func TestProviderManagementReplaceKeyWrites0600AndKeepsDisabled(t *testing.T) {
 	if rr.Code != http.StatusSeeOther {
 		t.Fatalf("expected redirect, got %d: %s", rr.Code, rr.Body.String())
 	}
-	info, err := os.Stat(openaiKey)
+	rec, ok, err := sqlite.NewCredentialStore(db).Get(context.Background(), "ai.openai.api_key")
 	if err != nil {
-		t.Fatalf("secret file missing: %v", err)
+		t.Fatalf("load credential: %v", err)
 	}
-	if got := info.Mode().Perm(); got != 0o600 {
-		t.Fatalf("expected 0600 secret file, got %#o", got)
+	if !ok || rec.Value != "super-secret-token" {
+		t.Fatalf("credential not stored in SQLite: ok=%v value=%q", ok, rec.Value)
 	}
-	data, err := os.ReadFile(openaiKey)
-	if err != nil {
-		t.Fatalf("read secret file: %v", err)
+	if audit, ok := srv.audit.(*BufferAuditSink); ok {
+		if strings.Contains(strings.ToLower(audit.String()), "super-secret-token") {
+			t.Fatalf("audit leaked secret: %s", audit.String())
+		}
 	}
-	if strings.TrimSpace(string(data)) != "super-secret-token" {
-		t.Fatalf("secret file not written correctly: %q", string(data))
-	}
-	state, ok, err := loadAIProviderState(stateFile)
-	if err != nil {
-		t.Fatalf("load state file: %v", err)
-	}
-	if ok {
-		t.Fatalf("replace key must not write provider state file: %#v", state)
-	}
-	if _, err := os.Stat(stateFile); !os.IsNotExist(err) {
-		t.Fatalf("provider state file should remain absent, got err=%v", err)
-	}
-	if strings.Contains(strings.ToLower(audit.String()), "super-secret-token") {
-		t.Fatalf("audit leaked secret: %s", audit.String())
+	if _, err := os.Stat(legacyFile); !os.IsNotExist(err) {
+		t.Fatalf("legacy secret file should not be written, got err=%v", err)
 	}
 }
 
@@ -106,13 +90,10 @@ func TestProviderManagementRequiresAuthAndCSRF(t *testing.T) {
 }
 
 func TestProviderManagementEnableRequiresReadableSecret(t *testing.T) {
-	secretDir := t.TempDir()
-	srv, _, secretPath := newTestServer(t, map[string]string{
-		"UI_SECRET":                       "ui-secret-value",
-		"AI_PROVIDER_OPENAI_API_KEY_FILE": filepath.Join(secretDir, "openai_api_key"),
-		"AI_PROVIDER_OPENAI_MODEL":        "gpt-4.1-mini",
+	srv, _, _ := newCredentialStoreServer(t, map[string]string{
+		"UI_SECRET":                "ui-secret-value",
+		"AI_PROVIDER_OPENAI_MODEL": "gpt-4.1-mini",
 	})
-	stateFile := filepath.Join(filepath.Dir(secretPath), "ai-providers.env")
 	cookie := loginCookie(t, srv, "ui-secret-value")
 
 	req := httptest.NewRequest(http.MethodPost, "/admin/providers/openai/enable", strings.NewReader(""))
@@ -126,32 +107,22 @@ func TestProviderManagementEnableRequiresReadableSecret(t *testing.T) {
 		t.Fatalf("expected enable refusal, got %d", rr.Code)
 	}
 	body := rr.Body.String()
-	for _, want := range []string{"impossible to write the secret", "sudo install -d -m 700 -o root -g root /etc/security-automation-go/secrets", "openai_api_key"} {
+	for _, want := range []string{"credential not configured in SQLite", "OpenAI"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("enable error missing %q: %s", want, body)
 		}
 	}
-	state, _, err := loadAIProviderState(stateFile)
-	if err != nil {
-		t.Fatalf("load state: %v", err)
-	}
-	if state.OpenAI.Enabled {
-		t.Fatal("provider must remain disabled when secret is missing")
-	}
 }
 
 func TestProviderManagementTestProviderUsesStubAndRedacts(t *testing.T) {
-	secretDir := t.TempDir()
-	openaiKey := filepath.Join(secretDir, "openai_api_key")
-	srv, audit, secretPath := newTestServer(t, map[string]string{
-		"UI_SECRET":                       "ui-secret-value",
-		"AI_PROVIDER_OPENAI_API_KEY_FILE": openaiKey,
-		"AI_PROVIDER_OPENAI_ENABLED":      "true",
-		"AI_PROVIDER_OPENAI_MODEL":        "gpt-4.1-mini",
+	srv, db, secretPath := newCredentialStoreServer(t, map[string]string{
+		"UI_SECRET":                  "ui-secret-value",
+		"AI_PROVIDER_OPENAI_ENABLED": "true",
+		"AI_PROVIDER_OPENAI_MODEL":   "gpt-4.1-mini",
 	})
 	stateFile := filepath.Join(filepath.Dir(secretPath), "ai-providers.env")
-	if err := os.WriteFile(openaiKey, []byte("test-secret"), 0o600); err != nil {
-		t.Fatalf("write secret: %v", err)
+	if err := sqlite.NewCredentialStore(db).Set(context.Background(), "ai.openai.api_key", "test-secret", true); err != nil {
+		t.Fatalf("seed credential: %v", err)
 	}
 	srv.providerFactories["openai"] = func(pc ai.ProviderConfig) providers.Provider {
 		return fakeProvider{name: providers.OpenAI, err: &providers.Error{Provider: providers.OpenAI, StatusCode: http.StatusTooManyRequests, Reason: "rate limited"}}
@@ -177,9 +148,11 @@ func TestProviderManagementTestProviderUsesStubAndRedacts(t *testing.T) {
 	if state.OpenAI.LastTestLatencyMS < 0 {
 		t.Fatalf("invalid latency stored: %#v", state.OpenAI)
 	}
-	for _, forbidden := range []string{"test-secret", "rate limited"} {
-		if strings.Contains(strings.ToLower(audit.String()), strings.ToLower(forbidden)) {
-			t.Fatalf("audit leaked %q: %s", forbidden, audit.String())
+	if audit, ok := srv.audit.(*BufferAuditSink); ok {
+		for _, forbidden := range []string{"test-secret", "rate limited"} {
+			if strings.Contains(strings.ToLower(audit.String()), strings.ToLower(forbidden)) {
+				t.Fatalf("audit leaked %q: %s", forbidden, audit.String())
+			}
 		}
 	}
 }

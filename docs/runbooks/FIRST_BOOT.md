@@ -1,81 +1,68 @@
 # First Boot Procedure
 
-## Pre-Boot: Environment File
+## Bootstrap files
 
-Copy the example env file and fill in secrets before starting the service:
+Create the minimal non-secret bootstrap env file before starting the service:
 
 ```bash
-install -m 600 -o root -g root \
-  /usr/share/doc/cf-sync/security-automation.env.example \
-  /etc/security-automation-go/security-automation.env
-# Or from the repo:
-# cp deployments/config/security-automation.env.example \
-#    /etc/security-automation-go/security-automation.env
-chmod 600 /etc/security-automation-go/security-automation.env
+install -d -m 755 -o root -g root /etc/security-automation-go
+install -m 644 -o root -g root /dev/null /etc/security-automation-go/security-automation.env
 ```
 
-Set at minimum:
-- `CF_API_TOKEN` — Cloudflare API token
-- `CF_ZONE_ID` — Cloudflare zone ID
-- `CF_SYNC_API_TOKEN` — cf-sync admin API token
-- `CF_SYNC_API_TOKEN_FILE` — path to a file containing the admin API token;
-  takes precedence over `CF_SYNC_API_TOKEN` when set (file must be non-empty)
-- `SECURITY_AUTOMATION_INITIAL_ADMIN_PASSWORD` — plaintext password used **once**
-  to create the bcrypt credential file; ignored on subsequent startups
+Use it only for bootstrap values such as bind address, port, and `state_dir`.
+Do not place operator tokens here.
 
-Bind address and port can be overridden with `SECURITY_AUTOMATION_BIND_ADDR` and
-`SECURITY_AUTOMATION_WEB_PORT` (both optional; default: `127.0.0.1:9091`).
+## Startup sequence
 
-## Startup Sequence
+1. **Instance lock check**: the process acquires a PID lock file at
+   `/run/security-automation-go.pid`.
+2. **Bootstrap config load**: the service reads
+   `/etc/security-automation-go/security-automation.env`.
+3. **SQLite startup**: the runtime database is created or opened in
+   `/var/lib/security-automation-go/runtime.db`.
+4. **Master key check**: the local key at
+   `/var/lib/security-automation-go/secret.key` is generated if needed.
+5. **UI secret initialization**: the one-time UI setup secret is created at
+   `/var/lib/security-automation-go/runtime/ui_secret` on first boot, and the
+   separate setup password file is created at
+   `/var/lib/security-automation-go/runtime/initial-admin-password`.
+6. **UI server starts**: the operator UI listens on the configured address.
 
-1. **Instance Lock Check**: System acquires a PID lock file at `/run/security-automation-go.pid`
-   - If another instance is running, startup fails with the running process's PID
-   - Prevents multiple instances from running simultaneously
+## First login
 
-2. **Port Availability Check**: System verifies the UI port (default 6969) is available
-   - If port is in use, startup fails with the occupying process's PID and name
-   - Operator must resolve the port conflict or change the UI port
+1. Operator navigates to `/login`.
+2. Enters the one-time UI setup secret.
+3. System verifies the setup secret.
+4. Operator is redirected to the setup wizard.
+5. Operator completes setup and sets a permanent password.
 
-3. **Bootstrap Password Initialization**: On first startup, the value of
-   `SECURITY_AUTOMATION_INITIAL_ADMIN_PASSWORD` is bcrypt-hashed and stored at
-   `cfg.UI.AdminPasswordFile` (default `/etc/security-automation-go/secrets/admin_password`).
-   If the credential file already exists this step is skipped.
+## Wizard behavior
 
-4. **UI Server Starts**: The operator UI is now available at the configured address
+- Provider credentials are optional.
+- If a token is entered, it is stored in encrypted SQLite.
+- If a token is skipped, setup continues.
+- Production mode remains disabled until Cloudflare token and Zone ID exist in
+  the credential store.
 
-## First Login
+## Subsequent startups
 
-1. Operator navigates to the UI login page
-2. Enters the bootstrap password
-3. System verifies the password
-4. Operator is redirected to **Settings → Security → Change Password**
-5. Operator must change the password before accessing other pages
-6. After successful password change:
-   - Bootstrap flag is cleared
-   - Operator gains full access to the UI
-   - Old bootstrap password is no longer valid
+1. Instance lock check.
+2. Bootstrap config load.
+3. SQLite startup and migrations.
+4. If `setup_complete=true`, the wizard is not forced again.
+5. UI starts with existing settings and credentials.
 
-## Subsequent Startups
+## Failure modes
 
-1. Instance lock check (same as first boot)
-2. Port availability check (same as first boot)
-3. No password generation (already exists)
-4. UI server starts with existing password configuration
+- Instance lock held: startup fails until the other process stops.
+- Port in use: startup fails until the operator changes the port or stops the
+  conflicting process.
+- Master key missing while encrypted credentials exist: fail closed with a clear
+  operator error.
 
-## Failure Modes (Fail-Closed)
+## Migration and reset
 
-- **Instance lock held**: Startup fails, operator must stop the other instance manually
-- **Port in use**: Startup fails, operator must change the port or resolve the conflict
-- **Password file missing and env var empty**: Startup fails; set
-  `SECURITY_AUTOMATION_INITIAL_ADMIN_PASSWORD` in the env file and restart
-- **No operator action taken**: System remains offline until operator intervenes
-
-## No Automatic Recovery
-
-The system does **not**:
-- Automatically kill other processes
-- Automatically restart
-- Use default passwords
-- Bypass authentication
-
-All recovery requires explicit operator action.
+- Legacy `/etc/security-automation-go/secrets/` files are import-only.
+- Existing SQLite state is preserved on upgrade.
+- To reset the whole installation, remove the runtime DB and bootstrap password
+  file, then restart.

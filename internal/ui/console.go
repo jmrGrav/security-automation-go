@@ -401,7 +401,7 @@ func DashboardConsolePage(view DashboardConsoleView) templ.Component {
 				}
 			}
 			if len(view.AIProviders) > 0 {
-				if _, err := fmt.Fprint(w, `<div class="panel" style="grid-column:1/-1"><h2>AI Providers</h2><p class="muted">OpenAI, Anthropic, and Gemini are managed locally through file-backed secrets and redacted operator state.</p><div class="grid">`); err != nil {
+				if _, err := fmt.Fprint(w, `<div class="panel" style="grid-column:1/-1"><h2>AI Providers</h2><p class="muted">OpenAI, Anthropic, and Gemini are managed locally through the encrypted SQLite credential store and redacted operator state.</p><div class="grid">`); err != nil {
 					return err
 				}
 				for _, provider := range view.AIProviders {

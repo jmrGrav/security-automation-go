@@ -8,7 +8,7 @@ import (
 )
 
 func CheckCloudflare(cfg Config) Check {
-	hasToken := strings.TrimSpace(cfg.CloudflareToken) != ""
+	hasToken := cfg.CloudflareTokenConfigured || strings.TrimSpace(cfg.CloudflareToken) != ""
 	hasZone := strings.TrimSpace(cfg.CloudflareZoneID) != ""
 	if hasToken && hasZone {
 		return Check{Name: "cloudflare", Status: Green, Reason: "API token and zone ID configured"}
@@ -30,7 +30,7 @@ func CheckCloudflare(cfg Config) Check {
 }
 
 func CheckAbuseIPDB(cfg Config) Check {
-	if strings.TrimSpace(cfg.AbuseIPDBKey) != "" {
+	if cfg.AbuseIPDBConfigured || strings.TrimSpace(cfg.AbuseIPDBKey) != "" {
 		return Check{Name: "abuseipdb", Status: Green, Reason: "API key configured"}
 	}
 	if cfg.AbuseIPDBEnabled {
@@ -38,14 +38,14 @@ func CheckAbuseIPDB(cfg Config) Check {
 			Name:        "abuseipdb",
 			Status:      Yellow,
 			Reason:      "AbuseIPDB enabled but API key missing",
-			Remediation: "Set ABUSEIPDB_KEY via setup wizard or /etc/security-automation-go/secrets/",
+			Remediation: "Set ABUSEIPDB_KEY in the setup wizard or Providers UI",
 		}
 	}
 	return Check{Name: "abuseipdb", Status: Green, Reason: "AbuseIPDB not configured (optional)"}
 }
 
 func CheckBetterStack(cfg Config) Check {
-	if strings.TrimSpace(cfg.BetterStackToken) != "" {
+	if cfg.BetterStackConfigured || strings.TrimSpace(cfg.BetterStackToken) != "" {
 		return Check{Name: "betterstack", Status: Green, Reason: "Source token configured"}
 	}
 	return Check{Name: "betterstack", Status: Green, Reason: "BetterStack not configured (optional)"}
@@ -60,7 +60,7 @@ func CheckSQLite(cfg Config) Check {
 			Remediation: "Set state_dir in configuration or run setup wizard",
 		}
 	}
-	dbPath := cfg.StateDir + "/state.db"
+	dbPath := cfg.StateDir + "/runtime.db"
 	if _, err := os.Stat(dbPath); err != nil {
 		if _, err2 := os.Stat(cfg.StateDir); err2 != nil {
 			return Check{
@@ -90,7 +90,9 @@ func CheckSQLite(cfg Config) Check {
 	return Check{Name: "sqlite", Status: Green, Reason: "Database present and readable"}
 }
 
-func CheckCrowdSec(cfg Config) Check {
+// checkCrowdSecLegacy is the original decisions-log file existence check,
+// preserved for backward compatibility and used as a fallback by CheckCrowdSec.
+func checkCrowdSecLegacy(cfg Config) Check {
 	if strings.TrimSpace(cfg.DecisionsLog) == "" {
 		return Check{Name: "crowdsec", Status: Green, Reason: "CrowdSec not configured (optional)"}
 	}
@@ -103,6 +105,71 @@ func CheckCrowdSec(cfg Config) Check {
 		}
 	}
 	return Check{Name: "crowdsec", Status: Green, Reason: "Decisions log present"}
+}
+
+// CheckCrowdSec reports the CrowdSec installation and LAPI key status.
+// It uses extended Config fields when available, falling back to the
+// legacy decisions-log check for operators who have not yet populated
+// the new fields.
+func CheckCrowdSec(cfg Config) Check {
+	// Nothing configured at all — optional component, return green.
+	if !cfg.CrowdSecInstalled && strings.TrimSpace(cfg.DecisionsLog) == "" {
+		return Check{Name: "crowdsec", Status: Green, Reason: "CrowdSec not configured (optional)"}
+	}
+
+	// Installed but service not running.
+	if cfg.CrowdSecInstalled && !cfg.CrowdSecServiceRunning {
+		return Check{
+			Name:        "crowdsec",
+			Status:      Yellow,
+			Reason:      "CrowdSec installed but service not running",
+			Remediation: "sudo systemctl start crowdsec",
+		}
+	}
+
+	// Service running but LAPI key not configured.
+	if cfg.CrowdSecInstalled && cfg.CrowdSecServiceRunning && !cfg.CrowdSecLAPIKeyConfigured {
+		return Check{
+			Name:        "crowdsec",
+			Status:      Yellow,
+			Reason:      "CrowdSec running — LAPI key not configured",
+			Remediation: "Set the CrowdSec LAPI key via Settings → CrowdSec or the first-run wizard",
+		}
+	}
+
+	// Fully configured via extended fields.
+	if cfg.CrowdSecInstalled && cfg.CrowdSecServiceRunning && cfg.CrowdSecLAPIKeyConfigured {
+		return Check{Name: "crowdsec", Status: Green, Reason: "CrowdSec running and LAPI key configured"}
+	}
+
+	// Fallback: use original decisions-log check for operators who have not
+	// populated the extended fields yet.
+	return checkCrowdSecLegacy(cfg)
+}
+
+// CheckCrowdSecPoller reports whether the CrowdSec poller is enabled and its
+// LAPI key is present.
+func CheckCrowdSecPoller(cfg Config) Check {
+	if !cfg.CrowdSecPollerEnabled {
+		return Check{Name: "crowdsec-poller", Status: Green, Reason: "CrowdSec poller not enabled (optional)"}
+	}
+	if cfg.CrowdSecLAPIKeyConfigured {
+		return Check{Name: "crowdsec-poller", Status: Green, Reason: "CrowdSec poller configured"}
+	}
+	return Check{
+		Name:        "crowdsec-poller",
+		Status:      Yellow,
+		Reason:      "CrowdSec poller enabled but LAPI key not configured",
+		Remediation: "Set the CrowdSec LAPI key via Settings → CrowdSec or the setup wizard",
+	}
+}
+
+// CheckCrowdSecAppSec reports whether the CrowdSec AppSec component is active.
+func CheckCrowdSecAppSec(cfg Config) Check {
+	if !cfg.CrowdSecAppSecDetected {
+		return Check{Name: "crowdsec-appsec", Status: Green, Reason: "CrowdSec AppSec not detected (optional)"}
+	}
+	return Check{Name: "crowdsec-appsec", Status: Green, Reason: "CrowdSec AppSec active"}
 }
 
 func CheckOpenResty(cfg Config) Check {
@@ -189,15 +256,15 @@ func CheckDisk(cfg Config) Check {
 func CheckPermissions(cfg Config) Check {
 	path := cfg.SecretDir
 	if strings.TrimSpace(path) == "" {
-		path = "/etc/security-automation-go/secrets"
+		path = "/var/lib/security-automation-go/runtime"
 	}
 	info, err := os.Stat(path)
 	if err != nil {
 		return Check{
 			Name:        "permissions",
 			Status:      Yellow,
-			Reason:      "Secret directory not found: " + path,
-			Remediation: "mkdir -p " + path + " && chmod 700 " + path,
+			Reason:      "Runtime directory not found: " + path,
+			Remediation: "mkdir -p " + path + " && chmod 750 " + path,
 		}
 	}
 	mode := info.Mode().Perm()
@@ -205,19 +272,11 @@ func CheckPermissions(cfg Config) Check {
 		return Check{
 			Name:        "permissions",
 			Status:      Red,
-			Reason:      fmt.Sprintf("Secrets directory world-accessible: %04o", mode),
-			Remediation: "chmod 700 " + path,
+			Reason:      fmt.Sprintf("Runtime directory world-accessible: %04o", mode),
+			Remediation: "chmod 750 " + path,
 		}
 	}
-	if mode&0o070 != 0 {
-		return Check{
-			Name:        "permissions",
-			Status:      Yellow,
-			Reason:      fmt.Sprintf("Secrets directory group-accessible: %04o", mode),
-			Remediation: "chmod 700 " + path,
-		}
-	}
-	return Check{Name: "permissions", Status: Green, Reason: fmt.Sprintf("Secrets directory permissions: %04o", mode)}
+	return Check{Name: "permissions", Status: Green, Reason: fmt.Sprintf("Runtime directory permissions: %04o", mode)}
 }
 
 func CheckStateDir(cfg Config) Check {
@@ -263,6 +322,106 @@ func CheckLogDir(cfg Config) Check {
 	return Check{Name: "logs", Status: Green, Reason: "Log directory present"}
 }
 
+// CheckSetupComplete reports whether the first-boot setup wizard has been completed.
+//   - GREEN: wizard was completed (SetupComplete == true)
+//   - YELLOW: wizard has not been completed — service is in setup mode
+func CheckSetupComplete(cfg Config) Check {
+	if cfg.SetupComplete {
+		return Check{Name: "setup", Status: Green, Reason: "First-boot setup complete"}
+	}
+	return Check{
+		Name:        "setup",
+		Status:      Yellow,
+		Reason:      "First-boot setup wizard not completed",
+		Remediation: "Open the UI in a browser and complete the setup wizard (http://<host>:<port>/setup)",
+	}
+}
+
+func CheckCanonicalSecretsDir(cfg Config) Check {
+	path := cfg.CanonicalSecretsDir
+	if strings.TrimSpace(path) == "" {
+		path = "/var/lib/security-automation-go/runtime"
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return Check{Name: "canonical-secrets", Status: Green, Reason: "Canonical secrets directory not required"}
+		}
+		return Check{
+			Name:        "canonical-secrets",
+			Status:      Red,
+			Reason:      "Cannot inspect canonical secrets directory: " + err.Error(),
+			Remediation: "Check permissions on " + path,
+		}
+	}
+	if !info.IsDir() {
+		return Check{
+			Name:        "canonical-secrets",
+			Status:      Red,
+			Reason:      "Canonical secrets path is not a directory: " + path,
+			Remediation: "mkdir -p " + path,
+		}
+	}
+	return Check{Name: "canonical-secrets", Status: Green, Reason: "Canonical secrets directory present"}
+}
+
+type aiSecretSpec struct {
+	name       string
+	enabled    bool
+	configured bool
+}
+
+func CheckAISecrets(cfg Config) Check {
+	specs := []aiSecretSpec{
+		{name: "openai", enabled: cfg.OpenAIEnabled, configured: cfg.OpenAIConfigured},
+		{name: "anthropic", enabled: cfg.AnthropicEnabled, configured: cfg.AnthropicConfigured},
+		{name: "gemini", enabled: cfg.GeminiEnabled, configured: cfg.GeminiConfigured},
+	}
+	enabled := make([]string, 0, len(specs))
+	missing := make([]string, 0, len(specs))
+	for _, spec := range specs {
+		if !spec.enabled {
+			continue
+		}
+		enabled = append(enabled, spec.name)
+		if !spec.configured {
+			missing = append(missing, spec.name)
+		}
+	}
+	if len(enabled) == 0 {
+		return Check{Name: "ai", Status: Green, Reason: "AI providers not configured (optional)"}
+	}
+	if len(missing) > 0 {
+		return Check{
+			Name:        "ai",
+			Status:      Yellow,
+			Reason:      "Missing AI credentials: " + strings.Join(missing, ", "),
+			Remediation: "Configure the missing AI credentials in the UI",
+		}
+	}
+	return Check{Name: "ai", Status: Green, Reason: "AI credentials configured"}
+}
+
+func CheckProductionReady(cfg Config) Check {
+	if !cfg.CloudflareTokenConfigured && strings.TrimSpace(cfg.CloudflareToken) == "" {
+		return Check{
+			Name:        "production",
+			Status:      Red,
+			Reason:      "Cloudflare API token missing",
+			Remediation: "Complete setup step 4 or configure the Cloudflare token in the UI",
+		}
+	}
+	if strings.TrimSpace(cfg.CloudflareZoneID) == "" {
+		return Check{
+			Name:        "production",
+			Status:      Red,
+			Reason:      "Cloudflare zone ID missing",
+			Remediation: "Complete setup step 4 or configure the Cloudflare zone ID in the UI",
+		}
+	}
+	return Check{Name: "production", Status: Green, Reason: "Production enable prerequisites satisfied"}
+}
+
 // CheckLegacyLayout reports whether a pre-V1.4 config directory exists alongside the canonical path.
 //   - GREEN: canonical secrets dir exists (or neither exists) — correct state
 //   - YELLOW: both legacy and canonical exist — migration in progress
@@ -274,12 +433,9 @@ func CheckLegacyLayout(cfg Config) Check {
 	}
 	canonical := cfg.CanonicalSecretsDir
 	if strings.TrimSpace(canonical) == "" {
-		canonical = "/etc/security-automation-go/secrets"
+		canonical = "/var/lib/security-automation-go/runtime"
 	}
-	_, legacyErr := os.Stat(legacy)
-	_, canonicalErr := os.Stat(canonical)
-	legacyExists := legacyErr == nil
-	canonicalExists := canonicalErr == nil
+	legacyExists, canonicalExists := legacyLayoutState(legacy, canonical)
 
 	switch {
 	case !legacyExists:
@@ -299,4 +455,10 @@ func CheckLegacyLayout(cfg Config) Check {
 			Remediation: "sudo mkdir -p " + canonical + " && sudo cp " + legacy + "/* " + canonical + "/ && sudo chmod 0600 " + canonical + "/*",
 		}
 	}
+}
+
+func legacyLayoutState(legacy, canonical string) (bool, bool) {
+	_, legacyErr := os.Stat(legacy)
+	_, canonicalErr := os.Stat(canonical)
+	return legacyErr == nil, canonicalErr == nil
 }

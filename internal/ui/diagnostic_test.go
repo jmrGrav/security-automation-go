@@ -1,13 +1,20 @@
 package ui
 
 import (
+	"archive/tar"
+	"bytes"
+	"compress/gzip"
+	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/jm/security-automation-go/internal/storage/sqlite"
 )
 
 func TestHandleRunDiagnostic_MethodNotAllowed(t *testing.T) {
@@ -130,6 +137,47 @@ func TestHandleSupportBundle_NoSession_Returns401(t *testing.T) {
 	}
 }
 
+func TestHandleSupportBundle_ExcludesSecretMaterial(t *testing.T) {
+	srv, db, _ := newCredentialStoreServer(t, map[string]string{"UI_SECRET": "ui-secret-value"})
+	if err := sqlite.NewCredentialStore(db).Set(context.Background(), "cloudflare.api_token", "bundle-secret-token", true); err != nil {
+		t.Fatalf("seed credential: %v", err)
+	}
+	cookie := loginCookie(t, srv, "ui-secret-value")
+	req := httptest.NewRequest(http.MethodGet, "/health/support-bundle", nil)
+	req.AddCookie(cookie)
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if bytes.Contains(rr.Body.Bytes(), []byte("bundle-secret-token")) {
+		t.Fatalf("support bundle leaked credential material")
+	}
+	gr, err := gzip.NewReader(bytes.NewReader(rr.Body.Bytes()))
+	if err != nil {
+		t.Fatalf("gzip reader: %v", err)
+	}
+	defer gr.Close()
+	tr := tar.NewReader(gr)
+	for {
+		hdr, err := tr.Next()
+		if err != nil {
+			break
+		}
+		if strings.Contains(hdr.Name, "secret.key") || strings.Contains(hdr.Name, "runtime.db") {
+			t.Fatalf("support bundle included forbidden entry %q", hdr.Name)
+		}
+		data, err := io.ReadAll(tr)
+		if err != nil {
+			t.Fatalf("read tar entry %s: %v", hdr.Name, err)
+		}
+		if bytes.Contains(data, []byte("bundle-secret-token")) {
+			t.Fatalf("support bundle entry %q leaked credential material", hdr.Name)
+		}
+	}
+}
+
 func TestRedactSecretLines(t *testing.T) {
 	tests := []struct {
 		input    string
@@ -202,5 +250,27 @@ func TestDiagnosticReport_StoredToDisk(t *testing.T) {
 	}
 	if !strings.HasSuffix(entries[0].Name(), ".json") {
 		t.Errorf("expected .json file, got %q", entries[0].Name())
+	}
+}
+
+func TestHandleRunDiagnostic_DoesNotLeakCredentialValues(t *testing.T) {
+	srv, db, _ := newCredentialStoreServer(t, map[string]string{"UI_SECRET": "ui-secret-value"})
+	if err := sqlite.NewCredentialStore(db).Set(context.Background(), "cloudflare.api_token", "diagnostic-secret-token", true); err != nil {
+		t.Fatalf("seed credential: %v", err)
+	}
+	cookie := loginCookie(t, srv, "ui-secret-value")
+	req := httptest.NewRequest("POST", "/health/diagnostic",
+		strings.NewReader("csrf_token="+srv.csrfTokenFor(cookie.Value)))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(cookie)
+	req.Header.Set("X-CSRF-Token", srv.csrfTokenFor(cookie.Value))
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if bytes.Contains(rr.Body.Bytes(), []byte("diagnostic-secret-token")) {
+		t.Fatalf("diagnostic report leaked credential material")
 	}
 }
