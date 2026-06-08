@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -664,10 +665,10 @@ func (s *Server) validCSRF(r *http.Request) bool {
 		return false
 	}
 	expected := s.csrfTokenFor(cookie.Value)
-	if subtleConstantTime(r.Header.Get(csrfHeaderName), expected) == 1 {
+	if subtle.ConstantTimeCompare([]byte(r.Header.Get(csrfHeaderName)), []byte(expected)) == 1 {
 		return true
 	}
-	return subtleConstantTime(r.FormValue("csrf_token"), expected) == 1
+	return subtle.ConstantTimeCompare([]byte(r.FormValue("csrf_token")), []byte(expected)) == 1
 }
 
 func (s *Server) csrfTokenFromRequest(r *http.Request) string {
@@ -1052,19 +1053,6 @@ func normalizeAIProviderPreference(value string) string {
 	}
 }
 
-func subtleConstantTime(a, b string) int {
-	if len(a) != len(b) {
-		return 0
-	}
-	var v byte
-	for i := 0; i < len(a); i++ {
-		v |= a[i] ^ b[i]
-	}
-	if v == 0 {
-		return 1
-	}
-	return 0
-}
 
 func (s *Server) forcePasswordChangeMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

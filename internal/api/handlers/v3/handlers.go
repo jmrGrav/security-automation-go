@@ -3,6 +3,7 @@ package v3
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -77,7 +78,8 @@ func (h *V3Handler) GetExplainDecision(w http.ResponseWriter, r *http.Request) {
 
 	graph, err := h.admission.ExplainDecision(r.Context(), evidenceID)
 	if err != nil {
-		h.ErrorResponse(w, http.StatusNotFound, "NOT_FOUND", err.Error())
+		slog.ErrorContext(r.Context(), "explain decision failed", "err", err)
+		h.ErrorResponse(w, http.StatusNotFound, "NOT_FOUND", "not found")
 		return
 	}
 
@@ -106,7 +108,8 @@ func (h *V3Handler) GetSecurityEvidence(w http.ResponseWriter, r *http.Request) 
 	if evidenceID != "" {
 		ev, found, err := h.evidence.Get(r.Context(), evidenceID)
 		if err != nil {
-			h.ErrorResponse(w, http.StatusInternalServerError, "EVIDENCE_READ_FAILED", err.Error())
+			slog.ErrorContext(r.Context(), "evidence read failed", "err", err)
+			h.ErrorResponse(w, http.StatusInternalServerError, "EVIDENCE_READ_FAILED", "internal error")
 			return
 		}
 		if !found {
@@ -143,7 +146,8 @@ func (h *V3Handler) GetSecurityEvidence(w http.ResponseWriter, r *http.Request) 
 	}
 	items, err := h.evidence.Search(r.Context(), opts)
 	if err != nil {
-		h.ErrorResponse(w, http.StatusInternalServerError, "EVIDENCE_SEARCH_FAILED", err.Error())
+		slog.ErrorContext(r.Context(), "evidence search failed", "err", err)
+		h.ErrorResponse(w, http.StatusInternalServerError, "EVIDENCE_SEARCH_FAILED", "internal error")
 		return
 	}
 	h.JSONResponse(w, http.StatusOK, items)
@@ -166,7 +170,8 @@ func (h *V3Handler) GetExplainSecurityEvidence(w http.ResponseWriter, r *http.Re
 	}
 	ev, found, err := h.evidence.Get(r.Context(), evidenceID)
 	if err != nil {
-		h.ErrorResponse(w, http.StatusInternalServerError, "EVIDENCE_READ_FAILED", err.Error())
+		slog.ErrorContext(r.Context(), "evidence read failed", "err", err)
+		h.ErrorResponse(w, http.StatusInternalServerError, "EVIDENCE_READ_FAILED", "internal error")
 		return
 	}
 	if !found {
@@ -191,7 +196,8 @@ func (h *V3Handler) GetOwnershipLineage(w http.ResponseWriter, r *http.Request) 
 	if eventID != "" {
 		ev, found, err := h.ownership.Get(r.Context(), eventID)
 		if err != nil {
-			h.ErrorResponse(w, http.StatusInternalServerError, "OWNERSHIP_LINEAGE_READ_FAILED", err.Error())
+			slog.ErrorContext(r.Context(), "ownership lineage read failed", "err", err)
+			h.ErrorResponse(w, http.StatusInternalServerError, "OWNERSHIP_LINEAGE_READ_FAILED", "internal error")
 			return
 		}
 		if !found {
@@ -216,7 +222,8 @@ func (h *V3Handler) GetOwnershipLineage(w http.ResponseWriter, r *http.Request) 
 		Limit:           limit,
 	})
 	if err != nil {
-		h.ErrorResponse(w, http.StatusInternalServerError, "OWNERSHIP_LINEAGE_SEARCH_FAILED", err.Error())
+		slog.ErrorContext(r.Context(), "ownership lineage search failed", "err", err)
+		h.ErrorResponse(w, http.StatusInternalServerError, "OWNERSHIP_LINEAGE_SEARCH_FAILED", "internal error")
 		return
 	}
 	if len(items) > 0 {
@@ -252,7 +259,8 @@ func (h *V3Handler) GetOwnershipLineagePage(w http.ResponseWriter, r *http.Reque
 		Limit:           limit,
 	})
 	if err != nil {
-		h.ErrorResponse(w, http.StatusInternalServerError, "OWNERSHIP_LINEAGE_SEARCH_FAILED", err.Error())
+		slog.ErrorContext(r.Context(), "ownership lineage search failed", "err", err)
+		h.ErrorResponse(w, http.StatusInternalServerError, "OWNERSHIP_LINEAGE_SEARCH_FAILED", "internal error")
 		return
 	}
 
@@ -286,7 +294,8 @@ func (h *V3Handler) GetExplainOwnershipLineage(w http.ResponseWriter, r *http.Re
 	}
 	ev, found, err := h.ownership.Get(r.Context(), eventID)
 	if err != nil {
-		h.ErrorResponse(w, http.StatusInternalServerError, "OWNERSHIP_LINEAGE_READ_FAILED", err.Error())
+		slog.ErrorContext(r.Context(), "ownership lineage read failed", "err", err)
+		h.ErrorResponse(w, http.StatusInternalServerError, "OWNERSHIP_LINEAGE_READ_FAILED", "internal error")
 		return
 	}
 	if !found {

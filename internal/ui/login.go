@@ -2,6 +2,7 @@ package ui
 
 import (
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -98,7 +99,7 @@ func (s *Server) handleLoginForm(w http.ResponseWriter, r *http.Request) {
 	}
 	secret := r.PostForm.Get("secret")
 	expected, ok := s.secretProvider.Lookup("UI_SECRET")
-	if !ok || expected == "" || subtleConstantTime(secret, expected) != 1 {
+	if !ok || expected == "" || subtle.ConstantTimeCompare([]byte(secret), []byte(expected)) != 1 {
 		s.audit.Record("login_failed", map[string]string{"reason": "invalid_secret"})
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return

@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync/atomic"
 	"syscall"
 
@@ -525,6 +526,9 @@ func (s *DB) ExportHotSnapshot(ctx context.Context, targetPath string) error {
 	clean := filepath.Clean(targetPath)
 	if clean != targetPath {
 		return apperr.Newf(op, "targetPath contains traversal, got %q", targetPath)
+	}
+	if strings.ContainsAny(clean, "'\"") {
+		return apperr.Newf(op, "targetPath contains invalid characters: %q", targetPath)
 	}
 	if err := os.MkdirAll(filepath.Dir(clean), 0755); err != nil {
 		return apperr.Wrap(op, err)
