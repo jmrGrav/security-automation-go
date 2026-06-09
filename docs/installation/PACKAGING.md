@@ -27,8 +27,9 @@ dpkg-deb --contents dist/security-automation-go_1.5.0_amd64.deb
 | `/lib/systemd/system/` | 5 service files + `cf-allowlist-sync.timer` |
 | `/usr/lib/sysusers.d/` | `security-automation-go.conf` (user/group) |
 | `/usr/lib/tmpfiles.d/` | `security-automation-go.conf` (directories) |
-| `DEBIAN/postinst` | User/dir creation, `systemctl enable cf-sync` |
-| `DEBIAN/postrm` | Purge cleanup |
+| `DEBIAN/postinst` | User/dir creation, default env file, legacy unit removal, `systemctl enable cf-sync` |
+| `DEBIAN/prerm` | Stop `cf-sync` before remove/deconfigure |
+| `DEBIAN/postrm` | Purge cleanup (dirs, user, group) |
 
 ## Packaging Tree
 
@@ -36,9 +37,10 @@ dpkg-deb --contents dist/security-automation-go_1.5.0_amd64.deb
 packaging/
 ├── deb/
 │   └── DEBIAN/
-│       ├── control      — package metadata (Version: 1.5.0, Architecture: amd64)
-│       ├── postinst     — user/dir creation, service enable (chmod 755)
-│       └── postrm       — purge cleanup (chmod 755)
+│       ├── control      — package metadata (Version injected by make package, Architecture: amd64)
+│       ├── postinst     — user/dir creation, default env file, service enable (chmod 755)
+│       ├── prerm        — stop service before remove (chmod 755)
+│       └── postrm       — purge cleanup: dirs, user, group (chmod 755)
 ├── rpm/
 │   └── security-automation-go.spec   — RPM spec with scriptlets
 └── shared/
@@ -62,7 +64,7 @@ Shell: `/usr/sbin/nologin`
 | `/var/lib/security-automation-go/runtime` | 0750 | security-automation |
 | `/var/lib/security-automation-go/secret.key` | 0600 | security-automation |
 | `/etc/security-automation-go/security-automation.env` | 0644 | root |
-| `/var/log/security-automation` | 0755 | security-automation |
+| `/var/log/security-automation-go` | 0755 | security-automation |
 
 ## Multi-Architecture Builds
 
@@ -91,3 +93,4 @@ make package
 - No repository publication (APT/YUM repo hosting)
 - Config template (`/etc/security-automation-go/security-automation.yaml.example`) not packaged
 - ARM64 `.deb` not produced by `make package` (uses amd64 binaries); separate `make package ARCH=arm64` target not yet implemented
+ge ARCH=arm64` target not yet implemented

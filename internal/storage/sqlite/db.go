@@ -71,12 +71,14 @@ func New(dir string) (*DB, error) {
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)
 
-	// Performance and safety pragmas
+	// Performance and safety pragmas.
+	// busy_timeout must be first so subsequent locking pragmas (journal_mode=WAL)
+	// retry instead of immediately returning SQLITE_BUSY on a fresh database.
 	pragmas := []string{
+		"PRAGMA busy_timeout=5000;",
 		"PRAGMA journal_mode=WAL;",
 		"PRAGMA synchronous=NORMAL;",
 		"PRAGMA foreign_keys=ON;",
-		"PRAGMA busy_timeout=5000;",
 		"PRAGMA wal_autocheckpoint=1000;",
 	}
 
@@ -438,12 +440,14 @@ func (s *DB) Reopen(ctx context.Context) error {
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)
 
-	// Performance and safety pragmas
+	// Performance and safety pragmas.
+	// busy_timeout must be first so subsequent locking pragmas (journal_mode=WAL)
+	// retry instead of immediately returning SQLITE_BUSY on a fresh database.
 	pragmas := []string{
+		"PRAGMA busy_timeout=5000;",
 		"PRAGMA journal_mode=WAL;",
 		"PRAGMA synchronous=NORMAL;",
 		"PRAGMA foreign_keys=ON;",
-		"PRAGMA busy_timeout=5000;",
 		"PRAGMA wal_autocheckpoint=1000;",
 	}
 

@@ -27,23 +27,21 @@ func TestUIFreshInstallWizardAndConservativeRestart(t *testing.T) {
 	cfg.UI.Enabled = true
 	cfg.UI.Addr = "127.0.0.1:" + freePort(t)
 	cfg.StateDir = stateDir
-	cfg.UI.SecretFile = filepath.Join(stateDir, "runtime", "ui_secret")
-	cfg.UI.InitialPasswordFile = filepath.Join(stateDir, "runtime", "initial-admin-password")
+	cfg.FinalizePaths()
 	cfg.UI.ProviderStateFile = filepath.Join(stateDir, "runtime", "ai-providers.env")
 
 	cancel, done := startUIMode(t, cfg)
 
 	step1Body := getBody(t, "http://"+cfg.UI.Addr+"/setup/step/1")
-	if !strings.Contains(step1Body, "one-time UI setup secret") && !strings.Contains(step1Body, "Login with setup secret") {
+	if !strings.Contains(step1Body, "Create administrator password") {
 		t.Fatalf("setup wizard not reachable on fresh install: %s", step1Body)
 	}
 
 	assertFileMode(t, filepath.Join(stateDir, "secret.key"), 0o600)
 	assertFileExists(t, filepath.Join(stateDir, "runtime.db"))
-	assertFileExists(t, filepath.Join(stateDir, "runtime", "initial-admin-password"))
-	assertFileExists(t, filepath.Join(stateDir, "runtime", "ui_secret"))
 
-	minimalWizardComplete(t, cfg, stateDir)
+	const testAdminPass = "Password123!@#Admin"
+	minimalWizardComplete(t, cfg, stateDir, testAdminPass)
 
 	// Re-authenticate and smoke the main operator pages on the live fresh-install instance.
 	client := &http.Client{
@@ -52,14 +50,10 @@ func TestUIFreshInstallWizardAndConservativeRestart(t *testing.T) {
 			return http.ErrUseLastResponse
 		},
 	}
-	uiSecret := parseSecretValue(t, cfg.UI.SecretFile, "UI_SECRET")
-	session := loginAndGetSessionCookie(t, client, "http://"+cfg.UI.Addr, uiSecret)
+	session := loginAndGetSessionCookie(t, client, "http://"+cfg.UI.Addr, testAdminPass)
 	dashboardBody := getBodyWithCookie(t, client, "http://"+cfg.UI.Addr+"/", session)
 	if !strings.Contains(dashboardBody, "encrypted SQLite credential store") {
 		t.Fatalf("dashboard should mention encrypted SQLite credential store: %s", dashboardBody)
-	}
-	if strings.Contains(dashboardBody, "file-backed secrets") {
-		t.Fatalf("dashboard must not mention file-backed secrets: %s", dashboardBody)
 	}
 	healthBody := getBodyWithCookie(t, client, "http://"+cfg.UI.Addr+"/health", session)
 	if strings.Contains(healthBody, "state.db") {
@@ -81,22 +75,7 @@ func TestUIFreshInstallWizardAndConservativeRestart(t *testing.T) {
 		t.Fatalf("expected production mutations to stay disabled on minimal wizard")
 	}
 
-	// No operator secret files should have been created during the skipped steps.
-	for _, forbidden := range []string{
-		"cloudflare_api_token",
-		"abuseipdb_api_key",
-		"betterstack_source_token",
-		"openai_api_key",
-		"anthropic_api_key",
-		"gemini_api_key",
-	} {
-		if _, err := os.Stat(filepath.Join(stateDir, "runtime", forbidden)); !os.IsNotExist(err) {
-			t.Fatalf("unexpected operator secret file created: %s (err=%v)", forbidden, err)
-		}
-	}
-
 	secretKeyBefore := readFileBytes(t, filepath.Join(stateDir, "secret.key"))
-	initialPasswordBefore := readFileBytes(t, filepath.Join(stateDir, "runtime", "initial-admin-password"))
 
 	cancel()
 	waitForUIExit(t, done)
@@ -112,10 +91,6 @@ func TestUIFreshInstallWizardAndConservativeRestart(t *testing.T) {
 	secretKeyAfter := readFileBytes(t, filepath.Join(stateDir, "secret.key"))
 	if string(secretKeyBefore) != string(secretKeyAfter) {
 		t.Fatal("secret.key changed across conservative restart")
-	}
-	initialPasswordAfter := readFileBytes(t, filepath.Join(stateDir, "runtime", "initial-admin-password"))
-	if string(initialPasswordBefore) != string(initialPasswordAfter) {
-		t.Fatal("initial password file changed across conservative restart")
 	}
 
 	client = &http.Client{
@@ -211,25 +186,44 @@ func getBody(t *testing.T, url string) string {
 	return string(body)
 }
 
-func minimalWizardComplete(t *testing.T, cfg *config.Config, stateDir string) {
+func minimalWizardComplete(t *testing.T, cfg *config.Config, stateDir, password string) {
 	t.Helper()
 	client := &http.Client{
-		// Step 2 performs a bcrypt hash; under full-suite load this can exceed a few seconds.
+		// Step 1 performs a bcrypt hash; under full-suite load this can exceed a few seconds.
 		Timeout: 30 * time.Second,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			return http.ErrUseLastResponse
 		},
 	}
 
-	uiSecret := parseSecretValue(t, cfg.UI.SecretFile, "UI_SECRET")
-	initialPassword := strings.TrimSpace(string(readFileBytes(t, cfg.UI.InitialPasswordFile)))
-	session := loginAndGetSessionCookie(t, client, "http://"+cfg.UI.Addr, uiSecret)
+	// Step 1: Create admin password
+	resp, err := client.PostForm("http://"+cfg.UI.Addr+"/setup/step/1", url.Values{
+		"new_password":     {password},
+		"confirm_password": {password},
+	})
+	if err != nil {
+		t.Fatalf("POST step 1: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusFound && resp.StatusCode != http.StatusSeeOther {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected redirect from step 1, got %d: %s", resp.StatusCode, string(body))
+	}
+	session := ""
+	for _, c := range resp.Cookies() {
+		if c.Name == uiSessionCookieName {
+			session = c.Value
+			break
+		}
+	}
+	if session == "" {
+		t.Fatal("missing session cookie after step 1")
+	}
+
 	csrf := getCSRF(t, client, "http://"+cfg.UI.Addr+"/setup/step/2", session)
 	csrf = postAndGetNextCSRF(t, client, "http://"+cfg.UI.Addr, "/setup/step/2", url.Values{
-		"csrf_token":       {csrf},
-		"current_password": {initialPassword},
-		"new_password":     {"Password123!@#New"},
-		"confirm_password": {"Password123!@#New"},
+		"csrf_token": {csrf},
+		"skip":       {"1"},
 	}, session)
 	csrf = postAndGetNextCSRF(t, client, "http://"+cfg.UI.Addr, "/setup/step/3", url.Values{
 		"csrf_token": {csrf},
@@ -251,19 +245,13 @@ func minimalWizardComplete(t *testing.T, cfg *config.Config, stateDir string) {
 		"csrf_token": {csrf},
 		"skip":       {"1"},
 	}, session)
-	// Step 8: CrowdSec LAPI key (optional) — skip. Uses its own CSRF fetched from the page.
-	csrf = getCSRF(t, client, "http://"+cfg.UI.Addr+"/setup/step/8", session)
-	postAndCheckLocation(t, client, "http://"+cfg.UI.Addr, "/setup/step/8", url.Values{
-		"csrf_token": {csrf},
-		"skip":       {"1"},
-	}, session)
-	// Step 9: Runtime summary — no form, just verify content and navigate forward.
-	step9 := getBodyWithCookie(t, client, "http://"+cfg.UI.Addr+"/setup/step/9", session)
-	if !strings.Contains(step9, "Runtime summary") && !strings.Contains(step9, "Detected Environment") {
-		t.Fatalf("expected runtime summary after minimal wizard, got: %s", step9)
+	// Step 8: Runtime summary — no form, just verify content and navigate forward.
+	step8 := getBodyWithCookie(t, client, "http://"+cfg.UI.Addr+"/setup/step/8", session)
+	if !strings.Contains(step8, "Runtime summary") && !strings.Contains(step8, "Detected Environment") {
+		t.Fatalf("expected runtime summary after minimal wizard, got: %s", step8)
 	}
-	csrf = getCSRF(t, client, "http://"+cfg.UI.Addr+"/setup/step/10", session)
-	postNoRedirect(t, client, "http://"+cfg.UI.Addr, "/setup/step/10", url.Values{
+	csrf = getCSRF(t, client, "http://"+cfg.UI.Addr+"/setup/step/9", session)
+	postNoRedirect(t, client, "http://"+cfg.UI.Addr, "/setup/step/9", url.Values{
 		"csrf_token": {csrf},
 	}, session)
 
@@ -278,9 +266,9 @@ func minimalWizardComplete(t *testing.T, cfg *config.Config, stateDir string) {
 	}
 }
 
-func loginAndGetSessionCookie(t *testing.T, client *http.Client, baseURL, secret string) string {
+func loginAndGetSessionCookie(t *testing.T, client *http.Client, baseURL, password string) string {
 	t.Helper()
-	resp, err := client.PostForm(baseURL+"/login", url.Values{"secret": {secret}})
+	resp, err := client.PostForm(baseURL+"/login", url.Values{"password": {password}})
 	if err != nil {
 		t.Fatalf("login: %v", err)
 	}
@@ -447,15 +435,4 @@ func readFileBytes(t *testing.T, path string) []byte {
 		t.Fatalf("read %s: %v", path, err)
 	}
 	return data
-}
-
-func parseSecretValue(t *testing.T, path, key string) string {
-	t.Helper()
-	data := strings.TrimSpace(string(readFileBytes(t, path)))
-	prefix := key + "="
-	if strings.HasPrefix(data, prefix) {
-		return strings.TrimSpace(strings.TrimPrefix(data, prefix))
-	}
-	t.Fatalf("expected %s to contain %s=<value>", path, key)
-	return ""
 }

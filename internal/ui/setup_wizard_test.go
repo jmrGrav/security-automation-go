@@ -40,7 +40,6 @@ func newTestServerWithSetup(t *testing.T, store ui.SetupStorer) *ui.Server {
 	cfg := config.DefaultConfig()
 	cfg.UI.Enabled = true
 	cfg.UI.Addr = "127.0.0.1:0"
-	cfg.UI.InitialPasswordFile = dataDir + "/runtime/initial-admin-password"
 	cfg.UI.SecretFile = dataDir + "/runtime/ui_secret"
 	cfg.UI.ProviderStateFile = dataDir + "/ai-providers.env"
 	cfg.StateDir = dataDir
@@ -111,7 +110,7 @@ func TestSetupGuard_NilStoreAllsThrough(t *testing.T) {
 	}
 }
 
-func TestSetupStep1MentionsUISecret(t *testing.T) {
+func TestSetupStep1IsMandatoryPasswordCreation(t *testing.T) {
 	store := &fakeSetupStore{step: 1, complete: false}
 	srv := newTestServerWithSetup(t, store)
 
@@ -123,11 +122,11 @@ func TestSetupStep1MentionsUISecret(t *testing.T) {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
 	body := w.Body.String()
-	if !strings.Contains(body, "runtime/ui_secret") {
-		t.Fatalf("step 1 should point to ui_secret, body=%s", body)
+	if !strings.Contains(body, "Create administrator password") {
+		t.Fatalf("step 1 should be password creation, body=%s", body)
 	}
-	if strings.Contains(body, "initial-admin-password") {
-		t.Fatalf("step 1 must not mention initial-admin-password, body=%s", body)
+	if strings.Contains(body, "setup secret") {
+		t.Fatalf("step 1 must not mention setup secret, body=%s", body)
 	}
 }
 
@@ -150,7 +149,7 @@ func TestSetupWizard_FirstBootRequiresSetup(t *testing.T) {
 
 func TestSetupWizard_SetupCompleteGatesMutations(t *testing.T) {
 	// If setup is complete but mutations not explicitly enabled, dry_run must remain absent (default true).
-	store := &fakeSetupStore{step: 9, complete: true, settings: map[string]string{}}
+	store := &fakeSetupStore{step: 8, complete: true, settings: map[string]string{}}
 	// No "mutations_enabled" key should be present by default.
 	val, ok, _ := store.GetSetting(context.Background(), "mutations_enabled")
 	if ok && val == "true" {
@@ -181,7 +180,7 @@ func TestSetupWizard_DryRunDefaultsTrue(t *testing.T) {
 
 func TestSetupWizard_PortChangePersisted(t *testing.T) {
 	// Verify that port changes are saved to the store via SetSetting.
-	store := &fakeSetupStore{step: 3, complete: false, settings: map[string]string{}}
+	store := &fakeSetupStore{step: 2, complete: false, settings: map[string]string{}}
 	if err := store.SetSetting(context.Background(), "ui_addr", "127.0.0.1:9999"); err != nil {
 		t.Fatalf("SetSetting: %v", err)
 	}

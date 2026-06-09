@@ -8,7 +8,7 @@ explicitly approved actions. It is not a public API.
 ## Default posture
 
 - `UI_ENABLED=0`
-- bind to `127.0.0.1:9090` when enabled
+- bind to `127.0.0.1:9091` when enabled
 - read-only by default
 - no destructive UI actions unless `UI_MUTATIONS_ENABLED=1`
 - no live Cloudflare mutation unless `CLOUDFLARE_MUTATIONS_ENABLED=1`

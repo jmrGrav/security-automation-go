@@ -8,9 +8,7 @@ import (
 )
 
 func TestTrustedNetworks_RequiresAuth(t *testing.T) {
-	srv, _, _ := newTestServer(t, map[string]string{
-		"UI_SECRET": "ui-secret-value",
-	})
+	srv, _, _ := newTestServer(t, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/trusted-networks", nil)
 	rr := httptest.NewRecorder()
@@ -25,10 +23,8 @@ func TestTrustedNetworks_RequiresAuth(t *testing.T) {
 }
 
 func TestTrustedNetworks_RenderRegistryEntries(t *testing.T) {
-	srv, audit, _ := newTestServer(t, map[string]string{
-		"UI_SECRET": "ui-secret-value",
-	})
-	cookie := loginCookie(t, srv, "ui-secret-value")
+	srv, audit, _ := newTestServer(t, nil)
+	cookie := loginCookie(t, srv, "test-password-123!@#")
 
 	req := httptest.NewRequest(http.MethodGet, "/trusted-networks", nil)
 	req.AddCookie(cookie)
@@ -77,10 +73,8 @@ func TestTrustedNetworks_RenderRegistryEntries(t *testing.T) {
 }
 
 func TestTrustedNetworks_ExportIsReadOnlyAndDeterministic(t *testing.T) {
-	srv, audit, _ := newTestServer(t, map[string]string{
-		"UI_SECRET": "ui-secret-value",
-	})
-	cookie := loginCookie(t, srv, "ui-secret-value")
+	srv, audit, _ := newTestServer(t, nil)
+	cookie := loginCookie(t, srv, "test-password-123!@#")
 
 	export := func() string {
 		req := httptest.NewRequest(http.MethodGet, "/trusted-networks/export", nil)

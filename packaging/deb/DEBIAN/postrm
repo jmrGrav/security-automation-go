@@ -4,7 +4,13 @@ set -e
 if [ "$1" = "purge" ]; then
     # Remove state on purge only — not on upgrade
     rm -rf /var/lib/security-automation-go
-    rm -rf /var/log/security-automation
+    rm -rf /var/log/security-automation-go
+    rm -rf /etc/security-automation-go
+
+    # Safely clean up empty legacy directories if they were used for migration
+    [ -d /var/lib/cf-sync ] && rmdir --ignore-fail-on-non-empty /var/lib/cf-sync || true
+    [ -d /var/log/security-automation ] && rmdir --ignore-fail-on-non-empty /var/log/security-automation || true
+
     if getent passwd security-automation >/dev/null 2>&1; then
         userdel security-automation || true
     fi

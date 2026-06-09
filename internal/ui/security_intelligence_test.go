@@ -25,9 +25,7 @@ func (f fakeLookupProvider) Lookup(_ context.Context, _ netip.Addr) (enrichment.
 }
 
 func TestSecurityIntelligence_RequiresAuth(t *testing.T) {
-	srv, _, _ := newTestServer(t, map[string]string{
-		"UI_SECRET": "ui-secret-value",
-	})
+	srv, _, _ := newTestServer(t, nil)
 
 	for _, req := range []*http.Request{
 		httptest.NewRequest(http.MethodGet, "/intelligence", nil),
@@ -48,11 +46,9 @@ func TestSecurityIntelligence_RequiresAuth(t *testing.T) {
 }
 
 func TestSecurityIntelligence_InvalidIPRejected(t *testing.T) {
-	srv, audit, _ := newTestServer(t, map[string]string{
-		"UI_SECRET": "ui-secret-value",
-	})
+	srv, audit, _ := newTestServer(t, nil)
 	srv.enrichment = enrichment.NewService(forensicCfg(), nil, nil, nil, nil)
-	cookie := loginCookie(t, srv, "ui-secret-value")
+	cookie := loginCookie(t, srv, "test-password-123!@#")
 
 	req := httptest.NewRequest(http.MethodPost, "/intelligence", strings.NewReader("ip=not-an-ip"))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -71,11 +67,9 @@ func TestSecurityIntelligence_InvalidIPRejected(t *testing.T) {
 }
 
 func TestSecurityIntelligence_CleanIPNeutral(t *testing.T) {
-	srv, _, _ := newTestServer(t, map[string]string{
-		"UI_SECRET": "ui-secret-value",
-	})
+	srv, _, _ := newTestServer(t, nil)
 	srv.enrichment = enrichment.NewService(forensicCfg(), nil, nil, nil, nil)
-	cookie := loginCookie(t, srv, "ui-secret-value")
+	cookie := loginCookie(t, srv, "test-password-123!@#")
 
 	req := httptest.NewRequest(http.MethodPost, "/intelligence", strings.NewReader("ip=203.0.113.4"))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -102,11 +96,9 @@ func TestSecurityIntelligence_ProtectedIPNoHardBan(t *testing.T) {
 		Provider:  "static",
 	}}
 	svc := enrichment.NewService(forensicCfg(), dns, asnProv, nil, nil)
-	srv, _, _ := newTestServer(t, map[string]string{
-		"UI_SECRET": "ui-secret-value",
-	})
+	srv, _, _ := newTestServer(t, nil)
 	srv.enrichment = svc
-	cookie := loginCookie(t, srv, "ui-secret-value")
+	cookie := loginCookie(t, srv, "test-password-123!@#")
 
 	req := httptest.NewRequest(http.MethodPost, "/intelligence", strings.NewReader("ip=104.16.0.1"))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -137,13 +129,12 @@ func TestSecurityIntelligence_ExternalSignalAloneCannotHardBan(t *testing.T) {
 	}
 	svc := enrichment.NewService(forensicCfg(), nil, nil, []enrichment.LookupProvider{fakeProvider}, nil)
 	srv, _, _ := newTestServer(t, map[string]string{
-		"UI_SECRET":          "ui-secret-value",
 		"ABUSEIPDB_ENABLED":  "1",
 		"SPAMHAUS_ENABLED":   "1",
 		"VIRUSTOTAL_ENABLED": "1",
 	})
 	srv.enrichment = svc
-	cookie := loginCookie(t, srv, "ui-secret-value")
+	cookie := loginCookie(t, srv, "test-password-123!@#")
 
 	req := httptest.NewRequest(http.MethodPost, "/intelligence", strings.NewReader("ip=203.0.113.7"))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -163,13 +154,12 @@ func TestSecurityIntelligence_ExternalSignalAloneCannotHardBan(t *testing.T) {
 
 func TestSecurityIntelligence_ProviderDisabledStateVisible(t *testing.T) {
 	srv, _, _ := newTestServer(t, map[string]string{
-		"UI_SECRET":          "ui-secret-value",
 		"ABUSEIPDB_ENABLED":  "0",
 		"SPAMHAUS_ENABLED":   "1",
 		"VIRUSTOTAL_ENABLED": "1",
 	})
 	srv.enrichment = enrichment.NewService(forensicCfg(), nil, nil, nil, nil)
-	cookie := loginCookie(t, srv, "ui-secret-value")
+	cookie := loginCookie(t, srv, "test-password-123!@#")
 
 	req := httptest.NewRequest(http.MethodPost, "/intelligence", strings.NewReader("ip=203.0.113.8"))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -184,11 +174,9 @@ func TestSecurityIntelligence_ProviderDisabledStateVisible(t *testing.T) {
 }
 
 func TestSecurityIntelligence_AuditLogWritten(t *testing.T) {
-	srv, audit, _ := newTestServer(t, map[string]string{
-		"UI_SECRET": "ui-secret-value",
-	})
+	srv, audit, _ := newTestServer(t, nil)
 	srv.enrichment = enrichment.NewService(forensicCfg(), nil, nil, nil, nil)
-	cookie := loginCookie(t, srv, "ui-secret-value")
+	cookie := loginCookie(t, srv, "test-password-123!@#")
 
 	req := httptest.NewRequest(http.MethodPost, "/intelligence", strings.NewReader("ip=203.0.113.9"))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -207,13 +195,12 @@ func TestSecurityIntelligence_AuditLogWritten(t *testing.T) {
 
 func TestSecurityIntelligence_NoSecretRendered(t *testing.T) {
 	srv, _, _ := newTestServer(t, map[string]string{
-		"UI_SECRET":          "ui-secret-value",
 		"ABUSEIPDB_KEY":      "super-secret",
 		"VIRUSTOTAL_API_KEY": "vt-secret",
 		"SPAMHAUS_API_KEY":   "spamhaus-secret",
 	})
 	srv.enrichment = enrichment.NewService(forensicCfg(), nil, nil, nil, nil)
-	cookie := loginCookie(t, srv, "ui-secret-value")
+	cookie := loginCookie(t, srv, "test-password-123!@#")
 
 	req := httptest.NewRequest(http.MethodPost, "/intelligence", strings.NewReader("ip=203.0.113.10"))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")

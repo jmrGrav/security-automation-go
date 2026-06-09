@@ -50,7 +50,7 @@ func (s *Server) buildHealthConfig() health.Config {
 		AbuseIPDBEnabled:          s.cfg.AbuseIPDB.Enabled,
 		BetterStackConfigured:     betterstackConfigured,
 		StateDir:                  s.cfg.StateDir,
-		LogDir:                    "/var/log/security-automation",
+		LogDir:                    "/var/log/security-automation-go",
 		SecretDir:                 runtimeDir,
 		CanonicalSecretsDir:       runtimeDir,
 		LegacySecretsDir:          "/etc/security-automation/secrets",
@@ -70,7 +70,7 @@ func (s *Server) buildHealthConfig() health.Config {
 func (s *Server) buildDetectConfig() detect.Config {
 	return detect.Config{
 		StateDir:            s.cfg.StateDir,
-		LogDir:              "/var/log/security-automation",
+		LogDir:              "/var/log/security-automation-go",
 		SecretDir:           "/var/lib/security-automation-go/runtime",
 		DecisionsLog:        s.cfg.CrowdSec.DecisionsLog,
 		NginxLogDir:         s.cfg.CrowdSec.NginxLogDir,

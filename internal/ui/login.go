@@ -2,7 +2,6 @@ package ui
 
 import (
 	"crypto/rand"
-	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -13,9 +12,8 @@ import (
 )
 
 // handleLogin processes POST /login requests.
-// Supports two authentication methods:
-// 1. JSON with admin password ({"password": "..."}) - permanent password stored in SQLite
-// 2. Form-encoded UI_SECRET (secret=...) - session token method
+// Supports both JSON ({"password": "..."}) and Form-encoded (password=...)
+// authentication using the permanent admin password stored in SQLite.
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -33,7 +31,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Fall back to form-based (UI_SECRET method)
+	// Fall back to form-based password login
 	s.handleLoginForm(w, r)
 }
 
@@ -90,20 +88,43 @@ func (s *Server) handleLoginJSON(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleLoginForm handles form-based UI_SECRET authentication.
+// handleLoginForm handles form-based admin password authentication.
 func (s *Server) handleLoginForm(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {
 		s.audit.Record("login_error", map[string]string{"reason": "bad_form"})
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
-	secret := r.PostForm.Get("secret")
-	expected, ok := s.secretProvider.Lookup("UI_SECRET")
-	if !ok || expected == "" || subtle.ConstantTimeCompare([]byte(secret), []byte(expected)) != 1 {
-		s.audit.Record("login_failed", map[string]string{"reason": "invalid_secret"})
+	password := r.PostForm.Get("password")
+	if password == "" {
+		http.Error(w, "password required", http.StatusBadRequest)
+		return
+	}
+
+	if s.setupStore == nil {
+		http.Error(w, "not configured", http.StatusServiceUnavailable)
+		return
+	}
+
+	// Load permanent admin password hash from SQLite.
+	hash, ok, err := s.setupStore.GetSetting(r.Context(), "admin_password_hash")
+	if err != nil {
+		s.audit.Record("login_error", map[string]string{"reason": "db_error"})
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	if !ok || hash == "" {
+		s.audit.Record("login_failed", map[string]string{"reason": "setup_incomplete"})
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
+
+	if !auth.VerifyPassword(hash, password) {
+		s.audit.Record("login_failed", map[string]string{"reason": "invalid_password"})
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
 	sessionToken := generateSessionToken()
 	s.mu.Lock()
 	s.sessions[sessionToken] = time.Now().Add(sessionTTL)

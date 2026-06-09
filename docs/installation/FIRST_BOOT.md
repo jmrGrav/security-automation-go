@@ -22,19 +22,20 @@ Do not place operator tokens here.
    `/var/lib/security-automation-go/runtime.db`.
 4. **Master key check**: the local key at
    `/var/lib/security-automation-go/secret.key` is generated if needed.
-5. **UI secret initialization**: the one-time UI setup secret is created at
-   `/var/lib/security-automation-go/runtime/ui_secret` on first boot, and the
-   separate setup password file is created at
-   `/var/lib/security-automation-go/runtime/initial-admin-password`.
+5. **CSRF key initialization**: a random CSRF signing key is generated at
+   `/var/lib/security-automation-go/runtime/ui_secret` on first boot (mode 0600).
 6. **UI server starts**: the operator UI listens on the configured address.
 
 ## First login
 
-1. Operator navigates to `/login`.
-2. Enters the one-time UI setup secret.
-3. System verifies the setup secret.
-4. Operator is redirected to the setup wizard.
-5. Operator completes setup and sets a permanent password.
+1. Operator navigates to `http://127.0.0.1:9091/setup/step/1`.
+2. Follow the 9-step wizard.
+3. Step 1 requires creating an administrator password (≥16 chars, mixed case, digits, symbols).
+4. The password is stored as a bcrypt hash in SQLite — no plaintext file is created.
+5. Subsequent wizard steps configure Cloudflare, CrowdSec, and other optional integrations.
+6. Step 8 shows a runtime summary. Step 9 finalizes and marks setup complete.
+
+**Note:** Default port is `9091` to avoid Cockpit (`9090`). Metrics are on `9092`.
 
 ## Wizard behavior
 
@@ -64,5 +65,5 @@ Do not place operator tokens here.
 
 - Legacy `/etc/security-automation-go/secrets/` files are import-only.
 - Existing SQLite state is preserved on upgrade.
-- To reset the whole installation, remove the runtime DB and bootstrap password
-  file, then restart.
+- To reset the whole installation, remove the runtime DB and restart. The wizard
+  will re-prompt for a new administrator password on first access.

@@ -10,7 +10,7 @@ import (
 func TestMutationSurface_CSRFAndMethodEnforcement(t *testing.T) {
 	srv, _, _ := newTestServer(t, map[string]string{"UI_SECRET": "test-secret"})
 
-	cookie := loginCookie(t, srv, "test-secret")
+	cookie := loginCookie(t, srv, "test-password-123!@#")
 	csrfToken := srv.csrfTokenFor(cookie.Value)
 
 	routes := []struct {

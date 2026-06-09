@@ -3,7 +3,7 @@ GOFLAGS ?=
 LDFLAGS ?= -s -w
 BUILD_FLAGS ?= -trimpath -buildvcs=false -ldflags "$(LDFLAGS)"
 STATIC_ENV = CGO_ENABLED=0
-VERSION ?= 1.5.3
+VERSION ?= 1.5.4
 GOPATH_BIN := $(shell $(GO) env GOPATH)/bin
 
 GOFMT_FILES := $(shell find . -type f -name '*.go' -not -path './vendor/*')
@@ -105,8 +105,9 @@ package: build-linux-amd64
 	@cp deployments/shadow/cf-shadow.service packaging/deb/lib/systemd/system/
 	@cp packaging/shared/sysusers.d/security-automation-go.conf packaging/deb/usr/lib/sysusers.d/
 	@cp packaging/shared/tmpfiles.d/security-automation-go.conf packaging/deb/usr/lib/tmpfiles.d/
-	@chmod 755 packaging/deb/DEBIAN/postinst packaging/deb/DEBIAN/postrm
+	@chmod 755 packaging/deb/DEBIAN/postinst packaging/deb/DEBIAN/postrm packaging/deb/DEBIAN/prerm
 	@chmod 755 packaging/deb/usr/local/bin/*
+	@sed -i "s/^Version:.*/Version: $(VERSION)/" packaging/deb/DEBIAN/control
 	@dpkg-deb --build packaging/deb dist/security-automation-go_$(VERSION)_amd64.deb
 	@echo "==> Built: dist/security-automation-go_$(VERSION)_amd64.deb"
 	@if [ -z "$(NO_RPM)" ] && command -v rpmbuild >/dev/null 2>&1; then \

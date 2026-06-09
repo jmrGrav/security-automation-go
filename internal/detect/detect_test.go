@@ -153,7 +153,7 @@ func TestDetectLogDir_DefaultPath(t *testing.T) {
 	defer func() { fileExists = origFile }()
 
 	r := DetectLogDir(Config{})
-	if r.Details["path"] != "/var/log/security-automation" {
+	if r.Details["path"] != "/var/log/security-automation-go" {
 		t.Errorf("expected default log path, got %q", r.Details["path"])
 	}
 }

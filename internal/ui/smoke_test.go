@@ -7,6 +7,9 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/jm/security-automation-go/internal/config"
+	"github.com/jm/security-automation-go/internal/storage/sqlite"
 )
 
 // Smoke tests verify end-to-end UI flows using in-process fixtures only.
@@ -37,7 +40,26 @@ func TestSmoke_ProtectedRouteRejectsAnonymous(t *testing.T) {
 }
 
 func TestSmoke_SetupWizardAccessible(t *testing.T) {
-	srv, _, _ := newTestServer(t, nil)
+	// Use a fresh server with setup NOT yet complete.
+	dataDir := t.TempDir()
+	t.Setenv("UI_ENABLED", "1")
+	t.Setenv("UI_ADDR", "127.0.0.1:0")
+	t.Setenv("STATE_DIR", dataDir)
+	cfg, err := config.Load("")
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	db, err := sqlite.New(dataDir)
+	if err != nil {
+		t.Fatalf("sqlite.New: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	srv, err := NewServer(cfg, Options{
+		SetupStore: sqlite.NewSetupStore(db),
+	})
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
 
 	req := httptest.NewRequest(http.MethodGet, "/setup/step/1", nil)
 	rr := httptest.NewRecorder()
@@ -45,16 +67,14 @@ func TestSmoke_SetupWizardAccessible(t *testing.T) {
 
 	// Before setup is complete, step 1 returns 200 (the wizard form).
 	if rr.Code != http.StatusOK {
-		t.Fatalf("GET /setup/step/1: expected 200, got %d", rr.Code)
+		t.Fatalf("GET /setup/step/1 (incomplete setup): expected 200, got %d", rr.Code)
 	}
 }
 
 func TestSmoke_LoginSucceeds(t *testing.T) {
-	srv, _, _ := newTestServer(t, map[string]string{
-		"UI_SECRET": "smoke-secret",
-	})
+	srv, _, _ := newTestServer(t, nil)
 
-	cookie := loginCookie(t, srv, "smoke-secret")
+	cookie := loginCookie(t, srv, "test-password-123!@#")
 	if cookie == nil {
 		t.Fatal("expected session cookie after login")
 	}
@@ -64,29 +84,22 @@ func TestSmoke_LoginSucceeds(t *testing.T) {
 }
 
 func TestSmoke_WrongPasswordRejected(t *testing.T) {
-	srv, _, _ := newTestServer(t, map[string]string{
-		"UI_SECRET": "smoke-secret",
-	})
+	srv, _, _ := newTestServer(t, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/login",
-		strings.NewReader("secret=wrong-secret"))
+		strings.NewReader("password=wrong-password-that-will-fail"))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rr := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rr, req)
 
-	if rr.Code == http.StatusFound {
-		loc := rr.Header().Get("Location")
-		if loc == "/" || loc == "" {
-			t.Error("wrong password should not redirect to dashboard")
-		}
+	if rr.Code != http.StatusUnauthorized {
+		t.Errorf("wrong password: expected 401 Unauthorized, got %d", rr.Code)
 	}
 }
 
 func TestSmoke_AuthenticatedDashboardReachable(t *testing.T) {
-	srv, _, _ := newTestServer(t, map[string]string{
-		"UI_SECRET": "smoke-secret",
-	})
-	cookie := loginCookie(t, srv, "smoke-secret")
+	srv, _, _ := newTestServer(t, nil)
+	cookie := loginCookie(t, srv, "test-password-123!@#")
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.AddCookie(cookie)
@@ -99,10 +112,8 @@ func TestSmoke_AuthenticatedDashboardReachable(t *testing.T) {
 }
 
 func TestSmoke_HealthEndpointReachable(t *testing.T) {
-	srv, _, _ := newTestServer(t, map[string]string{
-		"UI_SECRET": "smoke-secret",
-	})
-	cookie := loginCookie(t, srv, "smoke-secret")
+	srv, _, _ := newTestServer(t, nil)
+	cookie := loginCookie(t, srv, "test-password-123!@#")
 
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
 	req.AddCookie(cookie)
@@ -119,10 +130,8 @@ func TestSmoke_HealthEndpointReachable(t *testing.T) {
 
 func TestSmoke_DryRunDoesNotMutateProviders(t *testing.T) {
 	// Verify that POST mutations require CSRF and do not silently succeed without it.
-	srv, _, _ := newTestServer(t, map[string]string{
-		"UI_SECRET": "smoke-secret",
-	})
-	cookie := loginCookie(t, srv, "smoke-secret")
+	srv, _, _ := newTestServer(t, nil)
+	cookie := loginCookie(t, srv, "test-password-123!@#")
 
 	// Attempt to ban an IP without a CSRF token — must not succeed.
 	req := httptest.NewRequest(http.MethodPost, "/actions/cloudflare/ban",

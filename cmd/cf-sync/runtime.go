@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	abtransport "github.com/jm/security-automation-go/internal/abuseipdb/transport"
@@ -44,6 +46,7 @@ import (
 	"github.com/jm/security-automation-go/internal/runtime/governor"
 	"github.com/jm/security-automation-go/internal/runtime/health"
 	"github.com/jm/security-automation-go/internal/runtime/invariants"
+	"github.com/jm/security-automation-go/internal/runtime/lock"
 	"github.com/jm/security-automation-go/internal/runtime/ownership"
 	"github.com/jm/security-automation-go/internal/runtime/quarantine"
 	stateful_scheduler "github.com/jm/security-automation-go/internal/runtime/scheduler/stateful"
@@ -97,13 +100,42 @@ func runCFSync(configPath, mode string, dryRun bool, format string, metricsAddr 
 	})
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: mapLogLevel(cfg.Global.Log.Level)}))
-	if mode == "ui" {
-		if err := runUI(ctx, logger, cfg); err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+
+	// Acquire global instance lock for daemon or ui modes.
+	var locker *lock.FileLock
+	if mode == "daemon" || mode == "ui" {
+		lockFile := filepath.Join(cfg.StateDir, "security-automation-go.pid")
+		var err error
+		locker, err = lock.NewFileLock(lockFile)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: failed to create lock: %v\n", err)
 			os.Exit(1)
 		}
-		return
+		if err := locker.Acquire(); err != nil {
+			if lockErr, ok := err.(lock.PIDLockedError); ok {
+				fmt.Fprintf(os.Stderr, "Error: another instance (PID %d) is running\n", lockErr.PID)
+			} else {
+				fmt.Fprintf(os.Stderr, "Error: failed to acquire lock: %v\n", err)
+			}
+			os.Exit(1)
+		}
+		defer locker.Release()
+		logger.Info("global instance lock acquired", "lock_file", lockFile)
 	}
+
+	if mode == "ui" {
+		cfg.UI.Enabled = true // Force enable
+	}
+
+	// Always start UI server in background if enabled.
+	if cfg.UI.Enabled {
+		go func() {
+			if err := runUIWithLocker(ctx, logger, cfg, false); err != nil {
+				logger.Error("UI server failed", "error", err)
+			}
+		}()
+	}
+
 	bootstrapDB, err := sqlite.New(cfg.StateDir)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -112,6 +144,25 @@ func runCFSync(configPath, mode string, dryRun bool, format string, metricsAddr 
 	defer bootstrapDB.Close()
 	setupStore := sqlite.NewSetupStore(bootstrapDB)
 	credentialStore := sqlite.NewCredentialStore(bootstrapDB)
+
+	// If in UI mode and setup is not yet complete, wait for operator.
+	if mode == "ui" {
+		complete, _ := setupStore.IsComplete(ctx)
+		if !complete {
+			logger.Info("first-run setup wizard active on port 9091 — complete setup to enable automation")
+			// Wait for interrupt or context cancellation
+			sigChan := make(chan os.Signal, 1)
+			signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+			select {
+			case sig := <-sigChan:
+				logger.Info("received signal, shutting down wizard", "signal", sig)
+			case <-ctx.Done():
+			}
+			return
+		}
+		logger.Info("setup complete — starting background orchestration alongside UI")
+	}
+
 	if v, ok, _ := setupStore.GetSetting(ctx, "cf_zone_id"); ok && strings.TrimSpace(v) != "" {
 		cfg.Cloudflare.ZoneID = v
 	}
@@ -260,9 +311,9 @@ func runCFSync(configPath, mode string, dryRun bool, format string, metricsAddr 
 		os.Exit(1)
 	}
 
-	if mode == "daemon" {
+	if mode == "daemon" || mode == "ui" {
 		wafReplay := newWAFReplayService(cf, abuse, securityTelemetry, trustRegistry, cfg, reportingStores)
-		runDaemon(ctx, logger, orch, collector, jsonlJournal, qStore, stateStore, sm, driftMem, cooldownMgr, evidenceRecorder, bundleReg, activationMgr, fedRes, admController, reportingStores.Evidence, ownershipRepo, s.GetPool(), outboxWorker, scopeDir, cfg.Interval, metricsAddr, cfg.Cloudflare.ZoneID, wafReplay, cursorStore, quotaRefreshers)
+		runDaemonWithLocker(ctx, logger, orch, collector, jsonlJournal, qStore, stateStore, sm, driftMem, cooldownMgr, evidenceRecorder, bundleReg, activationMgr, fedRes, admController, reportingStores.Evidence, ownershipRepo, s.GetPool(), outboxWorker, scopeDir, cfg.Interval, metricsAddr, cfg.Cloudflare.ZoneID, wafReplay, cursorStore, quotaRefreshers, false)
 	} else if mode == "evidence" {
 		runEvidenceCLI(ctx, reportingStores.Evidence, args, format)
 	} else if mode == "ownership" {

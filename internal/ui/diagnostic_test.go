@@ -142,7 +142,7 @@ func TestHandleSupportBundle_ExcludesSecretMaterial(t *testing.T) {
 	if err := sqlite.NewCredentialStore(db).Set(context.Background(), "cloudflare.api_token", "bundle-secret-token", true); err != nil {
 		t.Fatalf("seed credential: %v", err)
 	}
-	cookie := loginCookie(t, srv, "ui-secret-value")
+	cookie := loginCookie(t, srv, "test-password-123!@#")
 	req := httptest.NewRequest(http.MethodGet, "/health/support-bundle", nil)
 	req.AddCookie(cookie)
 	rr := httptest.NewRecorder()
@@ -258,7 +258,7 @@ func TestHandleRunDiagnostic_DoesNotLeakCredentialValues(t *testing.T) {
 	if err := sqlite.NewCredentialStore(db).Set(context.Background(), "cloudflare.api_token", "diagnostic-secret-token", true); err != nil {
 		t.Fatalf("seed credential: %v", err)
 	}
-	cookie := loginCookie(t, srv, "ui-secret-value")
+	cookie := loginCookie(t, srv, "test-password-123!@#")
 	req := httptest.NewRequest("POST", "/health/diagnostic",
 		strings.NewReader("csrf_token="+srv.csrfTokenFor(cookie.Value)))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")

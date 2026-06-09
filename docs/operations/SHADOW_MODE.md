@@ -155,23 +155,23 @@ GOTOOLCHAIN=go1.25.0 go run ./cmd/cf-sync -config /etc/security-automation-go/cf
 Useful read-only checks:
 
 ```bash
-curl -skI http://127.0.0.1:9090/
-curl -skI http://127.0.0.1:9090/providers
-curl -skI http://127.0.0.1:9090/audit
-curl -skI http://127.0.0.1:9090/timeline
-curl -skI http://127.0.0.1:9090/intelligence
-curl -skI http://127.0.0.1:9090/trusted-networks
-curl -skI http://127.0.0.1:9090/cloudflare/diff
-curl -skI http://127.0.0.1:9090/replay
-curl -skI http://127.0.0.1:9090/recovery
-curl -skI http://127.0.0.1:9090/drift
+curl -skI http://127.0.0.1:9091/
+curl -skI http://127.0.0.1:9091/providers
+curl -skI http://127.0.0.1:9091/audit
+curl -skI http://127.0.0.1:9091/timeline
+curl -skI http://127.0.0.1:9091/intelligence
+curl -skI http://127.0.0.1:9091/trusted-networks
+curl -skI http://127.0.0.1:9091/cloudflare/diff
+curl -skI http://127.0.0.1:9091/replay
+curl -skI http://127.0.0.1:9091/recovery
+curl -skI http://127.0.0.1:9091/drift
 ```
 
 To inspect AI Explain gating from the UI, use an unauthenticated POST and
 expect CSRF/auth failure when the gate is working:
 
 ```bash
-curl -sk -X POST http://127.0.0.1:9090/ui/ai/explain \
+curl -sk -X POST http://127.0.0.1:9091/ui/ai/explain \
   -H 'Content-Type: application/json' \
   -d '{"subject_type":"provider","subject_id":"cloudflare","provider_preference":"auto"}'
 ```
@@ -208,7 +208,7 @@ grep -E '^(AI_EXPLAIN_ENABLED|AI_PROVIDER_OPENAI_ENABLED|AI_PROVIDER_OPENAI_API_
 Then inspect the UI provider page:
 
 ```bash
-curl -skI http://127.0.0.1:9090/providers
+curl -skI http://127.0.0.1:9091/providers
 ```
 
 Expected result:

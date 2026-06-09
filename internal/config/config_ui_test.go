@@ -9,7 +9,7 @@ func TestConfig_UIAndProviderEnvOverrides(t *testing.T) {
 	t.Setenv("CF_API_TOKEN", "test-token")
 	t.Setenv("CF_ZONE_ID", "test-zone")
 	t.Setenv("UI_ENABLED", "1")
-	t.Setenv("UI_ADDR", "127.0.0.1:9090")
+	t.Setenv("UI_ADDR", "127.0.0.1:9091")
 	t.Setenv("UI_MUTATIONS_ENABLED", "0")
 	t.Setenv("UI_SECRET_FILE", "/var/lib/security-automation-go/secrets.local")
 	t.Setenv("ENRICHMENT_ENABLED", "1")
@@ -30,7 +30,7 @@ func TestConfig_UIAndProviderEnvOverrides(t *testing.T) {
 		t.Fatalf("Load() failed: %v", err)
 	}
 
-	if !cfg.UI.Enabled || cfg.UI.Addr != "127.0.0.1:9090" || cfg.UI.MutationsEnabled {
+	if !cfg.UI.Enabled || cfg.UI.Addr != "127.0.0.1:9091" || cfg.UI.MutationsEnabled {
 		t.Fatalf("unexpected UI config: %+v", cfg.UI)
 	}
 	if cfg.UI.SecretFile != "/var/lib/security-automation-go/secrets.local" {

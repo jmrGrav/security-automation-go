@@ -38,10 +38,15 @@ make package         # dist/security-automation-go_1.5.0_amd64.deb
 ## Quick install
 
 ```bash
-sudo dpkg -i security-automation-go_1.5.0_amd64.deb
+sudo dpkg -i security-automation-go_1.5.3_amd64.deb
 sudo systemctl start cf-sync
-# First-run wizard opens automatically on first browser access
 ```
+
+1. Open your browser: `http://127.0.0.1:9091/setup`
+2. Follow the 10-step wizard to configure Cloudflare, CrowdSec, and AI providers.
+3. Credentials are encrypted and stored in SQLite.
+
+**Note:** UI port `9091` and Metrics port `9092` are used by default to avoid conflicts with Cockpit.
 
 ## Security
 

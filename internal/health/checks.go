@@ -309,7 +309,7 @@ func CheckStateDir(cfg Config) Check {
 func CheckLogDir(cfg Config) Check {
 	path := cfg.LogDir
 	if strings.TrimSpace(path) == "" {
-		path = "/var/log/security-automation"
+		path = "/var/log/security-automation-go"
 	}
 	if _, err := os.Stat(path); err != nil {
 		return Check{

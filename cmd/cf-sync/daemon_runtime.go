@@ -219,7 +219,7 @@ func nextWAFReplayCursor(report cloudflareevent.ProcessingReport, previous time.
 	return previous.UTC()
 }
 
-func runDaemon(ctx context.Context, logger *slog.Logger, orch *pipeline.Orchestrator, collector *status.Collector, j journal.JournalStore, qStore *quarantine.Store, store *state.StateStore, sm *engine.StateMachine, dm *memory.Store, cm *cooldown.Manager, rec *recorder.Recorder, br *registry.Registry, am *activation.Manager, fr *federation.Resolver, adm *admission.Controller, evidence reporting.EvidenceStore, ownershipRepo *sqlite.OwnershipRepository, p *pool.Pool, outboxWorker *reporting.OutboxWorker, stateDir string, interval time.Duration, metricsAddr string, zoneID string, wafReplay *cloudflareevent.Service, cursorStore *sqlite.CursorStore, quotaRefreshers *quotaRefreshers) {
+func runDaemonWithLocker(ctx context.Context, logger *slog.Logger, orch *pipeline.Orchestrator, collector *status.Collector, j journal.JournalStore, qStore *quarantine.Store, store *state.StateStore, sm *engine.StateMachine, dm *memory.Store, cm *cooldown.Manager, rec *recorder.Recorder, br *registry.Registry, am *activation.Manager, fr *federation.Resolver, adm *admission.Controller, evidence reporting.EvidenceStore, ownershipRepo *sqlite.OwnershipRepository, p *pool.Pool, outboxWorker *reporting.OutboxWorker, stateDir string, interval time.Duration, metricsAddr string, zoneID string, wafReplay *cloudflareevent.Service, cursorStore *sqlite.CursorStore, quotaRefreshers *quotaRefreshers, acquireLock bool) {
 	logger.Info("starting in daemon mode", "state_dir", stateDir, "interval", interval, "metrics_addr", metricsAddr)
 	var ownershipLineage *ownership.LineageQueryService
 	if ownershipRepo != nil {
@@ -231,25 +231,26 @@ func runDaemon(ctx context.Context, logger *slog.Logger, orch *pipeline.Orchestr
 		return
 	}
 
-	// Acquire daemon lock
-	lockFile := filepath.Join(stateDir, "security-automation-go.pid")
-	locker, err := lock.NewFileLock(lockFile)
-	if err != nil {
-		logger.Error("failed to create daemon lock", "error", err)
-		os.Exit(1)
-	}
-
-	if err := locker.Acquire(); err != nil {
-		if lockErr, ok := err.(lock.PIDLockedError); ok {
-			logger.Error("failed to acquire daemon lock: another instance is running", "pid", lockErr.PID)
-		} else {
-			logger.Error("failed to acquire daemon lock", "error", err)
+	if acquireLock {
+		// Acquire daemon lock
+		lockFile := filepath.Join(stateDir, "security-automation-go.pid")
+		locker, err := lock.NewFileLock(lockFile)
+		if err != nil {
+			logger.Error("failed to create daemon lock", "error", err)
+			os.Exit(1)
 		}
-		os.Exit(1)
-	}
-	defer locker.Release()
 
-	logger.Info("daemon lock acquired", "lock_file", lockFile)
+		if err := locker.Acquire(); err != nil {
+			if lockErr, ok := err.(lock.PIDLockedError); ok {
+				logger.Error("failed to acquire daemon lock: another instance is running", "pid", lockErr.PID)
+			} else {
+				logger.Error("failed to acquire daemon lock", "error", err)
+			}
+			os.Exit(1)
+		}
+		defer locker.Release()
+		logger.Info("daemon lock acquired", "lock_file", lockFile)
+	}
 
 	s := stateful_scheduler.New(store, orch, sm, cm, logger, interval)
 	defer s.Stop()

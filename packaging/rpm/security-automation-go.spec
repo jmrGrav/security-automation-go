@@ -25,7 +25,7 @@ install -d -m 755 -o root -g root /etc/security-automation-go
 touch /etc/security-automation-go/security-automation.env
 chmod 0644 /etc/security-automation-go/security-automation.env
 install -d -m 755 -o security-automation -g security-automation \
-    /var/log/security-automation
+    /var/log/security-automation-go
 
 %preun
 %systemd_preun cf-sync.service
@@ -39,4 +39,4 @@ install -d -m 755 -o security-automation -g security-automation \
 %config(noreplace) %attr(0640, root, security-automation) /etc/security-automation-go/security-automation.yaml
 %dir %attr(0750, security-automation, security-automation) /var/lib/security-automation-go
 %dir %attr(0750, security-automation, security-automation) /var/lib/security-automation-go/runtime
-%dir %attr(0755, security-automation, security-automation) /var/log/security-automation
+%dir %attr(0755, security-automation, security-automation) /var/log/security-automation-go

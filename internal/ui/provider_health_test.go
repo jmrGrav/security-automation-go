@@ -12,7 +12,6 @@ import (
 
 func TestProviderHealthCenter_RendersConfiguredMissingAndMasksSecrets(t *testing.T) {
 	srv, db, _ := newCredentialStoreServer(t, map[string]string{
-		"UI_SECRET":                  "ui-secret-value",
 		"AI_PROVIDER_OPENAI_ENABLED": "true",
 		"AI_PROVIDER_OPENAI_MODEL":   "gpt-4.1-mini",
 	})
@@ -20,7 +19,7 @@ func TestProviderHealthCenter_RendersConfiguredMissingAndMasksSecrets(t *testing
 	if err := store.Set(context.Background(), "ai.openai.api_key", "openai-secret", true); err != nil {
 		t.Fatalf("seed openai credential: %v", err)
 	}
-	cookie := loginCookie(t, srv, "ui-secret-value")
+	cookie := loginCookie(t, srv, "test-password-123!@#")
 
 	req := httptest.NewRequest(http.MethodGet, "/providers", nil)
 	req.AddCookie(cookie)
@@ -51,14 +50,13 @@ func TestProviderHealthCenter_RendersConfiguredMissingAndMasksSecrets(t *testing
 
 func TestProviderHealthCenter_RendersOperationalFieldsAndQuotaFallback(t *testing.T) {
 	srv, db, _ := newCredentialStoreServer(t, map[string]string{
-		"UI_SECRET":                  "ui-secret-value",
 		"AI_PROVIDER_OPENAI_ENABLED": "true",
 		"AI_PROVIDER_OPENAI_MODEL":   "gpt-4.1-mini",
 	})
 	if err := sqlite.NewCredentialStore(db).Set(context.Background(), "ai.openai.api_key", "openai-secret", true); err != nil {
 		t.Fatalf("seed openai credential: %v", err)
 	}
-	cookie := loginCookie(t, srv, "ui-secret-value")
+	cookie := loginCookie(t, srv, "test-password-123!@#")
 
 	req := httptest.NewRequest(http.MethodGet, "/providers", nil)
 	req.AddCookie(cookie)
@@ -83,13 +81,12 @@ func TestProviderHealthCenter_RendersOperationalFieldsAndQuotaFallback(t *testin
 
 func TestProviderHealthCenter_RendersObservedQuotaState(t *testing.T) {
 	srv, db, _ := newCredentialStoreServer(t, map[string]string{
-		"UI_SECRET":                   "ui-secret-value",
 		"AI_PROVIDER_ANTHROPIC_MODEL": "claude-3-5-sonnet-latest",
 	})
 	if err := sqlite.NewCredentialStore(db).Set(context.Background(), "ai.anthropic.api_key", "anthropic-secret", true); err != nil {
 		t.Fatalf("seed anthropic credential: %v", err)
 	}
-	cookie := loginCookie(t, srv, "ui-secret-value")
+	cookie := loginCookie(t, srv, "test-password-123!@#")
 
 	req := httptest.NewRequest(http.MethodGet, "/providers", nil)
 	req.AddCookie(cookie)
@@ -106,14 +103,13 @@ func TestProviderHealthCenter_RendersObservedQuotaState(t *testing.T) {
 
 func TestProviderHealthCenter_RendersQuotaOverviewAndQuotaDetails(t *testing.T) {
 	srv, db, _ := newCredentialStoreServer(t, map[string]string{
-		"UI_SECRET":                  "ui-secret-value",
 		"AI_PROVIDER_OPENAI_ENABLED": "true",
 		"AI_PROVIDER_OPENAI_MODEL":   "gpt-4.1-mini",
 	})
 	if err := sqlite.NewCredentialStore(db).Set(context.Background(), "ai.openai.api_key", "openai-secret", true); err != nil {
 		t.Fatalf("seed openai credential: %v", err)
 	}
-	cookie := loginCookie(t, srv, "ui-secret-value")
+	cookie := loginCookie(t, srv, "test-password-123!@#")
 
 	req := httptest.NewRequest(http.MethodGet, "/providers", nil)
 	req.AddCookie(cookie)
