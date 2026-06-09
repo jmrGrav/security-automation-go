@@ -41,6 +41,8 @@ Download the latest `.deb` from [Releases](https://github.com/jmrGrav/security-a
 
 ```bash
 curl -LO https://github.com/jmrGrav/security-automation-go/releases/download/v1.5.4/security-automation-go_1.5.4_amd64.deb
+curl -LO https://github.com/jmrGrav/security-automation-go/releases/download/v1.5.4/SHA256SUMS
+sha256sum -c SHA256SUMS
 sudo dpkg -i security-automation-go_1.5.4_amd64.deb
 sudo systemctl start cf-sync
 ```
