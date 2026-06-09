@@ -35,7 +35,7 @@ Do not place operator tokens here.
 5. Subsequent wizard steps configure Cloudflare, CrowdSec, and other optional integrations.
 6. Step 8 shows a runtime summary. Step 9 finalizes and marks setup complete.
 
-**Note:** Default port is `9091` to avoid Cockpit (`9090`). Metrics are on `9092`.
+**Ports:** UI listens on `127.0.0.1:9091`. Metrics on `127.0.0.1:9092`.
 
 ## Wizard behavior
 

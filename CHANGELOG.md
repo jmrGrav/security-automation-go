@@ -6,13 +6,13 @@ All notable changes to this project will be documented in this file.
 
 ### Summary
 
-Operational and First-Run UI finalization. Unified management mode introduced. Generic/temporary passwords removed in favor of mandatory wizard-based creation. Port conflicts with Cockpit resolved. Debian packaging lifecycle hardened (stop on remove, full cleanup on purge). SQLite concurrency hardened. Dead code from auth migration removed.
+Operational and First-Run UI finalization. Unified management mode introduced. Generic/temporary passwords removed in favor of mandatory wizard-based creation. Default ports standardized (UI: 9091, Metrics: 9092). Debian packaging lifecycle hardened (stop on remove, full cleanup on purge). SQLite concurrency hardened. Dead code from auth migration removed.
 
 ### Features
 
 - **Unified Management Mode** — The `-mode ui` flag now acts as a complete management service. On fresh installations, it provides the setup wizard. Once setup is complete, it automatically starts the full security orchestration in the background alongside the Web UI.
 - **Mandatory Password Creation** — Removed all generic passwords (`CHANGE_ME_ON_FIRST_BOOT`) and automatically generated setup secrets. Operators must now explicitly create their administrator password during the first-run wizard.
-- **Port Modernization** — Default UI port changed to `9091` and Metrics/API port to `9092` to avoid conflicts with **Cockpit** (`9090`).
+- **Port Standardization** — Default UI port set to `9091` and Metrics/API port to `9092`. Both listen on `127.0.0.1` (localhost only).
 
 ### Security / Reliability
 

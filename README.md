@@ -9,7 +9,7 @@ Go control-plane that synchronises [CrowdSec](https://crowdsec.net/) decisions t
 [Cloudflare](https://www.cloudflare.com/), reports abusive IPs to
 [AbuseIPDB](https://www.abuseipdb.com/), and drives WAF follow-up actions.
 
-**Status: v1.5.0** — first-run wizard, encrypted CredentialStore, CrowdSec Go integration. Production-ready.
+**Status: v1.5.4** — first-run wizard, encrypted CredentialStore, CrowdSec Go integration. Production-ready.
 
 ## Architecture
 
@@ -32,21 +32,25 @@ go vet ./...
 gofmt -l .
 go test ./...
 go test -race ./...
-make package         # dist/security-automation-go_1.5.0_amd64.deb
+make package         # dist/security-automation-go_1.5.4_amd64.deb
 ```
 
 ## Quick install
 
+Download the latest `.deb` from [Releases](https://github.com/jmrGrav/security-automation-go/releases):
+
 ```bash
-sudo dpkg -i security-automation-go_1.5.3_amd64.deb
+curl -LO https://github.com/jmrGrav/security-automation-go/releases/download/v1.5.4/security-automation-go_1.5.4_amd64.deb
+sudo dpkg -i security-automation-go_1.5.4_amd64.deb
 sudo systemctl start cf-sync
 ```
 
-1. Open your browser: `http://127.0.0.1:9091/setup`
-2. Follow the 10-step wizard to configure Cloudflare, CrowdSec, and AI providers.
-3. Credentials are encrypted and stored in SQLite.
+1. Open your browser: `http://127.0.0.1:9091/setup/step/1`
+2. Create your administrator password (step 1 — stored as bcrypt in SQLite, no plaintext).
+3. Follow the 9-step wizard to configure Cloudflare, CrowdSec, and AI providers.
+4. Credentials are encrypted and stored in SQLite.
 
-**Note:** UI port `9091` and Metrics port `9092` are used by default to avoid conflicts with Cockpit.
+**Ports:** UI listens on `127.0.0.1:9091`, metrics on `127.0.0.1:9092`.
 
 ## Security
 
