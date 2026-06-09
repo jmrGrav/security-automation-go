@@ -307,7 +307,12 @@ func (s *Server) handleSetupStep3Post(w http.ResponseWriter, r *http.Request) {
 		validateCF = s.validateCFToken
 	}
 	if err := validateCF(r.Context(), cfToken, zoneID); err != nil {
-		renderSetupPage(w, 3, "Cloudflare API token", "", "Token validation failed: "+err.Error())
+		// Strip internal Go error chain; show only the last meaningful segment.
+		msg := err.Error()
+		if idx := strings.LastIndex(msg, ": "); idx != -1 {
+			msg = msg[idx+2:]
+		}
+		renderSetupPage(w, 3, "Cloudflare API token", "", "Token validation failed: "+msg)
 		return
 	}
 
@@ -669,13 +674,33 @@ func (s *Server) handleSetupStep8(w http.ResponseWriter, r *http.Request) {
 	results := detect.RunAll(s.buildDetectConfig())
 	var sb strings.Builder
 	sb.WriteString(`<h3>Detected Environment</h3><div class="kv">`)
+	openrestyInstalled := false
 	for _, d := range results {
-		healthy := "&#x2717;"
+		if d.Name == "openresty" && d.Installed {
+			openrestyInstalled = true
+		}
+	}
+	for _, d := range results {
+		switch d.Name {
+		case "nginx":
+			if !d.Installed && openrestyInstalled {
+				fmt.Fprintf(&sb, `<div class="row"><span>%s</span><span style="color:#5f6b7a">&#x2139; not installed (OpenResty in use)</span></div>`,
+					html.EscapeString(d.Name))
+				continue
+			}
+		case "cloudflare":
+			if !d.Configured {
+				fmt.Fprintf(&sb, `<div class="row"><span>%s</span><span style="color:#5f6b7a">(not configured — optional)</span></div>`,
+					html.EscapeString(d.Name))
+				continue
+			}
+		}
+		icon := "&#x2717;"
 		if d.Healthy {
-			healthy = "&#x2713;"
+			icon = "&#x2713;"
 		}
 		fmt.Fprintf(&sb, `<div class="row"><span>%s</span><span>%s installed=%v configured=%v</span></div>`,
-			html.EscapeString(d.Name), healthy, d.Installed, d.Configured)
+			html.EscapeString(d.Name), icon, d.Installed, d.Configured)
 	}
 	sb.WriteString(`</div>`)
 	body += sb.String()
@@ -829,6 +854,11 @@ func validateBetterStack(ctx context.Context, token string) error {
 }
 
 func (s *Server) handleSetupComplete(w http.ResponseWriter, r *http.Request) {
+	// Mark setup complete regardless of how the operator reached this page
+	// (direct GET link "Finish without enabling production mode" or POST redirect).
+	if s.setupStore != nil {
+		_ = s.setupStore.MarkComplete(r.Context())
+	}
 	body := `
 <div class="ok">✓ Setup complete. The service is now configured.</div>
 <p>Next steps:</p>

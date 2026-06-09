@@ -2,6 +2,29 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v1.5.5] — 2026-06-10
+
+### Summary
+
+Hotfix release. Two wizard bugs fixed: Cloudflare token validation no longer fails on unknown JSON fields added by the Cloudflare API; completing setup via the "Finish without enabling production mode" link now correctly marks setup complete. Runtime Summary display corrected: OpenResty and SQLite no longer shown as failed when correctly installed.
+
+### Bug Fixes
+
+- **Cloudflare JSON tolerance** — `ExecuteAndDecode`, `MutateAndDecode`, `DecodeEnvelope`, and `ExecuteGraphQL` now use permissive JSON decoding for Cloudflare API responses. Unknown fields such as `development_mode` in Zone objects are silently ignored. `DecodeStrict` (strict schema enforcement) is preserved for internal payloads. Fix: `internal/cloudflare/decode/decode.go`, `internal/cloudflare/transport/transport.go`.
+- **Dry-run wizard completion** — `handleSetupComplete` now calls `MarkComplete` before rendering the completion page. Previously, navigating directly to `/setup/complete` (the "Finish without enabling production mode" link from steps 8 and 9) did not persist the completion state, causing the wizard guard to loop. Fix: `internal/ui/setup_wizard.go`.
+- **SQLite detection path** — `DetectSQLite` checked for `state.db`; the actual database is `runtime.db`. Corrected. Fix: `internal/detect/detectors.go`.
+- **OpenResty health** — `DetectOpenResty` marked healthy only when the WAF events file was configured. The events file is optional pipeline config, not a health signal. Health is now: binary installed + service running. Fix: `internal/detect/detectors.go`.
+- **Runtime Summary UX** — Step 8 wizard summary: nginx absence is shown as informational (not an error) when OpenResty is detected; Cloudflare not configured is shown as optional (not a failure). Fix: `internal/ui/setup_wizard.go`.
+- **Step 3 error message** — CF token validation errors strip the internal Go error chain from the user-facing message, showing only the final meaningful segment.
+
+### Testing
+
+- `internal/cloudflare/decode/decode_test.go` (new): `Decode` accepts unknown fields; `DecodeStrict` rejects them; malformed JSON is rejected by both.
+- `internal/detect/detect_test.go`: `TestDetectSQLite_UsesRuntimeDB`, `TestDetectOpenResty_InstalledAndRunning`, `TestDetectOpenResty_InstalledNoEventsFile_StillHealthy`.
+- `internal/ui/setup_wizard_test.go`: `TestSetupComplete_MarksCompleteOnDirectGET`, `TestSetupComplete_DryRunDoesNotSetMutations`.
+
+---
+
 ## [v1.5.4] — 2026-06-10
 
 ### Summary

@@ -84,12 +84,15 @@ func DetectOpenResty(cfg Config) Result {
 	r := Result{Name: "openresty", Details: map[string]string{}}
 	r.Installed = binaryInstalled("openresty")
 	r.Details["binary"] = presentOrMissing(r.Installed)
+	serviceActive := systemdServiceActive("openresty")
+	r.Details["service"] = presentOrMissing(serviceActive)
 	r.Configured = strings.TrimSpace(cfg.OpenRestyEventsFile) != ""
 	r.Details["events_file"] = valueOrMissing(cfg.OpenRestyEventsFile)
-	eventsExist := fileExists(cfg.OpenRestyEventsFile)
-	r.Details["events_exist"] = presentOrMissing(eventsExist)
-	r.Details["service"] = presentOrMissing(systemdServiceActive("openresty"))
-	r.Healthy = r.Installed && r.Configured && eventsExist
+	if r.Configured {
+		r.Details["events_exist"] = presentOrMissing(fileExists(cfg.OpenRestyEventsFile))
+	}
+	// Healthy = binary installed and service running; events pipeline config is optional.
+	r.Healthy = r.Installed && serviceActive
 	return r
 }
 
@@ -127,7 +130,7 @@ func DetectSQLite(cfg Config) Result {
 	r.Details["state_dir"] = valueOrMissing(cfg.StateDir)
 	dbPath := ""
 	if r.Configured {
-		dbPath = cfg.StateDir + "/state.db"
+		dbPath = cfg.StateDir + "/runtime.db"
 	}
 	dbExists := fileExists(dbPath)
 	r.Details["db_exists"] = presentOrMissing(dbExists)
