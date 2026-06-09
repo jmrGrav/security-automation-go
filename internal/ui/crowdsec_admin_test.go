@@ -11,7 +11,7 @@ import (
 	"github.com/jm/security-automation-go/internal/storage/sqlite"
 )
 
-const csTestSecret = "cs-admin-test-secret"
+const csTestSecret = "test-password-123!@#"
 
 // newTestServerWithCrowdSec builds a server with a real SQLite CredentialStore
 // and registers the CrowdSec admin routes.
@@ -291,13 +291,13 @@ func TestCrowdSecAdminSection_HTML(t *testing.T) {
 // Wizard step 8 — CrowdSec LAPI key (integration tests via credential store)
 // ---------------------------------------------------------------------------
 
-// TestWizardStep8_CrowdSecAbsent: GET /setup/step/8 shows "not detected" when cscli absent.
+// TestWizardStep8_CrowdSecAbsent: GET /setup/step/7 shows "not detected" when cscli absent.
 func TestWizardStep8_CrowdSecAbsent(t *testing.T) {
 	t.Setenv("PATH", t.TempDir()) // empty PATH — cscli not found
 	srv, _, _ := newTestServerWithCrowdSec(t, nil)
 	cookie := loginCookie(t, srv, csTestSecret)
 
-	req := httptest.NewRequest("GET", "/setup/step/8", nil)
+	req := httptest.NewRequest("GET", "/setup/step/7", nil)
 	req.AddCookie(cookie)
 	rr := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rr, req)
@@ -307,23 +307,23 @@ func TestWizardStep8_CrowdSecAbsent(t *testing.T) {
 	}
 	body := rr.Body.String()
 	if !strings.Contains(body, "CrowdSec") {
-		t.Error("step 8 must mention CrowdSec")
+		t.Error("step 7 must mention CrowdSec")
 	}
 	if !strings.Contains(body, "not detected") {
 		t.Errorf("expected 'not detected' banner, got: %s", body)
 	}
 	if !strings.Contains(body, `name="lapi_key"`) {
-		t.Error("step 8 must render LAPI key input even when CrowdSec absent")
+		t.Error("step 7 must render LAPI key input even when CrowdSec absent")
 	}
 }
 
-// TestWizardStep8_Skip: POST skip=1 redirects to /setup/step/9.
+// TestWizardStep8_Skip: POST skip=1 on step 7 redirects to /setup/step/8.
 func TestWizardStep8_Skip(t *testing.T) {
 	srv, _, _ := newTestServerWithCrowdSec(t, nil)
 	cookie := loginCookie(t, srv, csTestSecret)
 	csrf := srv.csrfTokenFor(cookie.Value)
 
-	req := httptest.NewRequest(http.MethodPost, "/setup/step/8",
+	req := httptest.NewRequest(http.MethodPost, "/setup/step/7",
 		strings.NewReader("csrf_token="+csrf+"&skip=1"))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.AddCookie(cookie)
@@ -333,12 +333,12 @@ func TestWizardStep8_Skip(t *testing.T) {
 	if rr.Code != http.StatusFound {
 		t.Fatalf("expected 302, got %d: %s", rr.Code, rr.Body.String())
 	}
-	if loc := rr.Header().Get("Location"); loc != "/setup/step/9" {
-		t.Errorf("skip must redirect to /setup/step/9, got %q", loc)
+	if loc := rr.Header().Get("Location"); loc != "/setup/step/8" {
+		t.Errorf("skip must redirect to /setup/step/8, got %q", loc)
 	}
 }
 
-// TestWizardStep8_StoresKey: POST lapi_key stores it in the credentialStore.
+// TestWizardStep8_StoresKey: POST lapi_key on step 7 stores it in the credentialStore.
 func TestWizardStep8_StoresKey(t *testing.T) {
 	srv, _, db := newTestServerWithCrowdSec(t, nil)
 	cookie := loginCookie(t, srv, csTestSecret)
@@ -346,7 +346,7 @@ func TestWizardStep8_StoresKey(t *testing.T) {
 
 	const testLAPIKey = "wizard-lapi-key-test"
 	form := "csrf_token=" + csrf + "&lapi_key=" + testLAPIKey + "&lapi_url=http://127.0.0.1:8080"
-	req := httptest.NewRequest(http.MethodPost, "/setup/step/8", strings.NewReader(form))
+	req := httptest.NewRequest(http.MethodPost, "/setup/step/7", strings.NewReader(form))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.AddCookie(cookie)
 	rr := httptest.NewRecorder()
@@ -355,8 +355,8 @@ func TestWizardStep8_StoresKey(t *testing.T) {
 	if rr.Code != http.StatusFound {
 		t.Fatalf("expected 302, got %d: %s", rr.Code, rr.Body.String())
 	}
-	if loc := rr.Header().Get("Location"); loc != "/setup/step/9" {
-		t.Errorf("save must redirect to /setup/step/9, got %q", loc)
+	if loc := rr.Header().Get("Location"); loc != "/setup/step/8" {
+		t.Errorf("save must redirect to /setup/step/8, got %q", loc)
 	}
 	stored, ok := lookupCrowdSecKey(t, db)
 	if !ok || stored != testLAPIKey {
@@ -364,13 +364,13 @@ func TestWizardStep8_StoresKey(t *testing.T) {
 	}
 }
 
-// TestWizardStep8_KeyAlreadyConfigured: GET shows "already configured" when key exists.
+// TestWizardStep8_KeyAlreadyConfigured: GET /setup/step/7 shows "already configured" when key exists.
 func TestWizardStep8_KeyAlreadyConfigured(t *testing.T) {
 	srv, _, db := newTestServerWithCrowdSec(t, nil)
 	storeCrowdSecKey(t, db, "pre-existing-lapi-key")
 	cookie := loginCookie(t, srv, csTestSecret)
 
-	req := httptest.NewRequest("GET", "/setup/step/8", nil)
+	req := httptest.NewRequest("GET", "/setup/step/7", nil)
 	req.AddCookie(cookie)
 	rr := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rr, req)

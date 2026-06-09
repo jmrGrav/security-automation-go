@@ -167,7 +167,7 @@ func DetectLogDir(cfg Config) Result {
 	r := Result{Name: "log-directory", Details: map[string]string{}}
 	path := cfg.LogDir
 	if strings.TrimSpace(path) == "" {
-		path = "/var/log/security-automation"
+		path = "/var/log/security-automation-go"
 	}
 	r.Details["path"] = path
 	r.Configured = true

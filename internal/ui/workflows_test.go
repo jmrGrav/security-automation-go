@@ -8,10 +8,8 @@ import (
 )
 
 func TestWorkflowPagesRenderReadOnlySections(t *testing.T) {
-	srv, _, _ := newTestServer(t, map[string]string{
-		"UI_SECRET": "ui-secret-value",
-	})
-	cookie := loginCookie(t, srv, "ui-secret-value")
+	srv, _, _ := newTestServer(t, nil)
+	cookie := loginCookie(t, srv, "test-password-123!@#")
 
 	cases := []struct {
 		path string
@@ -55,12 +53,11 @@ func TestWorkflowPagesRenderReadOnlySections(t *testing.T) {
 
 func TestWorkflowPagesDoNotLeakSecrets(t *testing.T) {
 	srv, _, _ := newTestServer(t, map[string]string{
-		"UI_SECRET":          "ui-secret-value",
 		"SPAMHAUS_API_KEY":   "spamhaus-secret",
 		"VIRUSTOTAL_API_KEY": "virustotal-secret",
 		"ABUSEIPDB_KEY":      "abuse-secret",
 	})
-	cookie := loginCookie(t, srv, "ui-secret-value")
+	cookie := loginCookie(t, srv, "test-password-123!@#")
 
 	for _, path := range []string{"/cloudflare/diff", "/replay", "/recovery", "/drift", "/timeline"} {
 		req := httptest.NewRequest(http.MethodGet, path, nil)

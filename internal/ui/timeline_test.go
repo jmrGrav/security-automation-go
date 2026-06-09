@@ -9,9 +9,7 @@ import (
 )
 
 func TestTimelineEmptyState(t *testing.T) {
-	srv, _, _ := newTestServer(t, map[string]string{
-		"UI_SECRET": "ui-secret-value",
-	})
+	srv, _, _ := newTestServer(t, nil)
 	cookie := &http.Cookie{Name: sessionCookieName, Value: "seeded-session"}
 	srv.mu.Lock()
 	srv.sessions[cookie.Value] = time.Now().UTC().Add(time.Hour)
@@ -35,9 +33,7 @@ func TestTimelineEmptyState(t *testing.T) {
 }
 
 func TestTimelineFiltersAndExportsReadOnlyEvents(t *testing.T) {
-	srv, audit, _ := newTestServer(t, map[string]string{
-		"UI_SECRET": "ui-secret-value",
-	})
+	srv, audit, _ := newTestServer(t, nil)
 	audit.Record("security_intelligence_lookup", map[string]string{
 		"actor":          "local",
 		"source":         "ui",
@@ -55,7 +51,7 @@ func TestTimelineFiltersAndExportsReadOnlyEvents(t *testing.T) {
 		"correlation_id": "corr-2",
 		"event_id":       "evt-2",
 	})
-	cookie := loginCookie(t, srv, "ui-secret-value")
+	cookie := loginCookie(t, srv, "test-password-123!@#")
 
 	req := httptest.NewRequest(http.MethodGet, "/timeline?q=security&action=security_intelligence_lookup&format=json", nil)
 	req.AddCookie(cookie)

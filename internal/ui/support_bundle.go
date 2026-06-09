@@ -72,7 +72,7 @@ func (s *Server) handleSupportBundle(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Last 200 lines of log, redacted
-	logPath := filepath.Join("/var/log/security-automation", "cf-sync.log")
+	logPath := filepath.Join("/var/log/security-automation-go", "cf-sync.log")
 	if content, err := bundleReadTail(logPath, 200); err == nil {
 		_ = bundleWriteEntry(tw, "cf-sync.log.redacted", []byte(redactSecretLines(content)), now)
 	}

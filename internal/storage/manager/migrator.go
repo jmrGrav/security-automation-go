@@ -52,24 +52,37 @@ func (m *Migrator) Migrate(ctx context.Context, migrations []Migration) error {
 		return migrations[i].Version < migrations[j].Version
 	})
 
-	// 4. Apply pending
+	// 4. Apply pending — each migration uses BEGIN IMMEDIATE so concurrent openers
+	// do not race on the same schema change (second connection waits, then sees the
+	// migration already recorded and skips it).
 	for _, mig := range migrations {
 		if mig.Version <= currentVersion {
 			continue
 		}
 
-		tx, err := m.db.BeginTx(ctx, nil)
+		tx, err := m.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
 		if err != nil {
 			return apperr.Wrap(op, err)
 		}
 
+		// Re-check inside the transaction — another connection may have applied it.
+		var alreadyApplied bool
+		if err := tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE version = ?)", mig.Version).Scan(&alreadyApplied); err != nil {
+			_ = tx.Rollback()
+			return apperr.Wrap(op, err)
+		}
+		if alreadyApplied {
+			_ = tx.Rollback()
+			continue
+		}
+
 		if _, err := tx.ExecContext(ctx, mig.SQL); err != nil {
-			tx.Rollback()
+			_ = tx.Rollback()
 			return apperr.Wrapf(op, err, "failed to apply migration %d: %s", mig.Version, mig.Description)
 		}
 
 		if _, err := tx.ExecContext(ctx, "INSERT INTO schema_migrations (version, description) VALUES (?, ?)", mig.Version, mig.Description); err != nil {
-			tx.Rollback()
+			_ = tx.Rollback()
 			return apperr.Wrap(op, err)
 		}
 

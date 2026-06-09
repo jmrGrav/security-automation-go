@@ -24,7 +24,7 @@ func TestAIExplainEndpointRequiresAuth(t *testing.T) {
 
 func TestAIExplainEndpointRequiresCSRF(t *testing.T) {
 	srv, _, _ := newTestServer(t, map[string]string{"UI_SECRET": "ui-secret-value"})
-	cookie := loginCookie(t, srv, "ui-secret-value")
+	cookie := loginCookie(t, srv, "test-password-123!@#")
 	req := httptest.NewRequest(http.MethodPost, "/ui/ai/explain", strings.NewReader(`{"subject_type":"provider","subject_id":"cloudflare","provider_preference":"auto"}`))
 	req.AddCookie(cookie)
 	req.Header.Set("Content-Type", "application/json")
@@ -37,7 +37,7 @@ func TestAIExplainEndpointRequiresCSRF(t *testing.T) {
 
 func TestAIExplainEndpointRejectsInvalidJSONAndSubject(t *testing.T) {
 	srv, _, _ := newTestServer(t, map[string]string{"UI_SECRET": "ui-secret-value"})
-	cookie := loginCookie(t, srv, "ui-secret-value")
+	cookie := loginCookie(t, srv, "test-password-123!@#")
 	invalidJSON := httptest.NewRequest(http.MethodPost, "/ui/ai/explain", strings.NewReader(`{`))
 	invalidJSON.AddCookie(cookie)
 	invalidJSON.Header.Set("Content-Type", "application/json")
@@ -61,7 +61,7 @@ func TestAIExplainEndpointRejectsInvalidJSONAndSubject(t *testing.T) {
 
 func TestAIExplainEndpointReturnsUnavailableJSON(t *testing.T) {
 	srv, audit, _ := newTestServer(t, map[string]string{"UI_SECRET": "ui-secret-value"})
-	cookie := loginCookie(t, srv, "ui-secret-value")
+	cookie := loginCookie(t, srv, "test-password-123!@#")
 	req := httptest.NewRequest(http.MethodPost, "/ui/ai/explain", strings.NewReader(`{"subject_type":"provider","subject_id":"cloudflare","provider_preference":"auto"}`))
 	req.AddCookie(cookie)
 	req.Header.Set("Content-Type", "application/json")
@@ -176,7 +176,7 @@ func TestAIExplainWidgetsRenderOnReadOnlyPages(t *testing.T) {
 
 func TestAIExplainScriptIsSelfHosted(t *testing.T) {
 	srv, _, _ := newTestServer(t, map[string]string{"UI_SECRET": "ui-secret-value"})
-	cookie := loginCookie(t, srv, "ui-secret-value")
+	cookie := loginCookie(t, srv, "test-password-123!@#")
 	req := httptest.NewRequest(http.MethodGet, "/static/ai-explain.js", nil)
 	req.AddCookie(cookie)
 	rr := httptest.NewRecorder()

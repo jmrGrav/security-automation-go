@@ -12,7 +12,6 @@ func TestWriteSecretFile_Uses0600Permissions(t *testing.T) {
 	path := filepath.Join(dir, "secrets.local")
 
 	if err := WriteSecretFile(path, map[string]string{
-		"UI_SECRET":          "ui-secret-value",
 		"SPAMHAUS_API_KEY":   "spamhaus-secret",
 		"VIRUSTOTAL_API_KEY": "virustotal-secret",
 	}); err != nil {

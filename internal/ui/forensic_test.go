@@ -86,7 +86,7 @@ func TestForensic_PostRequiresAuth(t *testing.T) {
 func TestForensic_InvalidIPShowsError(t *testing.T) {
 	svc := enrichment.NewService(forensicCfg(), nil, nil, nil, nil)
 	srv := newTestServerWithEnrichment(t, svc)
-	cookie := loginCookie(t, srv, "test-secret")
+	cookie := loginCookie(t, srv, "test-password-123!@#")
 
 	req := httptest.NewRequest(http.MethodPost, "/forensic", strings.NewReader("ip=not-an-ip"))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -105,7 +105,7 @@ func TestForensic_ValidIPShowsResult(t *testing.T) {
 	asnProv := &fakeEnrichmentASN{result: asn.Result{Kind: asn.KindUnknown, Provider: "fake-asn"}}
 	svc := enrichment.NewService(forensicCfg(), dns, asnProv, nil, nil)
 	srv := newTestServerWithEnrichment(t, svc)
-	cookie := loginCookie(t, srv, "test-secret")
+	cookie := loginCookie(t, srv, "test-password-123!@#")
 
 	req := httptest.NewRequest(http.MethodPost, "/forensic", strings.NewReader("ip=203.0.113.5"))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -132,7 +132,7 @@ func TestForensic_ProtectedNetworkShowsBadge(t *testing.T) {
 	}}
 	svc := enrichment.NewService(forensicCfg(), nil, asnProv, nil, nil)
 	srv := newTestServerWithEnrichment(t, svc)
-	cookie := loginCookie(t, srv, "test-secret")
+	cookie := loginCookie(t, srv, "test-password-123!@#")
 
 	req := httptest.NewRequest(http.MethodPost, "/forensic", strings.NewReader("ip=104.16.0.1"))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -150,7 +150,7 @@ func TestForensic_ProtectedNetworkShowsBadge(t *testing.T) {
 func TestForensic_NoEnrichmentServiceShowsError(t *testing.T) {
 	srv, _, _ := newTestServer(t, map[string]string{"UI_SECRET": "test-secret"})
 	// enrichment is nil (not wired)
-	cookie := loginCookie(t, srv, "test-secret")
+	cookie := loginCookie(t, srv, "test-password-123!@#")
 
 	req := httptest.NewRequest(http.MethodPost, "/forensic", strings.NewReader("ip=203.0.113.1"))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -168,7 +168,7 @@ func TestForensic_AuditLogWrittenOnLookup(t *testing.T) {
 	svc := enrichment.NewService(forensicCfg(), nil, nil, nil, nil)
 	srv, audit, _ := newTestServer(t, map[string]string{"UI_SECRET": "test-secret"})
 	srv.enrichment = svc
-	cookie := loginCookie(t, srv, "test-secret")
+	cookie := loginCookie(t, srv, "test-password-123!@#")
 
 	req := httptest.NewRequest(http.MethodPost, "/forensic", strings.NewReader("ip=203.0.113.1"))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -185,12 +185,11 @@ func TestForensic_AuditLogWrittenOnLookup(t *testing.T) {
 func TestForensic_SecretNotInBody(t *testing.T) {
 	svc := enrichment.NewService(forensicCfg(), nil, nil, nil, nil)
 	srv, _, _ := newTestServer(t, map[string]string{
-		"UI_SECRET":          "test-secret",
 		"ABUSEIPDB_KEY":      "super-secret-key",
 		"VIRUSTOTAL_API_KEY": "vt-secret-key",
 	})
 	srv.enrichment = svc
-	cookie := loginCookie(t, srv, "test-secret")
+	cookie := loginCookie(t, srv, "test-password-123!@#")
 
 	req := httptest.NewRequest(http.MethodPost, "/forensic", strings.NewReader("ip=203.0.113.1"))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -213,7 +212,7 @@ func TestForensic_NoCscliSpawn(t *testing.T) {
 	// simply assert the handler completes and returns HTML — not a process error.
 	svc := enrichment.NewService(forensicCfg(), nil, nil, nil, nil)
 	srv := newTestServerWithEnrichment(t, svc)
-	cookie := loginCookie(t, srv, "test-secret")
+	cookie := loginCookie(t, srv, "test-password-123!@#")
 
 	req := httptest.NewRequest(http.MethodPost, "/forensic", strings.NewReader("ip=203.0.113.2"))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")

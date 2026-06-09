@@ -6,6 +6,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -103,13 +104,12 @@ type VirusTotalConfig struct {
 }
 
 type UIBoolConfig struct {
-	Enabled             bool   `yaml:"enabled"`
-	Addr                string `yaml:"addr"`
-	Port                int    `yaml:"port"` // extracted from Addr; deprecated
-	MutationsEnabled    bool   `yaml:"mutations_enabled"`
-	SecretFile          string `yaml:"secret_file"`
-	ProviderStateFile   string `yaml:"provider_state_file"`
-	InitialPasswordFile string `yaml:"initial_password_file"` // one-time setup password (bootstrap only, truncated after setup)
+	Enabled           bool   `yaml:"enabled"`
+	Addr              string `yaml:"addr"`
+	Port              int    `yaml:"port"` // extracted from Addr; deprecated
+	MutationsEnabled  bool   `yaml:"mutations_enabled"`
+	SecretFile        string `yaml:"secret_file"`
+	ProviderStateFile string `yaml:"provider_state_file"`
 }
 
 type EnrichmentConfig struct {
@@ -163,9 +163,8 @@ func DefaultConfig() *Config {
 	return &Config{
 		Version: SchemaVersion,
 		Global: GlobalConfig{
-			AppEnv:         "production",
-			ServiceName:    "cf-sync",
-			AdminTokenFile: "/var/lib/security-automation-go/runtime/admin_token",
+			AppEnv:      "production",
+			ServiceName: "cf-sync",
 			Log: LogConfig{
 				Level:  "info",
 				Format: "json",
@@ -185,13 +184,9 @@ func DefaultConfig() *Config {
 			Profile: RuntimeProfileSingleNode,
 		},
 		UI: UIBoolConfig{
-			Enabled:             false,
-			Addr:                "127.0.0.1:6969",
-			Port:                6969,
-			SecretFile:          "/var/lib/security-automation-go/runtime/ui_secret",
-			InitialPasswordFile: "/var/lib/security-automation-go/runtime/initial-admin-password",
-			ProviderStateFile:   "/var/lib/security-automation-go/runtime/ai-providers.env",
-			MutationsEnabled:    false,
+			Enabled:          false,
+			Addr:             "127.0.0.1:9091",
+			MutationsEnabled: false,
 		},
 		Enrichment: EnrichmentConfig{
 			Enabled:    true,
@@ -244,12 +239,30 @@ func Load(path string) (*Config, error) {
 	}
 
 	applyEnvOverrides(cfg)
+	cfg.FinalizePaths()
 
 	if err := validate(cfg); err != nil {
 		return nil, err
 	}
 
 	return cfg, nil
+}
+
+// FinalizePaths ensures that derived paths are relative to the current StateDir
+// if they haven't been explicitly overridden.
+func (c *Config) FinalizePaths() {
+	if c.StateDir == "" {
+		c.StateDir = "/var/lib/security-automation-go"
+	}
+	if c.Global.AdminTokenFile == "" {
+		c.Global.AdminTokenFile = filepath.Join(c.StateDir, "runtime", "admin_token")
+	}
+	if c.UI.SecretFile == "" {
+		c.UI.SecretFile = filepath.Join(c.StateDir, "runtime", "ui_secret")
+	}
+	if c.UI.ProviderStateFile == "" {
+		c.UI.ProviderStateFile = filepath.Join(c.StateDir, "runtime", "ai-providers.env")
+	}
 }
 
 func applyEnvOverrides(cfg *Config) {
@@ -355,9 +368,6 @@ func applyEnvOverrides(cfg *Config) {
 	}
 	if v := os.Getenv("UI_PROVIDER_STATE_FILE"); v != "" {
 		cfg.UI.ProviderStateFile = v
-	}
-	if v := os.Getenv("UI_INITIAL_PASSWORD_FILE"); v != "" {
-		cfg.UI.InitialPasswordFile = v
 	}
 	if v := os.Getenv("ENRICHMENT_ENABLED"); v != "" {
 		if enabled, err := strconv.ParseBool(v); err == nil {

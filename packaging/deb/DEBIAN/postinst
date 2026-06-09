@@ -20,20 +20,27 @@ install -d -m 755 -o root -g root \
 install -d -m 750 -o security-automation -g security-automation \
     /var/lib/security-automation-go \
     /var/lib/security-automation-go/runtime
-touch /etc/security-automation-go/security-automation.env
-chmod 0644 /etc/security-automation-go/security-automation.env
-chown root:root /etc/security-automation-go/security-automation.env
+# /var/log — application logs
+install -d -m 755 -o security-automation -g security-automation \
+    /var/log/security-automation-go
+
+# Create default env file if it doesn't exist or is empty
 if [ ! -s /etc/security-automation-go/security-automation.env ]; then
     cat > /etc/security-automation-go/security-automation.env <<'EOF'
 UI_ENABLED=1
 UI_ADDR=127.0.0.1:9091
+METRICS_ADDR=127.0.0.1:9092
 STATE_DIR=/var/lib/security-automation-go
 EOF
     chmod 0644 /etc/security-automation-go/security-automation.env
     chown root:root /etc/security-automation-go/security-automation.env
 fi
-install -d -m 755 -o security-automation -g security-automation \
-    /var/log/security-automation
+
+# Remove legacy /etc/systemd/system/cf-sync.service that overrides the package-owned
+# /lib/systemd/system/ version. Safe because it is a file we own, not an admin override.
+if [ -f /etc/systemd/system/cf-sync.service ]; then
+    rm -f /etc/systemd/system/cf-sync.service
+fi
 
 # Enable and start service
 if [ "$1" = "configure" ]; then

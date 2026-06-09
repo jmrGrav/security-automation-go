@@ -31,11 +31,10 @@ func (p fakeProvider) Quota(context.Context) aiquota.ProviderQuota {
 
 func TestProviderManagementReplaceKeyWrites0600AndKeepsDisabled(t *testing.T) {
 	srv, db, secretPath := newCredentialStoreServer(t, map[string]string{
-		"UI_SECRET":                "ui-secret-value",
 		"AI_PROVIDER_OPENAI_MODEL": "gpt-4.1-mini",
 	})
 	legacyFile := filepath.Join(filepath.Dir(secretPath), "openai_api_key")
-	cookie := loginCookie(t, srv, "ui-secret-value")
+	cookie := loginCookie(t, srv, "test-password-123!@#")
 	csrf := srv.csrfTokenFor(cookie.Value)
 
 	req := httptest.NewRequest(http.MethodPost, "/admin/providers/openai/key", strings.NewReader("confirm_replace=yes&new_api_key=super-secret-token"))
@@ -66,9 +65,7 @@ func TestProviderManagementReplaceKeyWrites0600AndKeepsDisabled(t *testing.T) {
 }
 
 func TestProviderManagementRequiresAuthAndCSRF(t *testing.T) {
-	srv, _, _ := newTestServer(t, map[string]string{
-		"UI_SECRET": "ui-secret-value",
-	})
+	srv, _, _ := newTestServer(t, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/admin/providers/openai/key", strings.NewReader("confirm_replace=yes&new_api_key=secret"))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -78,7 +75,7 @@ func TestProviderManagementRequiresAuthAndCSRF(t *testing.T) {
 		t.Fatalf("expected auth redirect, got %d", rr.Code)
 	}
 
-	cookie := loginCookie(t, srv, "ui-secret-value")
+	cookie := loginCookie(t, srv, "test-password-123!@#")
 	req = httptest.NewRequest(http.MethodPost, "/admin/providers/openai/key", strings.NewReader("confirm_replace=yes&new_api_key=secret"))
 	req.AddCookie(cookie)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -91,10 +88,9 @@ func TestProviderManagementRequiresAuthAndCSRF(t *testing.T) {
 
 func TestProviderManagementEnableRequiresReadableSecret(t *testing.T) {
 	srv, _, _ := newCredentialStoreServer(t, map[string]string{
-		"UI_SECRET":                "ui-secret-value",
 		"AI_PROVIDER_OPENAI_MODEL": "gpt-4.1-mini",
 	})
-	cookie := loginCookie(t, srv, "ui-secret-value")
+	cookie := loginCookie(t, srv, "test-password-123!@#")
 
 	req := httptest.NewRequest(http.MethodPost, "/admin/providers/openai/enable", strings.NewReader(""))
 	req.AddCookie(cookie)
@@ -116,7 +112,6 @@ func TestProviderManagementEnableRequiresReadableSecret(t *testing.T) {
 
 func TestProviderManagementTestProviderUsesStubAndRedacts(t *testing.T) {
 	srv, db, secretPath := newCredentialStoreServer(t, map[string]string{
-		"UI_SECRET":                  "ui-secret-value",
 		"AI_PROVIDER_OPENAI_ENABLED": "true",
 		"AI_PROVIDER_OPENAI_MODEL":   "gpt-4.1-mini",
 	})
@@ -127,7 +122,7 @@ func TestProviderManagementTestProviderUsesStubAndRedacts(t *testing.T) {
 	srv.providerFactories["openai"] = func(pc ai.ProviderConfig) providers.Provider {
 		return fakeProvider{name: providers.OpenAI, err: &providers.Error{Provider: providers.OpenAI, StatusCode: http.StatusTooManyRequests, Reason: "rate limited"}}
 	}
-	cookie := loginCookie(t, srv, "ui-secret-value")
+	cookie := loginCookie(t, srv, "test-password-123!@#")
 	req := httptest.NewRequest(http.MethodPost, "/admin/providers/openai/test", strings.NewReader(""))
 	req.AddCookie(cookie)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")

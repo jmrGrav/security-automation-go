@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-const DefaultLogDir = "/var/log/security-automation"
+const DefaultLogDir = "/var/log/security-automation-go"
 
 // StartupInfo holds non-sensitive facts logged at startup.
 type StartupInfo struct {

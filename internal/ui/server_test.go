@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"context"
 	"crypto/tls"
 	"net/http"
 	"net/http/httptest"
@@ -16,6 +17,8 @@ import (
 	aigemini "github.com/jm/security-automation-go/internal/ai/providers/gemini"
 	aiopenai "github.com/jm/security-automation-go/internal/ai/providers/openai"
 	"github.com/jm/security-automation-go/internal/config"
+	"github.com/jm/security-automation-go/internal/storage/sqlite"
+	"github.com/jm/security-automation-go/internal/ui/auth"
 )
 
 func TestServer_RequiresSessionCookie(t *testing.T) {
@@ -34,12 +37,10 @@ func TestServer_RequiresSessionCookie(t *testing.T) {
 }
 
 func TestServer_LoginSetsHttpOnlyCookie(t *testing.T) {
-	srv, _, secretPath := newTestServer(t, map[string]string{
-		"UI_SECRET": "ui-secret-value",
-	})
+	srv, _, secretPath := newTestServer(t, nil)
 	_ = secretPath
 
-	form := strings.NewReader("secret=ui-secret-value")
+	form := strings.NewReader("password=test-password-123!@#")
 	req := httptest.NewRequest(http.MethodPost, "/login", form)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rr := httptest.NewRecorder()
@@ -65,11 +66,9 @@ func TestServer_LoginSetsHttpOnlyCookie(t *testing.T) {
 }
 
 func TestServer_LoginSetsSecureCookieOverHTTPS(t *testing.T) {
-	srv, _, _ := newTestServer(t, map[string]string{
-		"UI_SECRET": "ui-secret-value",
-	})
+	srv, _, _ := newTestServer(t, nil)
 
-	form := strings.NewReader("secret=ui-secret-value")
+	form := strings.NewReader("password=test-password-123!@#")
 	req := httptest.NewRequest(http.MethodPost, "/login", form)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("X-Forwarded-Proto", "https")
@@ -90,12 +89,10 @@ func TestServer_LoginSetsSecureCookieOverHTTPS(t *testing.T) {
 }
 
 func TestServer_LoginWritesAuditLog(t *testing.T) {
-	srv, audit, secretPath := newTestServer(t, map[string]string{
-		"UI_SECRET": "ui-secret-value",
-	})
+	srv, audit, secretPath := newTestServer(t, nil)
 	_ = secretPath
 
-	form := strings.NewReader("secret=ui-secret-value")
+	form := strings.NewReader("password=test-password-123!@#")
 	req := httptest.NewRequest(http.MethodPost, "/login", form)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rr := httptest.NewRecorder()
@@ -107,10 +104,8 @@ func TestServer_LoginWritesAuditLog(t *testing.T) {
 }
 
 func TestServer_MutationsDisabledByDefault(t *testing.T) {
-	srv, _, _ := newTestServer(t, map[string]string{
-		"UI_SECRET": "ui-secret-value",
-	})
-	cookie := loginCookie(t, srv, "ui-secret-value")
+	srv, _, _ := newTestServer(t, nil)
+	cookie := loginCookie(t, srv, "test-password-123!@#")
 
 	req := httptest.NewRequest(http.MethodPost, "/actions/cloudflare/ban", strings.NewReader("ip=203.0.113.4"))
 	req.AddCookie(cookie)
@@ -126,11 +121,10 @@ func TestServer_MutationsDisabledByDefault(t *testing.T) {
 
 func TestServer_CSRFRequiredWhenMutationsEnabled(t *testing.T) {
 	srv, _, _ := newTestServer(t, map[string]string{
-		"UI_SECRET":                    "ui-secret-value",
 		"UI_MUTATIONS_ENABLED":         "1",
 		"CLOUDFLARE_MUTATIONS_ENABLED": "1",
 	})
-	cookie := loginCookie(t, srv, "ui-secret-value")
+	cookie := loginCookie(t, srv, "test-password-123!@#")
 
 	req := httptest.NewRequest(http.MethodPost, "/actions/cloudflare/ban", strings.NewReader("ip=203.0.113.4"))
 	req.AddCookie(cookie)
@@ -145,13 +139,12 @@ func TestServer_CSRFRequiredWhenMutationsEnabled(t *testing.T) {
 
 func TestServer_ProviderKeysAreMasked(t *testing.T) {
 	srv, _, _ := newTestServer(t, map[string]string{
-		"UI_SECRET":          "ui-secret-value",
 		"SPAMHAUS_API_KEY":   "spamhaus-secret",
 		"VIRUSTOTAL_API_KEY": "virustotal-secret",
 		"SPAMHAUS_ENABLED":   "1",
 		"VIRUSTOTAL_ENABLED": "1",
 	})
-	cookie := loginCookie(t, srv, "ui-secret-value")
+	cookie := loginCookie(t, srv, "test-password-123!@#")
 
 	req := httptest.NewRequest(http.MethodGet, "/providers", nil)
 	req.AddCookie(cookie)
@@ -167,10 +160,8 @@ func TestServer_ProviderKeysAreMasked(t *testing.T) {
 }
 
 func TestServer_DashboardShowsFallbackAndCloudflareStates(t *testing.T) {
-	srv, _, _ := newTestServer(t, map[string]string{
-		"UI_SECRET": "ui-secret-value",
-	})
-	cookie := loginCookie(t, srv, "ui-secret-value")
+	srv, _, _ := newTestServer(t, nil)
+	cookie := loginCookie(t, srv, "test-password-123!@#")
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.AddCookie(cookie)
@@ -182,7 +173,7 @@ func TestServer_DashboardShowsFallbackAndCloudflareStates(t *testing.T) {
 		"CrowdSec unavailable / read-only fallback",
 		"OpenResty unavailable / nginx log mode",
 		"Cloudflare configured dry-run",
-		"UI ready on 127.0.0.1:9090",
+		"UI ready on 127.0.0.1:9091",
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("dashboard missing %q: %s", want, body)
@@ -191,10 +182,8 @@ func TestServer_DashboardShowsFallbackAndCloudflareStates(t *testing.T) {
 }
 
 func TestServer_SidebarIncludesFuturePages(t *testing.T) {
-	srv, _, _ := newTestServer(t, map[string]string{
-		"UI_SECRET": "ui-secret-value",
-	})
-	cookie := loginCookie(t, srv, "ui-secret-value")
+	srv, _, _ := newTestServer(t, nil)
+	cookie := loginCookie(t, srv, "test-password-123!@#")
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.AddCookie(cookie)
@@ -221,10 +210,8 @@ func TestServer_SidebarIncludesFuturePages(t *testing.T) {
 }
 
 func TestServer_ImplementedWorkflowRoutesAreNotMarkedSoon(t *testing.T) {
-	srv, _, _ := newTestServer(t, map[string]string{
-		"UI_SECRET": "ui-secret-value",
-	})
-	cookie := loginCookie(t, srv, "ui-secret-value")
+	srv, _, _ := newTestServer(t, nil)
+	cookie := loginCookie(t, srv, "test-password-123!@#")
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.AddCookie(cookie)
@@ -246,10 +233,8 @@ func TestServer_ImplementedWorkflowRoutesAreNotMarkedSoon(t *testing.T) {
 }
 
 func TestServer_ActiveNavMarksCurrentPage(t *testing.T) {
-	srv, _, _ := newTestServer(t, map[string]string{
-		"UI_SECRET": "ui-secret-value",
-	})
-	cookie := loginCookie(t, srv, "ui-secret-value")
+	srv, _, _ := newTestServer(t, nil)
+	cookie := loginCookie(t, srv, "test-password-123!@#")
 
 	req := httptest.NewRequest(http.MethodGet, "/providers", nil)
 	req.AddCookie(cookie)
@@ -266,10 +251,8 @@ func TestServer_ActiveNavMarksCurrentPage(t *testing.T) {
 }
 
 func TestServer_ConsolePagesAreSelfContained(t *testing.T) {
-	srv, _, _ := newTestServer(t, map[string]string{
-		"UI_SECRET": "ui-secret-value",
-	})
-	cookie := loginCookie(t, srv, "ui-secret-value")
+	srv, _, _ := newTestServer(t, nil)
+	cookie := loginCookie(t, srv, "test-password-123!@#")
 
 	for _, path := range []string{"/", "/providers", "/about", "/audit", "/timeline"} {
 		req := httptest.NewRequest(http.MethodGet, path, nil)
@@ -291,10 +274,9 @@ func TestServer_ConsolePagesAreSelfContained(t *testing.T) {
 
 func TestServer_AboutPageHidesSecrets(t *testing.T) {
 	srv, _, _ := newTestServer(t, map[string]string{
-		"UI_SECRET":        "ui-secret-value",
 		"SPAMHAUS_API_KEY": "spamhaus-secret",
 	})
-	cookie := loginCookie(t, srv, "ui-secret-value")
+	cookie := loginCookie(t, srv, "test-password-123!@#")
 
 	req := httptest.NewRequest(http.MethodGet, "/about", nil)
 	req.AddCookie(cookie)
@@ -308,9 +290,7 @@ func TestServer_AboutPageHidesSecrets(t *testing.T) {
 }
 
 func TestServer_AuditTrailEmptyState(t *testing.T) {
-	srv, _, _ := newTestServer(t, map[string]string{
-		"UI_SECRET": "ui-secret-value",
-	})
+	srv, _, _ := newTestServer(t, nil)
 	cookie := &http.Cookie{Name: sessionCookieName, Value: "seeded-session"}
 	srv.mu.Lock()
 	srv.sessions[cookie.Value] = time.Now().UTC().Add(time.Hour)
@@ -328,9 +308,7 @@ func TestServer_AuditTrailEmptyState(t *testing.T) {
 }
 
 func TestServer_ReservedRoutesRequireAuth(t *testing.T) {
-	srv, _, _ := newTestServer(t, map[string]string{
-		"UI_SECRET": "ui-secret-value",
-	})
+	srv, _, _ := newTestServer(t, nil)
 
 	for _, path := range []string{"/deban"} {
 		req := httptest.NewRequest(http.MethodGet, path, nil)
@@ -346,9 +324,7 @@ func TestServer_ReservedRoutesRequireAuth(t *testing.T) {
 }
 
 func TestServer_WorkflowRoutesRequireAuth(t *testing.T) {
-	srv, _, _ := newTestServer(t, map[string]string{
-		"UI_SECRET": "ui-secret-value",
-	})
+	srv, _, _ := newTestServer(t, nil)
 
 	for _, path := range []string{"/timeline", "/cloudflare/diff", "/replay", "/recovery", "/drift"} {
 		req := httptest.NewRequest(http.MethodGet, path, nil)
@@ -364,10 +340,8 @@ func TestServer_WorkflowRoutesRequireAuth(t *testing.T) {
 }
 
 func TestServer_PagesAreSelfContained(t *testing.T) {
-	srv, _, _ := newTestServer(t, map[string]string{
-		"UI_SECRET": "ui-secret-value",
-	})
-	cookie := loginCookie(t, srv, "ui-secret-value")
+	srv, _, _ := newTestServer(t, nil)
+	cookie := loginCookie(t, srv, "test-password-123!@#")
 
 	for _, path := range []string{"/", "/forensic", "/intelligence", "/trusted-networks", "/timeline", "/cloudflare/diff", "/replay", "/recovery", "/drift"} {
 		req := httptest.NewRequest(http.MethodGet, path, nil)
@@ -389,7 +363,7 @@ func TestServer_PagesAreSelfContained(t *testing.T) {
 
 func TestServer_SecurityHeadersPresentOnAuthenticatedRoutes(t *testing.T) {
 	srv, _, _ := newTestServer(t, map[string]string{"UI_SECRET": "test-secret"})
-	cookie := loginCookie(t, srv, "test-secret")
+	cookie := loginCookie(t, srv, "test-password-123!@#")
 
 	for _, path := range []string{"/", "/providers"} {
 		req := httptest.NewRequest(http.MethodGet, path, nil)
@@ -413,7 +387,7 @@ func TestServer_SecurityHeadersPresentOnAuthenticatedRoutes(t *testing.T) {
 
 func TestServer_SessionExpiredAfterTTL(t *testing.T) {
 	srv, _, _ := newTestServer(t, map[string]string{"UI_SECRET": "test-secret"})
-	cookie := loginCookie(t, srv, "test-secret")
+	cookie := loginCookie(t, srv, "test-password-123!@#")
 
 	// Manually expire the session.
 	srv.mu.Lock()
@@ -437,7 +411,7 @@ func TestServer_SessionExpiredAfterTTL(t *testing.T) {
 
 func TestServer_ExpiredSessionEvictedFromStore(t *testing.T) {
 	srv, _, _ := newTestServer(t, map[string]string{"UI_SECRET": "test-secret"})
-	cookie := loginCookie(t, srv, "test-secret")
+	cookie := loginCookie(t, srv, "test-password-123!@#")
 
 	srv.mu.Lock()
 	initialCount := len(srv.sessions)
@@ -519,7 +493,7 @@ func newTestServer(t *testing.T, env map[string]string) (*Server, *BufferAuditSi
 	t.Setenv("CF_API_TOKEN", "test-token")
 	t.Setenv("CF_ZONE_ID", "test-zone")
 	t.Setenv("UI_ENABLED", "1")
-	t.Setenv("UI_ADDR", "127.0.0.1:9090")
+	t.Setenv("UI_ADDR", "127.0.0.1:9091")
 	t.Setenv("UI_SECRET_FILE", filepath.Join(dataDir, "ui-secrets.local"))
 	t.Setenv("UI_PROVIDER_STATE_FILE", filepath.Join(dataDir, "ai-providers.env"))
 	t.Setenv("STATE_DIR", dataDir)
@@ -545,11 +519,19 @@ func newTestServer(t *testing.T, env map[string]string) (*Server, *BufferAuditSi
 		}
 		return aigateway.NewService(aiCfg, providers, nil, audit)
 	}
+
+	db, err := sqlite.New(cfg.StateDir)
+	if err != nil {
+		t.Fatalf("sqlite.New: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
 	srv, err := NewServer(cfg, Options{
 		SecretProvider:   NewFileSecretProvider(secretsPath),
 		AuditSink:        audit,
 		AIExplainBuilder: builder,
 		AIConfig:         aiCfg,
+		SetupStore:       sqlite.NewSetupStore(db),
 		ProviderFactories: map[string]ProviderFactory{
 			"openai":    func(pc ai.ProviderConfig) providers.Provider { return aiopenai.New(pc) },
 			"anthropic": func(pc ai.ProviderConfig) providers.Provider { return aianthropic.New(pc) },
@@ -559,17 +541,23 @@ func newTestServer(t *testing.T, env map[string]string) (*Server, *BufferAuditSi
 	if err != nil {
 		t.Fatalf("NewServer failed: %v", err)
 	}
+
+	// Seed default admin password for tests
+	hash, _ := auth.HashPassword("test-password-123!@#")
+	_ = srv.setupStore.SetSetting(context.Background(), "admin_password_hash", hash)
+	_ = srv.setupStore.MarkComplete(context.Background())
+
 	return srv, audit, secretsPath
 }
 
-func loginCookie(t *testing.T, srv *Server, secret string) *http.Cookie {
+func loginCookie(t *testing.T, srv *Server, password string) *http.Cookie {
 	t.Helper()
-	req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader("secret="+secret))
+	req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader("password="+password))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rr := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rr, req)
 	if rr.Code != http.StatusFound {
-		t.Fatalf("login failed with status %d", rr.Code)
+		t.Fatalf("login failed with status %d body=%s", rr.Code, rr.Body.String())
 	}
 	cookies := rr.Result().Cookies()
 	if len(cookies) == 0 {
@@ -579,8 +567,8 @@ func loginCookie(t *testing.T, srv *Server, secret string) *http.Cookie {
 }
 
 func TestLogout_RequiresCSRF(t *testing.T) {
-	srv, _, _ := newTestServer(t, map[string]string{"UI_SECRET": "ui-secret-value"})
-	cookie := loginCookie(t, srv, "ui-secret-value")
+	srv, _, _ := newTestServer(t, nil)
+	cookie := loginCookie(t, srv, "test-password-123!@#")
 
 	req := httptest.NewRequest(http.MethodPost, "/logout", nil)
 	req.AddCookie(cookie)
@@ -593,8 +581,8 @@ func TestLogout_RequiresCSRF(t *testing.T) {
 }
 
 func TestLogout_ValidCSRF(t *testing.T) {
-	srv, _, _ := newTestServer(t, map[string]string{"UI_SECRET": "ui-secret-value"})
-	cookie := loginCookie(t, srv, "ui-secret-value")
+	srv, _, _ := newTestServer(t, nil)
+	cookie := loginCookie(t, srv, "test-password-123!@#")
 
 	req := httptest.NewRequest(http.MethodPost, "/logout", nil)
 	req.AddCookie(cookie)
@@ -608,8 +596,8 @@ func TestLogout_ValidCSRF(t *testing.T) {
 }
 
 func TestForensicLookup_RequiresCSRF(t *testing.T) {
-	srv, _, _ := newTestServer(t, map[string]string{"UI_SECRET": "ui-secret-value"})
-	cookie := loginCookie(t, srv, "ui-secret-value")
+	srv, _, _ := newTestServer(t, nil)
+	cookie := loginCookie(t, srv, "test-password-123!@#")
 
 	form := strings.NewReader("ip=1.2.3.4")
 	req := httptest.NewRequest(http.MethodPost, "/forensic", form)
@@ -624,8 +612,8 @@ func TestForensicLookup_RequiresCSRF(t *testing.T) {
 }
 
 func TestIntelligenceLookup_RequiresCSRF(t *testing.T) {
-	srv, _, _ := newTestServer(t, map[string]string{"UI_SECRET": "ui-secret-value"})
-	cookie := loginCookie(t, srv, "ui-secret-value")
+	srv, _, _ := newTestServer(t, nil)
+	cookie := loginCookie(t, srv, "test-password-123!@#")
 
 	form := strings.NewReader("ip=1.2.3.4")
 	req := httptest.NewRequest(http.MethodPost, "/intelligence", form)
@@ -636,5 +624,22 @@ func TestIntelligenceLookup_RequiresCSRF(t *testing.T) {
 
 	if rr.Code != http.StatusForbidden {
 		t.Fatalf("expected 403 for missing CSRF on intelligence lookup, got %d", rr.Code)
+	}
+}
+
+func TestIntelligenceLookup_Success(t *testing.T) {
+	srv, _, _ := newTestServer(t, nil)
+	cookie := loginCookie(t, srv, "test-password-123!@#")
+
+	form := strings.NewReader("ip=1.2.3.4")
+	req := httptest.NewRequest(http.MethodPost, "/intelligence", form)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(cookie)
+	req.Header.Set("X-CSRF-Token", srv.csrfTokenFor(cookie.Value))
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rr.Code)
 	}
 }

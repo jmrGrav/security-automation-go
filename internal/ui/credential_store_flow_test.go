@@ -42,7 +42,7 @@ func newCredentialStoreServer(t *testing.T, env map[string]string) (*Server, *sq
 	t.Setenv("CF_API_TOKEN", "bootstrap-token")
 	t.Setenv("CF_ZONE_ID", "bootstrap-zone")
 	t.Setenv("UI_ENABLED", "1")
-	t.Setenv("UI_ADDR", "127.0.0.1:9090")
+	t.Setenv("UI_ADDR", "127.0.0.1:9091")
 	t.Setenv("UI_SECRET_FILE", filepath.Join(dataDir, "ui-secrets.local"))
 	t.Setenv("UI_PROVIDER_STATE_FILE", filepath.Join(dataDir, "ai-providers.env"))
 	t.Setenv("STATE_DIR", dataDir)
@@ -87,7 +87,7 @@ func newCredentialStoreServer(t *testing.T, env map[string]string) (*Server, *sq
 	if err != nil {
 		t.Fatalf("NewServer: %v", err)
 	}
-	hash, err := auth.HashPassword("bootstrap-pass-123!@#")
+	hash, err := auth.HashPassword("test-password-123!@#")
 	if err != nil {
 		t.Fatalf("hash bootstrap password: %v", err)
 	}
@@ -102,12 +102,12 @@ func newCredentialStoreServer(t *testing.T, env map[string]string) (*Server, *sq
 
 func TestSetupWizard_WritesCloudflareTokenIntoCredentialStore(t *testing.T) {
 	srv, db, _ := newCredentialStoreServer(t, map[string]string{"UI_SECRET": "ui-secret-value"})
-	cookie := loginCookie(t, srv, "ui-secret-value")
+	cookie := loginCookie(t, srv, "test-password-123!@#")
 	srv.mu.Lock()
 	srv.sessions[cookie.Value] = time.Now().UTC().Add(time.Hour)
 	srv.mu.Unlock()
 
-	req := httptest.NewRequest(http.MethodPost, "/setup/step/4", strings.NewReader("cf_token=cf-token-raw&zone_id=zone-123"))
+	req := httptest.NewRequest(http.MethodPost, "/setup/step/3", strings.NewReader("cf_token=cf-token-raw&zone_id=zone-123"))
 	req.AddCookie(cookie)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("X-CSRF-Token", srv.csrfTokenFor(cookie.Value))
@@ -128,7 +128,7 @@ func TestSetupWizard_WritesCloudflareTokenIntoCredentialStore(t *testing.T) {
 
 func TestSetupWizard_SkipStep4AllowsContinue(t *testing.T) {
 	srv, _, _ := newCredentialStoreServer(t, map[string]string{"UI_SECRET": "ui-secret-value"})
-	cookie := loginCookie(t, srv, "ui-secret-value")
+	cookie := loginCookie(t, srv, "test-password-123!@#")
 	srv.mu.Lock()
 	srv.sessions[cookie.Value] = time.Now().UTC().Add(time.Hour)
 	srv.mu.Unlock()
@@ -151,7 +151,7 @@ func TestProviderManagement_ReplaceKeyStoresInCredentialStore(t *testing.T) {
 	if err := srv.setupStore.MarkComplete(context.Background()); err != nil {
 		t.Fatalf("mark complete: %v", err)
 	}
-	cookie := loginCookie(t, srv, "ui-secret-value")
+	cookie := loginCookie(t, srv, "test-password-123!@#")
 
 	req := httptest.NewRequest(http.MethodPost, "/admin/providers/openai/key", strings.NewReader("confirm_replace=yes&new_api_key=sk-test-123"))
 	req.AddCookie(cookie)
@@ -213,7 +213,7 @@ func TestLegacyImportAction_ImportsViaUI(t *testing.T) {
 	legacySecretsDirPath = legacyDir
 	defer func() { legacySecretsDirPath = origLegacyDir }()
 
-	cookie := loginCookie(t, srv, "ui-secret-value")
+	cookie := loginCookie(t, srv, "test-password-123!@#")
 	req := httptest.NewRequest(http.MethodPost, "/admin/providers/import-legacy", strings.NewReader(""))
 	req.AddCookie(cookie)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")

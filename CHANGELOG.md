@@ -2,6 +2,46 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v1.5.4] — 2026-06-10
+
+### Summary
+
+Operational and First-Run UI finalization. Unified management mode introduced. Generic/temporary passwords removed in favor of mandatory wizard-based creation. Default ports standardized (UI: 9091, Metrics: 9092). Debian packaging lifecycle hardened (stop on remove, full cleanup on purge). SQLite concurrency hardened. Dead code from auth migration removed.
+
+### Features
+
+- **Unified Management Mode** — The `-mode ui` flag now acts as a complete management service. On fresh installations, it provides the setup wizard. Once setup is complete, it automatically starts the full security orchestration in the background alongside the Web UI.
+- **Mandatory Password Creation** — Removed all generic passwords (`CHANGE_ME_ON_FIRST_BOOT`) and automatically generated setup secrets. Operators must now explicitly create their administrator password during the first-run wizard.
+- **Port Standardization** — Default UI port set to `9091` and Metrics/API port to `9092`. Both listen on `127.0.0.1` (localhost only).
+
+### Security / Reliability
+
+- **SQLite PRAGMA ordering** — `PRAGMA busy_timeout=5000` is now set before `PRAGMA journal_mode=WAL` in both `New()` and `Reopen()`. This ensures the retry timeout is active during WAL mode negotiation, preventing `SQLITE_BUSY` errors on concurrent first-open in UI mode (`internal/storage/sqlite/db.go`).
+- **Migration TOCTOU** — Each schema migration now runs inside a `BEGIN IMMEDIATE` transaction with an in-transaction `EXISTS` check before applying. Prevents duplicate-migration errors when two goroutines open the same database simultaneously on fresh install (`internal/storage/manager/migrator.go`).
+- **Smoke test correctness** — Fixed two bugs in `smoke_test.go` (build tag `smoke`): `TestSmoke_SetupWizardAccessible` now uses an incomplete-setup server; `TestSmoke_WrongPasswordRejected` uses the correct `password=` form field and asserts 401.
+
+### Packaging
+
+- **Lifecycle Hardening** — Added `prerm` script to ensure the `cf-sync` service is stopped before package removal.
+- **Improved Purge** — `apt purge` now cleans up all canonical directories (`/etc`, `/var/lib`, `/var/log` for `security-automation-go`) and safely removes empty legacy paths used during migration.
+- **Path Normalization** — All internal paths and defaults updated to the canonical `/var/log/security-automation-go` directory.
+- **Version injection** — `make package` now injects `$(VERSION)` into `DEBIAN/control` via `sed` before `dpkg-deb --build`, ensuring `dpkg --info` reports the correct version.
+- **Legacy service cleanup** — `postinst` removes any `/etc/systemd/system/cf-sync.service` left over from pre-package installs so the package-owned unit in `/lib/systemd/system/` takes precedence.
+
+### Cleanup
+
+- Removed `GenerateInitialPassword`, `VerifyInitialPassword`, and `InvalidateInitialPassword` (dead code — no production callers after auth migration).
+- Removed `InitialPasswordFile` config field (set but never read in production).
+- Removed `func runDaemon` wrapper (replaced by `runDaemonWithLocker` which is called directly).
+- Removed dead `"UI_SECRET"` env map entries from test helpers (env var not read by config).
+- Corrected `.env.example` paths to canonical `/var/lib/security-automation-go`.
+
+### Documentation
+
+- Updated `README.md`, `FIRST_BOOT.md`, and `PACKAGING.md` with new ports and setup procedures.
+
+---
+
 ## [v1.5.3] — 2026-06-08
 
 ### Summary

@@ -25,10 +25,13 @@ import (
 	"github.com/jm/security-automation-go/internal/startupcheck"
 	"github.com/jm/security-automation-go/internal/storage/sqlite"
 	"github.com/jm/security-automation-go/internal/ui"
-	uiauth "github.com/jm/security-automation-go/internal/ui/auth"
 )
 
 func runUI(ctx context.Context, logger *slog.Logger, cfg *config.Config) error {
+	return runUIWithLocker(ctx, logger, cfg, true)
+}
+
+func runUIWithLocker(ctx context.Context, logger *slog.Logger, cfg *config.Config, acquireLock bool) error {
 	if !cfg.UI.Enabled {
 		return errors.New("ui mode requires UI_ENABLED=1 or ui.enabled=true")
 	}
@@ -52,28 +55,22 @@ func runUI(ctx context.Context, logger *slog.Logger, cfg *config.Config) error {
 		return err
 	}
 
-	// Acquire instance lock
-	lockFile := filepath.Join(cfg.StateDir, "security-automation-go.pid")
-	locker, err := lock.NewFileLock(lockFile)
-	if err != nil {
-		return fmt.Errorf("create lock: %w", err)
-	}
-
-	if err := locker.Acquire(); err != nil {
-		if lockErr, ok := err.(lock.PIDLockedError); ok {
-			return fmt.Errorf("another instance (PID %d) is running", lockErr.PID)
+	if acquireLock {
+		// Acquire instance lock
+		lockFile := filepath.Join(cfg.StateDir, "security-automation-go.pid")
+		locker, err := lock.NewFileLock(lockFile)
+		if err != nil {
+			return fmt.Errorf("create lock: %w", err)
 		}
-		return err
-	}
-	defer locker.Release()
 
-	logger.Info("instance lock acquired", "lock_file", lockFile)
-
-	runtimeDBPath := filepath.Join(cfg.StateDir, "runtime.db")
-	_, runtimeDBExistsErr := os.Stat(runtimeDBPath)
-	runtimeDBExists := runtimeDBExistsErr == nil
-	if runtimeDBExistsErr != nil && !os.IsNotExist(runtimeDBExistsErr) {
-		return fmt.Errorf("check runtime db: %w", runtimeDBExistsErr)
+		if err := locker.Acquire(); err != nil {
+			if lockErr, ok := err.(lock.PIDLockedError); ok {
+				return fmt.Errorf("another instance (PID %d) is running", lockErr.PID)
+			}
+			return err
+		}
+		defer locker.Release()
+		logger.Info("instance lock acquired", "lock_file", lockFile)
 	}
 
 	// Open SQLite for setup wizard state persistence.
@@ -85,17 +82,6 @@ func runUI(ctx context.Context, logger *slog.Logger, cfg *config.Config) error {
 	setupStore := sqlite.NewSetupStore(setupDB)
 	credentialStore := sqlite.NewCredentialStore(setupDB)
 
-	// Generate the initial one-time setup password only on first boot.
-	// If a runtime DB already exists, preserve the existing bootstrap file state.
-	if !runtimeDBExists {
-		if _, err := uiauth.GenerateInitialPassword(cfg.UI.InitialPasswordFile); err != nil {
-			return fmt.Errorf("generate initial password: %w", err)
-		}
-		logger.Info("initial setup password available", "path", cfg.UI.InitialPasswordFile)
-	} else {
-		logger.Info("preserving existing setup password for conservative restart", "path", cfg.UI.InitialPasswordFile)
-	}
-
 	if v, ok, _ := credentialStore.Lookup(ctx, "cloudflare.api_token"); ok {
 		cfg.Cloudflare.APIToken = v
 	}
@@ -104,23 +90,6 @@ func runUI(ctx context.Context, logger *slog.Logger, cfg *config.Config) error {
 	}
 	if v, ok, _ := credentialStore.Lookup(ctx, "betterstack.source_token"); ok {
 		cfg.BetterStack.SourceToken = v
-	}
-
-	// If SECURITY_AUTOMATION_INITIAL_ADMIN_PASSWORD is set and no permanent password hash
-	// exists yet in SQLite, store its bcrypt hash now. This allows automated deployments
-	// to seed the admin password without a file at secrets/admin_password.
-	// NEVER log the password value.
-	if envPwd := os.Getenv("SECURITY_AUTOMATION_INITIAL_ADMIN_PASSWORD"); envPwd != "" {
-		if _, ok, _ := setupStore.GetSetting(ctx, "admin_password_hash"); !ok {
-			hash, err := uiauth.HashPassword(envPwd)
-			if err != nil {
-				return fmt.Errorf("hash initial admin password: %w", err)
-			}
-			if err := setupStore.SetSetting(ctx, "admin_password_hash", hash); err != nil {
-				return fmt.Errorf("store initial admin password: %w", err)
-			}
-			logger.Info("initial admin password stored in SQLite from environment")
-		}
 	}
 
 	// Apply wizard settings as runtime overrides (wizard stores these in SQLite).
@@ -134,7 +103,7 @@ func runUI(ctx context.Context, logger *slog.Logger, cfg *config.Config) error {
 	// Phase 5 — Setup Mode UX: log the wizard URL if setup is not yet complete.
 	// The operator sees this in journald immediately after systemctl start cf-sync.
 	if complete, _ := setupStore.IsComplete(ctx); !complete {
-		logger.Info("first boot setup required — open in browser",
+		logger.Info("first boot setup required — open in browser to create admin password",
 			"url", "http://"+cfg.UI.Addr+"/setup/step/1",
 			"action", "complete_wizard_before_enabling_production")
 	}

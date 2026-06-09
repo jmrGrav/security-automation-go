@@ -31,7 +31,7 @@ Environment=STATE_DIR=/var/lib/security-automation-go
 ExecStart=/usr/local/bin/cf-sync -mode ui
 
 # Paths (writable)
-ReadWritePaths=/var/lib/security-automation-go /var/log/security-automation
+ReadWritePaths=/var/lib/security-automation-go /var/log/security-automation-go
 
 # Reliability
 Restart=always

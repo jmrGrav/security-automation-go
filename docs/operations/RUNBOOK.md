@@ -24,7 +24,7 @@
 
 1. Confirm UI mode is explicitly enabled before starting it:
    - `UI_ENABLED=1`
-   - `UI_ADDR=127.0.0.1:9090`
+   - `UI_ADDR=127.0.0.1:9091`
    - `UI_MUTATIONS_ENABLED=0` unless the operator has explicitly enabled
      mutations
    - `UI_SECRET_FILE=/var/lib/security-automation-go/secrets.local`

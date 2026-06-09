@@ -28,8 +28,7 @@ func (e *Exporter) Export(ctx context.Context, w io.Writer) error {
 	tmpPath := fmt.Sprintf("/tmp/backup-%d.db", time.Now().UnixNano())
 	defer os.Remove(tmpPath)
 
-	query := fmt.Sprintf("VACUUM INTO '%s'", tmpPath)
-	if _, err := e.db.Conn().ExecContext(ctx, query); err != nil {
+	if _, err := e.db.Conn().ExecContext(ctx, "VACUUM INTO ?", tmpPath); err != nil {
 		return apperr.Wrap(op, err)
 	}
 

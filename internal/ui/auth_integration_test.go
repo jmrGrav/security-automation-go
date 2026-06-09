@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -123,27 +122,6 @@ func TestNoSecretLeakage(t *testing.T) {
 	}
 	if bytes.Contains(body, []byte(wrongPwd)) {
 		t.Errorf("error response must not contain attempted password")
-	}
-}
-
-// TestInitialPasswordFileIdempotent verifies that calling GenerateInitialPassword
-// multiple times returns the same password without overwriting the file.
-func TestInitialPasswordFileIdempotent(t *testing.T) {
-	tmpDir := t.TempDir()
-	passwordFile := filepath.Join(tmpDir, "runtime", "initial-admin-password")
-
-	pwd1, err := auth.GenerateInitialPassword(passwordFile)
-	if err != nil {
-		t.Fatalf("first GenerateInitialPassword failed: %v", err)
-	}
-
-	pwd2, err := auth.GenerateInitialPassword(passwordFile)
-	if err != nil {
-		t.Fatalf("second GenerateInitialPassword failed: %v", err)
-	}
-
-	if pwd1 != pwd2 {
-		t.Errorf("GenerateInitialPassword should return same password on subsequent calls")
 	}
 }
 
