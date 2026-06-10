@@ -167,6 +167,11 @@ func NewServer(cfg *config.Config, opts Options) (*Server, error) {
 	} else {
 		s.aiExplain = opts.AIExplain
 	}
+	if opts.SetupStore != nil {
+		if epoch, err := opts.SetupStore.GetAuthEpoch(context.Background()); err == nil {
+			s.authEpoch.Store(epoch)
+		}
+	}
 	s.routes()
 	_ = s.rebuildAIExplainFromState()
 	return s, nil

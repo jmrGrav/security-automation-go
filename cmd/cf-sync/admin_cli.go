@@ -9,11 +9,13 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"golang.org/x/term"
 
 	"github.com/jm/security-automation-go/internal/storage/sqlite"
+	"github.com/jm/security-automation-go/internal/ui"
 	"github.com/jm/security-automation-go/internal/ui/auth"
 )
 
@@ -41,9 +43,15 @@ func runAdminCLI(ctx context.Context, stateDir string, args []string) {
 	defer db.Close()
 	store := sqlite.NewSetupStore(db)
 
+	auditSink, err := ui.NewFileAuditSink(filepath.Join(stateDir, "ui-audit.log"))
+	if err != nil {
+		// Non-fatal: proceed without audit if the log cannot be opened.
+		auditSink = nil
+	}
+
 	switch args[0] {
 	case "reset-password":
-		adminResetPassword(ctx, store)
+		adminResetPassword(ctx, store, auditSink)
 	case "recovery-key":
 		if len(args) < 2 {
 			fmt.Fprintln(os.Stderr, "Usage: cf-sync -mode admin recovery-key <create|rotate>")
@@ -51,16 +59,16 @@ func runAdminCLI(ctx context.Context, stateDir string, args []string) {
 		}
 		switch args[1] {
 		case "create":
-			adminRecoveryKeyCreate(ctx, store)
+			adminRecoveryKeyCreate(ctx, store, auditSink)
 		case "rotate":
-			adminRecoveryKeyRotate(ctx, store)
+			adminRecoveryKeyRotate(ctx, store, auditSink)
 		default:
 			fmt.Fprintf(os.Stderr, "Unknown recovery-key subcommand: %q\n", args[1])
 			fmt.Fprintln(os.Stderr, "Usage: cf-sync -mode admin recovery-key <create|rotate>")
 			os.Exit(1)
 		}
 	case "recover":
-		adminRecover(ctx, store)
+		adminRecover(ctx, store, auditSink)
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown admin subcommand: %q\n", args[0])
 		printAdminUsage()
@@ -71,7 +79,7 @@ func runAdminCLI(ctx context.Context, stateDir string, args []string) {
 // adminResetPassword generates a temporary password, stores its bcrypt hash,
 // sets password_change_required=true, and invalidates all sessions via auth_epoch.
 // The temporary password is printed to stdout exactly once.
-func adminResetPassword(ctx context.Context, store *sqlite.SetupStore) {
+func adminResetPassword(ctx context.Context, store *sqlite.SetupStore, audit ui.AuditSink) {
 	tempPwd := auth.GenerateBootstrapPassword()
 
 	hash, err := auth.HashPassword(tempPwd)
@@ -92,6 +100,10 @@ func adminResetPassword(ctx context.Context, store *sqlite.SetupStore) {
 		fmt.Fprintf(os.Stderr, "Warning: increment auth epoch: %v\n", err)
 	}
 
+	if audit != nil {
+		audit.Record("admin_password_reset", map[string]string{"actor": "cli", "source": "admin_cli"})
+	}
+
 	fmt.Println()
 	fmt.Println("=== TEMPORARY PASSWORD (shown once) ===")
 	fmt.Println(tempPwd)
@@ -103,7 +115,7 @@ func adminResetPassword(ctx context.Context, store *sqlite.SetupStore) {
 
 // adminRecoveryKeyCreate generates and stores a new recovery key.
 // Fails if a recovery key already exists — use 'rotate' to replace it.
-func adminRecoveryKeyCreate(ctx context.Context, store *sqlite.SetupStore) {
+func adminRecoveryKeyCreate(ctx context.Context, store *sqlite.SetupStore, audit ui.AuditSink) {
 	_, exists, err := store.GetRecoveryKeyHash(ctx)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: check existing recovery key: %v\n", err)
@@ -114,18 +126,24 @@ func adminRecoveryKeyCreate(ctx context.Context, store *sqlite.SetupStore) {
 		os.Exit(1)
 	}
 	key := generateAndStoreRecoveryKey(ctx, store)
+	if audit != nil {
+		audit.Record("admin_recovery_key_created", map[string]string{"actor": "cli", "source": "admin_cli"})
+	}
 	printRecoveryKey(key, false)
 }
 
 // adminRecoveryKeyRotate replaces the existing recovery key with a new one.
-func adminRecoveryKeyRotate(ctx context.Context, store *sqlite.SetupStore) {
+func adminRecoveryKeyRotate(ctx context.Context, store *sqlite.SetupStore, audit ui.AuditSink) {
 	key := generateAndStoreRecoveryKey(ctx, store)
+	if audit != nil {
+		audit.Record("admin_recovery_key_rotated", map[string]string{"actor": "cli", "source": "admin_cli"})
+	}
 	printRecoveryKey(key, true)
 }
 
 // adminRecover uses the recovery key to reset the admin password.
 // Reads the recovery key from stdin (masked), verifies it, then resets.
-func adminRecover(ctx context.Context, store *sqlite.SetupStore) {
+func adminRecover(ctx context.Context, store *sqlite.SetupStore, audit ui.AuditSink) {
 	storedHash, ok, err := store.GetRecoveryKeyHash(ctx)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: read recovery key: %v\n", err)
@@ -156,30 +174,25 @@ func adminRecover(ctx context.Context, store *sqlite.SetupStore) {
 		os.Exit(1)
 	}
 
-	// Decode base64 → raw bytes → SHA-256 hash
-	rawKey, err := base64.RawURLEncoding.DecodeString(strings.TrimSpace(string(input)))
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "Error: invalid recovery key format")
+	// Decode and verify using constant-time SHA-256 comparison.
+	ok, verifyErr := verifyRecoveryKey(string(input), storedHash)
+	if verifyErr != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", verifyErr)
 		os.Exit(1)
 	}
-	inputHash := sha256sum(rawKey)
-
-	// Constant-time comparison
-	storedHashBytes, err := hex.DecodeString(storedHash)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "Error: internal key format error")
-		os.Exit(1)
-	}
-	if subtle.ConstantTimeCompare(inputHash, storedHashBytes) != 1 {
+	if !ok {
 		fmt.Fprintln(os.Stderr, "Error: recovery key is incorrect")
 		os.Exit(1)
 	}
 
 	// Record the use
 	_ = store.UpdateRecoveryKeyLastUsed(ctx)
+	if audit != nil {
+		audit.Record("admin_recovery_used", map[string]string{"actor": "cli", "source": "admin_cli"})
+	}
 
 	// Reset password
-	adminResetPassword(ctx, store)
+	adminResetPassword(ctx, store, audit)
 }
 
 func generateAndStoreRecoveryKey(ctx context.Context, store *sqlite.SetupStore) []byte {
@@ -194,6 +207,21 @@ func generateAndStoreRecoveryKey(ctx context.Context, store *sqlite.SetupStore) 
 		os.Exit(1)
 	}
 	return key
+}
+
+// verifyRecoveryKey checks whether the base64-encoded candidate matches storedHexHash.
+// Returns true only when the constant-time SHA-256 comparison succeeds.
+func verifyRecoveryKey(candidate string, storedHexHash string) (bool, error) {
+	raw, err := base64.RawURLEncoding.DecodeString(strings.TrimSpace(candidate))
+	if err != nil {
+		return false, fmt.Errorf("invalid recovery key format")
+	}
+	inputHash := sha256sum(raw)
+	storedBytes, err := hex.DecodeString(storedHexHash)
+	if err != nil {
+		return false, fmt.Errorf("internal key format error")
+	}
+	return subtle.ConstantTimeCompare(inputHash, storedBytes) == 1, nil
 }
 
 func printRecoveryKey(key []byte, rotated bool) {
