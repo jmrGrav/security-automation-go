@@ -1,0 +1,14 @@
+{
+  "name": "security-automation-smoke",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Local smoke tests — never run in CI. Requires SECURITY_AUTOMATION_SMOKE_LIVE=1.",
+  "scripts": {
+    "smoke": "playwright test",
+    "smoke:report": "playwright test --reporter=html"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.60.0",
+    "@types/node": "^22.0.0"
+  }
+}
