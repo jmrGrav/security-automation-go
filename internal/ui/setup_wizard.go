@@ -652,9 +652,17 @@ func (s *Server) handleSetupStep8(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	cfState := "(not configured)"
-	if s.credentialStore != nil {
-		if _, ok, _ := s.credentialStore.Lookup(r.Context(), "cloudflare.api_token"); ok {
-			cfState = "configured in SQLite"
+	if s.cfSentinelToken() != "" {
+		cfState = "configured (encrypted)"
+	}
+	dryRun := "true"
+	mutationsState := "disabled"
+	if s.setupStore != nil {
+		if v, ok, _ := s.setupStore.GetSetting(r.Context(), "dry_run"); ok && v == "false" {
+			dryRun = "false"
+		}
+		if v, ok, _ := s.setupStore.GetSetting(r.Context(), "mutations_enabled"); ok && v == "true" {
+			mutationsState = "enabled"
 		}
 	}
 	body := fmt.Sprintf(`
@@ -664,13 +672,13 @@ func (s *Server) handleSetupStep8(w http.ResponseWriter, r *http.Request) {
 <tr><td style="padding:.4rem .2rem;color:#5f6b7a">State directory</td><td><code>%s</code></td></tr>
 <tr><td style="padding:.4rem .2rem;color:#5f6b7a">SQLite</td><td><code>%s/runtime.db</code></td></tr>
 <tr><td style="padding:.4rem .2rem;color:#5f6b7a">CF token</td><td><code>%s</code></td></tr>
-<tr><td style="padding:.4rem .2rem;color:#5f6b7a">Dry-run</td><td><code>true (default)</code></td></tr>
-<tr><td style="padding:.4rem .2rem;color:#5f6b7a">Mutations</td><td><code>disabled (default)</code></td></tr>
+<tr><td style="padding:.4rem .2rem;color:#5f6b7a">Dry-run</td><td><code>%s</code></td></tr>
+<tr><td style="padding:.4rem .2rem;color:#5f6b7a">Mutations</td><td><code>%s</code></td></tr>
 </table>
 <br>
 <a href="/setup/step/9"><button>Continue to production mode</button></a>
 <a href="/setup/complete" style="margin-left:.5rem"><button class="secondary">Finish without enabling production mode</button></a>
-`, uiAddr, s.cfg.StateDir, s.cfg.StateDir, cfState)
+`, uiAddr, s.cfg.StateDir, s.cfg.StateDir, cfState, dryRun, mutationsState)
 	results := detect.RunAll(s.buildDetectConfig())
 	var sb strings.Builder
 	sb.WriteString(`<h3>Detected Environment</h3><div class="kv">`)
