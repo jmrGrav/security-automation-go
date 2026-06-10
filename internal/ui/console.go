@@ -353,10 +353,10 @@ func consoleNav(active string) []navItem {
 		{Label: "Audit Trail", Href: "/audit"},
 		{Label: "Trusted Networks", Href: "/trusted-networks"},
 		{Label: "Cloudflare Diff", Href: "/cloudflare/diff"},
-		{Label: "Replay", Href: "/replay"},
+		{Label: "Replay", Href: "/replay", Soon: true},
 		{Label: "Deban", Href: "/deban", Soon: true},
-		{Label: "Recovery", Href: "/recovery"},
-		{Label: "Drift", Href: "/drift"},
+		{Label: "Recovery", Href: "/recovery", Soon: true},
+		{Label: "Drift", Href: "/drift", Soon: true},
 		{Label: "About/System", Href: "/about"},
 	}
 	for i := range items {

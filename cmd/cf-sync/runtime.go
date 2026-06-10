@@ -129,8 +129,9 @@ func runCFSync(configPath, mode string, dryRun bool, format string, metricsAddr 
 
 	// Always start UI server in background if enabled.
 	if cfg.UI.Enabled {
+		uiCfg := *cfg // snapshot: runUIWithLocker writes its own credential fields; avoid race with writes below
 		go func() {
-			if err := runUIWithLocker(ctx, logger, cfg, false); err != nil {
+			if err := runUIWithLocker(ctx, logger, &uiCfg, false); err != nil {
 				logger.Error("UI server failed", "error", err)
 			}
 		}()

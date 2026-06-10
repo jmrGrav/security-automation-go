@@ -350,9 +350,9 @@ func providerManagementEntry(name AIProviderName, cfg ai.ProviderConfig, configu
 		SecretState:       secretState,
 		SecretPathDisplay: "SQLite credential store",
 		LastTestAt:        formatProviderTime(record.LastTestAt),
-		LastTestStatus:    valueOrFallback(record.LastTestStatus, "never"),
+		LastTestStatus:    displayProviderTestStatus(valueOrFallback(record.LastTestStatus, "never")),
 		LastTestLatencyMS: formatLatencyMS(record.LastTestLatencyMS),
-		LastErrorCode:     valueOrFallback(record.LastErrorCode, "none"),
+		LastErrorCode:     displayProviderErrorCode(valueOrFallback(record.LastErrorCode, "none")),
 		ValidationMessage: providerValidationMessage(status, secretState, record),
 	}
 }
@@ -410,6 +410,36 @@ func providerDashboardEntry(name AIProviderName, cfg ai.ProviderConfig, credenti
 		LastLatency:  entry.LastTestLatencyMS,
 		SecretState:  entry.SecretState,
 		EnabledState: enabledText(record.Enabled),
+	}
+}
+
+func displayProviderTestStatus(raw string) string {
+	switch raw {
+	case "READY":
+		return "ready"
+	case "AUTH_FAILED":
+		return "authentication failed"
+	case "RATE_LIMITED":
+		return "rate limited"
+	case "NETWORK_ERROR":
+		return "network error"
+	case "TIMEOUT":
+		return "timeout"
+	case "UNKNOWN_ERROR":
+		return "test failed"
+	default:
+		return raw
+	}
+}
+
+func displayProviderErrorCode(raw string) string {
+	switch raw {
+	case "UNKNOWN_ERROR":
+		return "unknown failure"
+	case "MISSING_SECRET":
+		return "key not configured"
+	default:
+		return raw
 	}
 }
 
