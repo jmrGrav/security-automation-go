@@ -185,7 +185,7 @@ func (s *Server) replayView() workflowProjectionView {
 		Intro:    "Replay remains read-only in the UI shell. This page explains the operator-facing data that will be shown once the replay store is wired through the control-plane.",
 		Badges: []StatusItem{
 			{Label: "Mode", Level: "dry-run", Detail: "read-only"},
-			{Label: "Execution", Level: "warning", Detail: "not wired"},
+			{Label: "Execution", Level: "disabled", Detail: "not available"},
 		},
 		Sections: []workflowSection{
 			{Title: "Checkpoints", Description: "Runtime checkpoints visible to the UI server.", Rows: []keyValueRow{
@@ -267,7 +267,7 @@ func (s *Server) driftView() workflowProjectionView {
 		Intro:    "Drift is read-only in the UI shell. The page is reserved for eventual convergence, oscillation, and ownership projection without exposing mutation controls.",
 		Badges: []StatusItem{
 			{Label: "Mode", Level: "dry-run", Detail: "read-only"},
-			{Label: "Convergence", Level: "warning", Detail: "not wired"},
+			{Label: "Convergence", Level: "disabled", Detail: "not available"},
 		},
 		Sections: []workflowSection{
 			{Title: "Active drift", Description: "Current drift indicators visible to the UI server.", Rows: []keyValueRow{

@@ -116,6 +116,23 @@ func TestDashboard_StubPanelsAreDisabled(t *testing.T) {
 	}
 }
 
+func TestWorkflowPages_StubBadgesAreDisabled(t *testing.T) {
+	srv := newCFTestServer(t, nil, "tok", "zone")
+	for _, tc := range []struct {
+		name   string
+		badges []StatusItem
+	}{
+		{"replay", srv.replayView().Badges},
+		{"drift", srv.driftView().Badges},
+	} {
+		for _, b := range tc.badges {
+			if b.Level == "warning" {
+				t.Errorf("%s page badge %q must not carry warning level", tc.name, b.Label)
+			}
+		}
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Helper
 // ---------------------------------------------------------------------------
