@@ -115,15 +115,15 @@ func TrustedNetworksPage(view TrustedNetworksView) templ.Component {
 				_, err := fmt.Fprint(w, `</section>`)
 				return err
 			}
-			if _, err := fmt.Fprint(w, `<div class="grid">`); err != nil {
+			if _, err := fmt.Fprint(w, `<div style="overflow-x:auto"><table><thead><tr><th>Name</th><th>Kind</th><th>CIDRs</th><th>Protection</th><th>Allowlist</th><th>Status</th></tr></thead><tbody>`); err != nil {
 				return err
 			}
 			for _, entry := range view.Entries {
-				if err := renderTrustedNetworkCard(w, entry); err != nil {
+				if err := renderTrustedNetworkRow(w, entry); err != nil {
 					return err
 				}
 			}
-			_, err := fmt.Fprint(w, `</div></section>`)
+			_, err := fmt.Fprint(w, `</tbody></table></div></section>`)
 			return err
 		}),
 	})
@@ -167,75 +167,86 @@ func (s *Server) trustedNetworksView() TrustedNetworksView {
 	return TrustedNetworksView{Entries: views}
 }
 
-func renderTrustedNetworkCard(w io.Writer, entry TrustedNetworkEntryView) error {
-	if _, err := fmt.Fprint(w, `<div class="panel">`); err != nil {
-		return err
-	}
-	statusClassName := trustedNetworkStatusClass(entry.Status)
-	if _, err := fmt.Fprintf(w, `<div class="pagehead" style="align-items:center"><div><h2>%s</h2><p class="muted">%s</p></div><div class="badges"><span class="badge %s">%s</span><span class="badge healthy">%s</span></div></div>`,
-		html.EscapeString(trustedNetworkDisplayName(entry.Organization)),
-		html.EscapeString(strings.TrimSpace(joinNonEmpty(entry.Notes, " · "))),
-		html.EscapeString(statusClassName),
-		html.EscapeString(trustedNetworkStatusLabel(entry.Status)),
-		html.EscapeString(strings.ToUpper(valueOrFallback(entry.Kind, "unknown"))),
-	); err != nil {
-		return err
-	}
-	if _, err := fmt.Fprint(w, `<div class="kv">`); err != nil {
-		return err
-	}
-	rows := []struct {
-		label string
-		value string
-	}{
-		{"organization", trustedNetworkDisplayName(entry.Organization)},
-		{"kind", valueOrFallback(entry.Kind, "unknown")},
-		{"CIDR count", fmt.Sprintf("%d", entry.CIDRCount)},
-		{"SourceURL", valueOrFallback(entry.SourceURL, "unavailable")},
-		{"LastVerified", valueOrFallback(entry.LastVerified, "unavailable")},
-		{"status", trustedNetworkStatusLabel(entry.Status)},
-		{"NoHardBan=true", "read-only"},
-		{"HardBanAllowed=false", "read-only"},
-		{"allowlisted=false", "default"},
-		{"Cloudflare whitelist not synced", valueOrFallback(entry.CloudflareWhitelist, "not synced")},
-		{"CrowdSec allowlist not synced", valueOrFallback(entry.CrowdSecAllowlist, "not synced")},
-	}
-	for _, row := range rows {
-		if _, err := fmt.Fprintf(w, `<div class="row"><span>%s</span><span>%s</span></div>`, html.EscapeString(row.label), html.EscapeString(row.value)); err != nil {
+func renderTrustedNetworkRow(w io.Writer, entry TrustedNetworkEntryView) error {
+	statusClass := trustedNetworkStatusClass(entry.Status)
+	name := html.EscapeString(trustedNetworkDisplayName(entry.Organization))
+	kind := html.EscapeString(strings.ToUpper(valueOrFallback(entry.Kind, "unknown")))
+	notes := strings.TrimSpace(joinNonEmpty(entry.Notes, " · "))
+
+	// Name cell
+	if notes != "" {
+		if _, err := fmt.Fprintf(w, `<tr><td><strong>%s</strong><br><span class="muted" style="font-size:.8rem">%s</span></td>`, name, html.EscapeString(notes)); err != nil {
+			return err
+		}
+	} else {
+		if _, err := fmt.Fprintf(w, `<tr><td><strong>%s</strong></td>`, name); err != nil {
 			return err
 		}
 	}
-	if len(entry.CIDRs) > 0 {
-		if _, err := fmt.Fprint(w, `<div class="row"><span>CIDRs</span><span class="stack">`); err != nil {
+
+	// Kind cell
+	if _, err := fmt.Fprintf(w, `<td><span class="badge">%s</span></td>`, kind); err != nil {
+		return err
+	}
+
+	// CIDRs cell — first 2 inline, rest in <details>
+	if _, err := fmt.Fprint(w, `<td>`); err != nil {
+		return err
+	}
+	if len(entry.CIDRs) == 0 {
+		if _, err := fmt.Fprint(w, `<span class="muted">none</span>`); err != nil {
 			return err
 		}
-		limit := len(entry.CIDRs)
-		if limit > 4 {
-			limit = 4
+	} else {
+		visible := entry.CIDRs
+		hidden := []string(nil)
+		if len(visible) > 2 {
+			visible, hidden = entry.CIDRs[:2], entry.CIDRs[2:]
 		}
-		for i := 0; i < limit; i++ {
-			if _, err := fmt.Fprintf(w, `<code>%s</code>`, html.EscapeString(entry.CIDRs[i])); err != nil {
+		for _, cidr := range visible {
+			if _, err := fmt.Fprintf(w, `<code style="display:block;margin-bottom:.2rem">%s</code>`, html.EscapeString(cidr)); err != nil {
 				return err
 			}
 		}
-		if len(entry.CIDRs) > limit {
-			if _, err := fmt.Fprintf(w, `<details><summary class="badge">+%d more CIDRs</summary><div class="stack" style="margin-top:.5rem">`, len(entry.CIDRs)-limit); err != nil {
+		if len(hidden) > 0 {
+			if _, err := fmt.Fprintf(w, `<details style="margin-top:.2rem"><summary class="badge" style="cursor:pointer">+%d more</summary>`, len(hidden)); err != nil {
 				return err
 			}
-			for _, cidr := range entry.CIDRs[limit:] {
-				if _, err := fmt.Fprintf(w, `<code>%s</code>`, html.EscapeString(cidr)); err != nil {
+			for _, cidr := range hidden {
+				if _, err := fmt.Fprintf(w, `<code style="display:block;margin-top:.2rem">%s</code>`, html.EscapeString(cidr)); err != nil {
 					return err
 				}
 			}
-			if _, err := fmt.Fprint(w, `</div></details>`); err != nil {
+			if _, err := fmt.Fprint(w, `</details>`); err != nil {
 				return err
 			}
 		}
-		if _, err := fmt.Fprint(w, `</span></div>`); err != nil {
-			return err
-		}
 	}
-	_, err := fmt.Fprint(w, `</div></div>`)
+	if _, err := fmt.Fprintf(w, `<span class="muted" style="font-size:.75rem;display:block;margin-top:.2rem">%d total</span></td>`, entry.CIDRCount); err != nil {
+		return err
+	}
+
+	// Protection cell
+	protBadge := `<span class="badge healthy">no hard ban</span>`
+	if entry.HardBanAllowed {
+		protBadge = `<span class="badge warning">hard ban allowed</span>`
+	}
+	if _, err := fmt.Fprintf(w, `<td>%s</td>`, protBadge); err != nil {
+		return err
+	}
+
+	// Allowlist cell
+	cfSync := html.EscapeString(valueOrFallback(entry.CloudflareWhitelist, "not synced"))
+	csSync := html.EscapeString(valueOrFallback(entry.CrowdSecAllowlist, "not synced"))
+	if _, err := fmt.Fprintf(w, `<td><span class="muted" style="font-size:.8rem">CF: %s</span><br><span class="muted" style="font-size:.8rem">CS: %s</span></td>`, cfSync, csSync); err != nil {
+		return err
+	}
+
+	// Status cell
+	_, err := fmt.Fprintf(w, `<td><span class="badge %s">%s</span></td></tr>`,
+		html.EscapeString(statusClass),
+		html.EscapeString(trustedNetworkStatusLabel(entry.Status)),
+	)
 	return err
 }
 
