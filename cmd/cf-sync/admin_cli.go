@@ -3,10 +3,7 @@ package main
 import (
 	"context"
 	"crypto/rand"
-	"crypto/sha256"
-	"crypto/subtle"
 	"encoding/base64"
-	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -96,8 +93,10 @@ func adminResetPassword(ctx context.Context, store *sqlite.SetupStore, audit ui.
 		fmt.Fprintf(os.Stderr, "Error: set password_change_required: %v\n", err)
 		os.Exit(1)
 	}
-	if _, err := store.IncrementAuthEpoch(ctx); err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: increment auth epoch: %v\n", err)
+	if _, epochErr := store.IncrementAuthEpoch(ctx); epochErr != nil {
+		fmt.Fprintf(os.Stderr, "Warning: increment auth epoch: %v\n", epochErr)
+	} else if audit != nil {
+		audit.Record("admin_sessions_invalidated", map[string]string{"actor": "cli", "source": "admin_cli"})
 	}
 
 	if audit != nil {
@@ -174,7 +173,6 @@ func adminRecover(ctx context.Context, store *sqlite.SetupStore, audit ui.AuditS
 		os.Exit(1)
 	}
 
-	// Decode and verify using constant-time SHA-256 comparison.
 	ok, verifyErr := verifyRecoveryKey(string(input), storedHash)
 	if verifyErr != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", verifyErr)
@@ -201,7 +199,12 @@ func generateAndStoreRecoveryKey(ctx context.Context, store *sqlite.SetupStore) 
 		fmt.Fprintf(os.Stderr, "Error: generate recovery key: %v\n", err)
 		os.Exit(1)
 	}
-	hash := hex.EncodeToString(sha256sum(key))
+	encoded := base64.RawURLEncoding.EncodeToString(key)
+	hash, err := auth.HashPassword(encoded)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: hash recovery key: %v\n", err)
+		os.Exit(1)
+	}
 	if err := store.SetRecoveryKeyHash(ctx, hash); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: store recovery key hash: %v\n", err)
 		os.Exit(1)
@@ -209,19 +212,10 @@ func generateAndStoreRecoveryKey(ctx context.Context, store *sqlite.SetupStore) 
 	return key
 }
 
-// verifyRecoveryKey checks whether the base64-encoded candidate matches storedHexHash.
-// Returns true only when the constant-time SHA-256 comparison succeeds.
-func verifyRecoveryKey(candidate string, storedHexHash string) (bool, error) {
-	raw, err := base64.RawURLEncoding.DecodeString(strings.TrimSpace(candidate))
-	if err != nil {
-		return false, fmt.Errorf("invalid recovery key format")
-	}
-	inputHash := sha256sum(raw)
-	storedBytes, err := hex.DecodeString(storedHexHash)
-	if err != nil {
-		return false, fmt.Errorf("internal key format error")
-	}
-	return subtle.ConstantTimeCompare(inputHash, storedBytes) == 1, nil
+// verifyRecoveryKey checks whether the candidate matches the stored bcrypt hash.
+// bcrypt.CompareHashAndPassword is already constant-time; no additional hardening needed.
+func verifyRecoveryKey(candidate string, storedHash string) (bool, error) {
+	return auth.VerifyPassword(storedHash, strings.TrimSpace(candidate)), nil
 }
 
 func printRecoveryKey(key []byte, rotated bool) {
@@ -238,11 +232,6 @@ func printRecoveryKey(key []byte, rotated bool) {
 	fmt.Println("Store this key in a secure location (password manager, safe).")
 	fmt.Println("It cannot be recovered from the database — only its hash is stored.")
 	fmt.Println("Use: sudo cf-sync -mode admin recover")
-}
-
-func sha256sum(b []byte) []byte {
-	h := sha256.Sum256(b)
-	return h[:]
 }
 
 func printAdminUsage() {

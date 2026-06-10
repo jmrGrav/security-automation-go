@@ -4,24 +4,27 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
-	"encoding/hex"
 	"testing"
 
 	"github.com/jm/security-automation-go/internal/storage/sqlite"
+	"github.com/jm/security-automation-go/internal/ui/auth"
 )
 
-// TestVerifyRecoveryKey_RoundTrip tests the generate → encode → hash → verify path.
+// TestVerifyRecoveryKey_RoundTrip tests the generate → encode → bcrypt → verify path.
 func TestVerifyRecoveryKey_RoundTrip(t *testing.T) {
 	raw := make([]byte, adminRecoveryKeyBytes)
 	if _, err := rand.Read(raw); err != nil {
 		t.Fatalf("rand.Read: %v", err)
 	}
 	encoded := base64.RawURLEncoding.EncodeToString(raw)
-	storedHash := hex.EncodeToString(sha256sum(raw))
-
-	ok, err := verifyRecoveryKey(encoded, storedHash)
+	storedHash, err := auth.HashPassword(encoded)
 	if err != nil {
-		t.Fatalf("verifyRecoveryKey returned error: %v", err)
+		t.Fatalf("HashPassword: %v", err)
+	}
+
+	ok, verifyErr := verifyRecoveryKey(encoded, storedHash)
+	if verifyErr != nil {
+		t.Fatalf("verifyRecoveryKey returned error: %v", verifyErr)
 	}
 	if !ok {
 		t.Error("expected valid key to verify successfully")
@@ -34,7 +37,11 @@ func TestVerifyRecoveryKey_WrongKey(t *testing.T) {
 	if _, err := rand.Read(raw); err != nil {
 		t.Fatalf("rand.Read: %v", err)
 	}
-	storedHash := hex.EncodeToString(sha256sum(raw))
+	encoded := base64.RawURLEncoding.EncodeToString(raw)
+	storedHash, err := auth.HashPassword(encoded)
+	if err != nil {
+		t.Fatalf("HashPassword: %v", err)
+	}
 
 	// A different key — same length but different bytes.
 	other := make([]byte, adminRecoveryKeyBytes)
@@ -43,9 +50,9 @@ func TestVerifyRecoveryKey_WrongKey(t *testing.T) {
 	}
 	wrongEncoded := base64.RawURLEncoding.EncodeToString(other)
 
-	ok, err := verifyRecoveryKey(wrongEncoded, storedHash)
-	if err != nil {
-		t.Fatalf("unexpected error for wrong key: %v", err)
+	ok, verifyErr := verifyRecoveryKey(wrongEncoded, storedHash)
+	if verifyErr != nil {
+		t.Fatalf("unexpected error for wrong key: %v", verifyErr)
 	}
 	if ok {
 		t.Error("expected wrong key to be rejected")
@@ -69,7 +76,10 @@ func TestVerifyRecoveryKey_RotateInvalidatesOld(t *testing.T) {
 		t.Fatalf("rand.Read: %v", err)
 	}
 	oldEncoded := base64.RawURLEncoding.EncodeToString(oldRaw)
-	oldHash := hex.EncodeToString(sha256sum(oldRaw))
+	oldHash, err := auth.HashPassword(oldEncoded)
+	if err != nil {
+		t.Fatalf("HashPassword old: %v", err)
+	}
 	if err := store.SetRecoveryKeyHash(ctx, oldHash); err != nil {
 		t.Fatalf("SetRecoveryKeyHash: %v", err)
 	}
@@ -80,7 +90,10 @@ func TestVerifyRecoveryKey_RotateInvalidatesOld(t *testing.T) {
 		t.Fatalf("rand.Read new: %v", err)
 	}
 	newEncoded := base64.RawURLEncoding.EncodeToString(newRaw)
-	newHash := hex.EncodeToString(sha256sum(newRaw))
+	newHash, err := auth.HashPassword(newEncoded)
+	if err != nil {
+		t.Fatalf("HashPassword new: %v", err)
+	}
 	if err := store.SetRecoveryKeyHash(ctx, newHash); err != nil {
 		t.Fatalf("SetRecoveryKeyHash (rotate): %v", err)
 	}
