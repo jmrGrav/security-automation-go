@@ -98,12 +98,63 @@ func TestDetectCloudflare_BothPresent(t *testing.T) {
 
 func TestDetectSQLite_DBExists(t *testing.T) {
 	origFile := fileExists
-	fileExists = func(path string) bool { return strings.HasSuffix(path, "state.db") }
+	fileExists = func(path string) bool { return strings.HasSuffix(path, "runtime.db") }
 	defer func() { fileExists = origFile }()
 
 	r := DetectSQLite(Config{StateDir: "/var/lib/security-automation-go"})
 	if !r.Healthy {
-		t.Error("expected healthy when DB exists")
+		t.Error("expected healthy when runtime.db exists")
+	}
+}
+
+func TestDetectSQLite_UsesRuntimeDB(t *testing.T) {
+	var checkedPath string
+	origFile := fileExists
+	fileExists = func(path string) bool { checkedPath = path; return true }
+	defer func() { fileExists = origFile }()
+
+	DetectSQLite(Config{StateDir: "/var/lib/security-automation-go"})
+	if !strings.HasSuffix(checkedPath, "runtime.db") {
+		t.Errorf("expected to check runtime.db, got %q", checkedPath)
+	}
+}
+
+func TestDetectOpenResty_InstalledAndRunning(t *testing.T) {
+	origBin := binaryInstalled
+	origSvc := systemdServiceActive
+	binaryInstalled = func(string) bool { return true }
+	systemdServiceActive = func(string) bool { return true }
+	defer func() {
+		binaryInstalled = origBin
+		systemdServiceActive = origSvc
+	}()
+
+	r := DetectOpenResty(Config{})
+	if !r.Healthy {
+		t.Error("expected healthy when binary installed and service active")
+	}
+	if !r.Installed {
+		t.Error("expected installed=true")
+	}
+}
+
+func TestDetectOpenResty_InstalledNoEventsFile_StillHealthy(t *testing.T) {
+	origBin := binaryInstalled
+	origSvc := systemdServiceActive
+	binaryInstalled = func(string) bool { return true }
+	systemdServiceActive = func(string) bool { return true }
+	defer func() {
+		binaryInstalled = origBin
+		systemdServiceActive = origSvc
+	}()
+
+	// Events file not configured — should not affect Healthy status.
+	r := DetectOpenResty(Config{OpenRestyEventsFile: ""})
+	if !r.Healthy {
+		t.Error("expected healthy even when events file not configured")
+	}
+	if r.Configured {
+		t.Error("expected configured=false when events file path is empty")
 	}
 }
 

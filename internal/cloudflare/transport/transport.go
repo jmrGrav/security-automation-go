@@ -120,7 +120,7 @@ func ExecuteAndDecode[T any](ctx context.Context, t *Transport, method, path str
 	}
 
 	var env ResponseEnvelope[T]
-	if err := decode.DecodeStrict(raw, &env); err != nil {
+	if err := decode.Decode(raw, &env); err != nil {
 		return out, nil, apperr.Wrap(op, err)
 	}
 
@@ -159,7 +159,7 @@ func ExecuteGraphQL[T any](ctx context.Context, t *Transport, query string, vari
 	}
 
 	var resp GraphQLResponse[T]
-	if err := decode.DecodeStrict(raw, &resp); err != nil {
+	if err := decode.Decode(raw, &resp); err != nil {
 		return out, apperr.Wrap(op, err)
 	}
 	if len(resp.Errors) > 0 {
@@ -179,7 +179,7 @@ func MutateAndDecode[T any](ctx context.Context, t *Transport, method, path stri
 	}
 
 	var env ResponseEnvelope[T]
-	if err := decode.DecodeStrict(raw, &env); err != nil {
+	if err := decode.Decode(raw, &env); err != nil {
 		return out, "", apperr.Wrap(op, err)
 	}
 
@@ -190,11 +190,11 @@ func MutateAndDecode[T any](ctx context.Context, t *Transport, method, path stri
 	return env.Result, respETag, nil
 }
 
-// DecodeEnvelope decodes the outer Cloudflare envelope without strict result checking.
+// DecodeEnvelope decodes the outer Cloudflare envelope without strict field checking.
 // This is useful when the result type is variable or we only care about ResultInfo.
 func DecodeEnvelope(raw []byte, target any) error {
 	const op = "cloudflare.transport.DecodeEnvelope"
-	return decode.DecodeStrict(raw, target)
+	return decode.Decode(raw, target)
 }
 
 // RateLimitHook implements httpclient.RateLimitHook for Cloudflare.
