@@ -60,8 +60,29 @@ echo "[SMOKE] Pre-flight checks..."
 # 1. Standard test suite must pass first.
 echo "[SMOKE] Running go test ./... (must be green before live smoke)..."
 cd "$ROOT_DIR"
-GOTOOLCHAIN=go1.25.0 go test ./... -count=1 -quiet 2>&1 | tail -5
+GOTOOLCHAIN=go1.25.0 go test ./... -count=1 2>&1 | grep -E "^(ok|FAIL|---)" | tail -10
 echo "[SMOKE] ✓ Unit tests passed."
+
+# 2. Backend status probe (pre-flight only — full check is in spec 09)
+echo "[SMOKE] Probing backend DB status..."
+BACKEND_JSON=$(SECURITY_AUTOMATION_SMOKE_LIVE=1 SMOKE_STATE_DIR="$STATE_DIR" \
+  "$ROOT_DIR/scripts/smoke-backend-status.sh" "$STATE_DIR" 2>/dev/null || echo '{"error":"probe failed"}')
+if echo "$BACKEND_JSON" | grep -q '"error":null'; then
+  echo "[SMOKE] ✓ DB probe: credentials present in $(echo "$BACKEND_JSON" | grep -o '"db_path":"[^"]*"' | head -1)"
+  # Print presence manifest (no values, no decryption)
+  echo "$BACKEND_JSON" | python3 -c "
+import sys,json
+d=json.load(sys.stdin)
+creds=d.get('credentials',{})
+for k,v in creds.items():
+    status='PRESENT' if v['present'] else 'MISSING'
+    enabled=' (disabled)' if v['present'] and not v['enabled'] else ''
+    print(f'  [{status}]{enabled} {k}')
+" 2>/dev/null || true
+else
+  echo "[SMOKE] WARNING: DB probe failed or DB not accessible: $BACKEND_JSON"
+  echo "[SMOKE]          Integrity tests will be skipped (spec 09)."
+fi
 
 # 2. Binary must be built.
 echo "[SMOKE] Building cf-sync binary..."
@@ -160,6 +181,20 @@ cat > "$REPORT_FILE" << REPORT
 - Health ↔ Cloudflare Diff token status
 - Provider page key masking
 - OpenResty without events.jsonl ≠ critical failure
+
+## Runtime Integrity Checks (spec 09)
+
+Three-layer verification — DB truth ↔ /health/json ↔ UI:
+
+| Provider | Credential Key | DB Probe |
+|----------|---------------|----------|
+| Cloudflare | cloudflare.api_token | $(echo "$BACKEND_JSON" | python3 -c "import sys,json; d=json.load(sys.stdin); c=d.get('credentials',{}); v=c.get('cloudflare.api_token',{}); print('PRESENT' if v.get('present') else 'MISSING')" 2>/dev/null || echo "N/A") |
+| CrowdSec | crowdsec.lapi_key | $(echo "$BACKEND_JSON" | python3 -c "import sys,json; d=json.load(sys.stdin); c=d.get('credentials',{}); v=c.get('crowdsec.lapi_key',{}); print('PRESENT' if v.get('present') else 'MISSING')" 2>/dev/null || echo "N/A") |
+| AbuseIPDB | abuseipdb.api_key | $(echo "$BACKEND_JSON" | python3 -c "import sys,json; d=json.load(sys.stdin); c=d.get('credentials',{}); v=c.get('abuseipdb.api_key',{}); print('PRESENT' if v.get('present') else 'MISSING')" 2>/dev/null || echo "N/A") |
+| BetterStack | betterstack.source_token | $(echo "$BACKEND_JSON" | python3 -c "import sys,json; d=json.load(sys.stdin); c=d.get('credentials',{}); v=c.get('betterstack.source_token',{}); print('PRESENT' if v.get('present') else 'MISSING')" 2>/dev/null || echo "N/A") |
+| OpenAI | ai.openai.api_key | $(echo "$BACKEND_JSON" | python3 -c "import sys,json; d=json.load(sys.stdin); c=d.get('credentials',{}); v=c.get('ai.openai.api_key',{}); print('PRESENT' if v.get('present') else 'MISSING')" 2>/dev/null || echo "N/A") |
+| Anthropic | ai.anthropic.api_key | $(echo "$BACKEND_JSON" | python3 -c "import sys,json; d=json.load(sys.stdin); c=d.get('credentials',{}); v=c.get('ai.anthropic.api_key',{}); print('PRESENT' if v.get('present') else 'MISSING')" 2>/dev/null || echo "N/A") |
+| Gemini | ai.gemini.api_key | $(echo "$BACKEND_JSON" | python3 -c "import sys,json; d=json.load(sys.stdin); c=d.get('credentials',{}); v=c.get('ai.gemini.api_key',{}); print('PRESENT' if v.get('present') else 'MISSING')" 2>/dev/null || echo "N/A") |
 
 ## Security Checks
 

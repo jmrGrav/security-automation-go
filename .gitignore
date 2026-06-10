@@ -47,3 +47,10 @@ go.work
 go.work.sum
 .codex/
 .claude/worktrees/
+
+# Smoke tests — local only, never committed
+tests/smoke/node_modules/
+tests/smoke/dist/
+tests/smoke/playwright-report/
+tests/smoke/test-results/
+SMOKE_TEST_REPORT.md

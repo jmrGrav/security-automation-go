@@ -189,8 +189,8 @@ manager or physical safe:
 sudo cf-sync -mode admin recovery-key create
 ```
 
-The key (43-character base64) is printed to stdout once. Only its SHA-256 hash
-is stored in the database. If the key is lost, rotate it (see below).
+The key (43-character base64) is printed to stdout once. Only its bcrypt hash
+(cost 12) is stored in the database. If the key is lost, rotate it (see below).
 
 ### Rotate the recovery key
 
@@ -216,11 +216,62 @@ set. Log in with the temporary password and change it immediately.
 ### Security invariants
 
 - Admin passwords are stored as bcrypt (cost 12). Never in plaintext.
-- Recovery key: only SHA-256 hash stored in SQLite. Plaintext shown once, never again.
+- Recovery key: only bcrypt hash (cost 12) stored in SQLite. Plaintext shown once, never again.
 - `show-password`, `export-password`, and `decrypt-password` are not implemented and must not be added.
 - All admin CLI operations require root (`os.Getuid() == 0`).
 - Session invalidation via `auth_epoch`: the running UI server detects the epoch
   change on the next session check (no restart required).
+
+## Pre-release smoke tests (v1.6.0+)
+
+These tests run on your local machine against a live instance. They are **never run in CI**.
+
+### What they verify
+
+- Browser login, session cookie attributes, logout
+- All authenticated pages render (200, no panic, no JS errors)
+- No raw API tokens leak into any page
+- Cross-page coherence: Health ↔ Dashboard ↔ Cloudflare Diff ↔ Providers
+- Admin recovery CLI (with explicit confirmation flag)
+
+### How to run
+
+```bash
+# 1. Read admin password without logging it
+read -rsp "Admin password: " SMOKE_ADMIN_PASSWORD && export SMOKE_ADMIN_PASSWORD
+
+# 2. Run (requires a live cf-sync with UI_ENABLED=1 on 127.0.0.1:9091)
+SECURITY_AUTOMATION_SMOKE_LIVE=1 ./scripts/smoke-ui-runtime.sh
+```
+
+The script:
+1. Runs `go test ./...` as a pre-flight gate
+2. Builds the binary
+3. Checks UI reachability
+4. Installs Playwright + Chromium (first run only)
+5. Runs all browser smoke tests
+6. Writes `SMOKE_TEST_REPORT.md` (gitignored)
+
+### Admin CLI smoke (destructive — explicit opt-in required)
+
+```bash
+SECURITY_AUTOMATION_SMOKE_LIVE=1 \
+SMOKE_ADMIN_RESET_CONFIRM=1 \
+SMOKE_ADMIN_PASSWORD=... \
+./scripts/smoke-ui-runtime.sh
+```
+
+`SMOKE_ADMIN_RESET_CONFIRM=1` enables tests that rotate the recovery key and reset
+the admin password. These modify the database. Only run if you know the current
+admin password and can re-login after the test.
+
+### Security constraints
+
+- The admin password is read from `SMOKE_ADMIN_PASSWORD` — never logged or printed
+- Screenshots on failure go to `/tmp/security-automation-smoke/` — **never committed**
+- `SMOKE_TEST_REPORT.md` is gitignored — **never committed**
+- No provider tokens, credentials, or DB content are included in the report
+- Tests are read-only for all providers except the login/logout session
 
 ## Release and cutover checklist
 
