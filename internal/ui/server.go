@@ -18,6 +18,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	ai "github.com/jm/security-automation-go/internal/ai"
@@ -45,6 +46,10 @@ type SetupStorer interface {
 	MarkComplete(ctx context.Context) error
 	GetSetting(ctx context.Context, key string) (string, bool, error)
 	SetSetting(ctx context.Context, key, value string) error
+	GetAuthEpoch(ctx context.Context) (int64, error)
+	IncrementAuthEpoch(ctx context.Context) (int64, error)
+	GetPasswordChangeRequired(ctx context.Context) (bool, error)
+	SetPasswordChangeRequired(ctx context.Context, required bool) error
 }
 
 type CredentialStorer interface {
@@ -81,6 +86,7 @@ type Server struct {
 	mux                 *http.ServeMux
 	sessions            map[string]time.Time
 	mu                  sync.Mutex
+	authEpoch           atomic.Int64
 	sessionMax          int
 	lastSessionSweep    time.Time
 	sessionSweepEvery   time.Duration
@@ -1105,12 +1111,17 @@ func (s *Server) forcePasswordChangeMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		// Check if bootstrap password is still active
+		// Force password change: bootstrap (no hash set) or CLI reset flag.
 		isBootstrap := s.isBootstrapActive()
 		if isBootstrap {
-			// Force password change
 			http.Redirect(w, r, "/ui/settings/password/change", http.StatusFound)
 			return
+		}
+		if s.setupStore != nil {
+			if required, err := s.setupStore.GetPasswordChangeRequired(r.Context()); err == nil && required {
+				http.Redirect(w, r, "/ui/settings/password/change", http.StatusFound)
+				return
+			}
 		}
 
 		next.ServeHTTP(w, r)

@@ -43,6 +43,7 @@ var knownTables = map[string]struct{}{
 	"credential_meta":              {},
 	"setup_state":                  {},
 	"ui_settings":                  {},
+	"admin_recovery_keys":          {},
 }
 
 // DB manages a scoped SQLite connection with migrations.
@@ -399,6 +400,19 @@ func (s *DB) runMigrations() error {
 					key TEXT PRIMARY KEY,
 					value TEXT NOT NULL,
 					updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+				);
+			`,
+		},
+		{
+			Version:     17,
+			Description: "Admin recovery keys",
+			SQL: `
+				CREATE TABLE IF NOT EXISTS admin_recovery_keys (
+					id INTEGER PRIMARY KEY CHECK (id = 1),
+					key_hash TEXT NOT NULL,
+					created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+					rotated_at TIMESTAMP,
+					last_used_at TIMESTAMP
 				);
 			`,
 		},

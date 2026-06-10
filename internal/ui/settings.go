@@ -99,12 +99,22 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.mu.Lock()
-	s.sessions = make(map[string]time.Time)
-	s.mu.Unlock()
+	// Clear forced-change flag set by CLI reset/recover, then invalidate all sessions.
+	if s.setupStore != nil {
+		_ = s.setupStore.SetPasswordChangeRequired(r.Context(), false)
+		if newEpoch, err := s.setupStore.IncrementAuthEpoch(r.Context()); err == nil {
+			s.invalidateAllSessions(newEpoch)
+		} else {
+			s.invalidateAllSessions(s.authEpoch.Load() + 1)
+		}
+	} else {
+		s.mu.Lock()
+		s.sessions = make(map[string]time.Time)
+		s.mu.Unlock()
+	}
 
 	if s.audit != nil {
-		s.audit.Record("password_changed", map[string]string{})
+		s.audit.Record("admin_password_changed", map[string]string{})
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -153,5 +163,23 @@ func (s *Server) getSession(r *http.Request) (string, bool) {
 		return "", false
 	}
 
+	// Epoch check: if a CLI reset has bumped auth_epoch in the DB since we last
+	// saw it, flush all in-memory sessions so the operator must re-login.
+	if s.setupStore != nil {
+		dbEpoch, err := s.setupStore.GetAuthEpoch(r.Context())
+		if err == nil && dbEpoch > s.authEpoch.Load() {
+			s.invalidateAllSessions(dbEpoch)
+			return "", false
+		}
+	}
+
 	return cookie.Value, true
+}
+
+// invalidateAllSessions clears all in-memory sessions and updates the cached epoch.
+func (s *Server) invalidateAllSessions(newEpoch int64) {
+	s.mu.Lock()
+	s.sessions = make(map[string]time.Time)
+	s.mu.Unlock()
+	s.authEpoch.Store(newEpoch)
 }

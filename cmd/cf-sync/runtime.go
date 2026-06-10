@@ -73,6 +73,12 @@ func runCFSync(configPath, mode string, dryRun bool, format string, metricsAddr 
 		os.Exit(1)
 	}
 
+	// Admin commands need only the database — short-circuit before the full orchestrator.
+	if mode == "admin" {
+		runAdminCLI(context.Background(), cfg.StateDir, args)
+		return
+	}
+
 	ctx := context.Background()
 	otelShutdown, err := tracing.InitTracer(ctx, tracing.Config{
 		Enabled:      cfg.Global.Tracing.Enabled,

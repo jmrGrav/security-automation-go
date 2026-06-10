@@ -161,6 +161,67 @@ API server) is listening:
 ss -tlnp | grep 9092
 ```
 
+## Admin password reset and account recovery
+
+All admin commands require local root access (`sudo`).
+
+### Reset the admin password (without recovery key)
+
+Use when you know root access is available and want to force a password change:
+
+```bash
+sudo cf-sync -mode admin reset-password
+```
+
+This generates a temporary password, prints it to stdout once, sets
+`password_change_required=true`, and invalidates all active UI sessions by
+incrementing the auth epoch. The next UI login must use the temporary password;
+the UI will immediately require setting a new permanent password.
+
+The temporary password is **never** written to journald, SQLite, or log files.
+
+### Create a recovery key
+
+Run once, immediately after initial setup, and store the key in a password
+manager or physical safe:
+
+```bash
+sudo cf-sync -mode admin recovery-key create
+```
+
+The key (43-character base64) is printed to stdout once. Only its SHA-256 hash
+is stored in the database. If the key is lost, rotate it (see below).
+
+### Rotate the recovery key
+
+Replaces the current recovery key with a new one. The old key is immediately
+invalidated:
+
+```bash
+sudo cf-sync -mode admin recovery-key rotate
+```
+
+### Recover access using the recovery key
+
+When the admin password is lost and you have the recovery key:
+
+```bash
+sudo cf-sync -mode admin recover
+```
+
+You will be prompted for the recovery key (input is masked). On success, a new
+temporary password is printed to stdout once and `password_change_required` is
+set. Log in with the temporary password and change it immediately.
+
+### Security invariants
+
+- Admin passwords are stored as bcrypt (cost 12). Never in plaintext.
+- Recovery key: only SHA-256 hash stored in SQLite. Plaintext shown once, never again.
+- `show-password`, `export-password`, and `decrypt-password` are not implemented and must not be added.
+- All admin CLI operations require root (`os.Getuid() == 0`).
+- Session invalidation via `auth_epoch`: the running UI server detects the epoch
+  change on the next session check (no restart required).
+
 ## Release and cutover checklist
 
 Use [RELEASE_CUTOVER_CHECKLIST.md](RELEASE_CUTOVER_CHECKLIST.md) for the final operator gate.
