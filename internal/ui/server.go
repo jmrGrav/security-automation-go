@@ -1029,15 +1029,6 @@ func maskedProviderValue(cfgValue string, sp SecretProvider, key string) string 
 	return redactValue(v)
 }
 
-func (s *Server) runtimeStatus() RuntimeStatusView {
-	return RuntimeStatusView{
-		CrowdSec:   crowdSecStatus(s.cfg.CrowdSec.DecisionsLog),
-		OpenResty:  openRestyStatus(s.cfg.OpenResty.EventsFile),
-		Cloudflare: cloudflareStatus(s.cfSentinelToken(), s.cfZoneIDFromSetup(context.Background()), s.cfg.Cloudflare.MutationsEnabled),
-		UI:         uiStatus(s.cfg.UI.Enabled, s.cfg.UI.Addr),
-	}
-}
-
 func crowdSecStatus(decisionsLog string) string {
 	if strings.TrimSpace(decisionsLog) == "" {
 		return "CrowdSec unavailable / read-only fallback"
@@ -1046,16 +1037,6 @@ func crowdSecStatus(decisionsLog string) string {
 		return "CrowdSec unavailable / read-only fallback"
 	}
 	return "CrowdSec ready"
-}
-
-func openRestyStatus(eventsFile string) string {
-	if strings.TrimSpace(eventsFile) == "" {
-		return "OpenResty unavailable / nginx log mode"
-	}
-	if _, err := os.Stat(eventsFile); err != nil {
-		return "OpenResty unavailable / nginx log mode"
-	}
-	return "OpenResty ready"
 }
 
 func cloudflareStatus(token, zoneID string, live bool) string {
