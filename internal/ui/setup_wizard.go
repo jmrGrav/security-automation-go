@@ -754,6 +754,8 @@ func (s *Server) handleSetupStep9Post(w http.ResponseWriter, r *http.Request) {
 			_ = s.setupStore.SetSetting(r.Context(), "mutations_enabled", "true")
 		}
 		_ = s.setupStore.MarkComplete(r.Context())
+		s.logger.Info("setup complete — restart cf-sync to enable background orchestration",
+			"action", "systemctl restart cf-sync")
 	}
 	http.Redirect(w, r, "/setup/complete", http.StatusFound)
 }
