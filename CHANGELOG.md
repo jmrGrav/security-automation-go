@@ -2,6 +2,47 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased] — cookie Secure hardening
+
+### Summary
+
+Structural fix for CWE-614 / CodeQL `go/cookie-secure-not-set`. The
+conditional `secureCookie(r)` helper (returning `false` on plain HTTP) has been
+replaced by two single-emitter methods — `setSessionCookie` and
+`clearSessionCookie` — that unconditionally set `Secure: true`. This is safe
+because the UI binds to `127.0.0.1` only, and both `http://localhost` and
+`http://127.0.0.1` are "potentially trustworthy origins" under the W3C Secure
+Contexts spec (§3.2); modern browsers (Chrome, Firefox 84+) store and send
+`Secure` cookies over the loopback interface without HTTPS.
+
+### Security
+
+- **CWE-614 eliminated structurally** — `Secure: true` is now a compile-time
+  constant in the single pair of cookie-emitting methods. Future call sites
+  cannot accidentally omit it; CodeQL can no longer rediscover the pattern on
+  new files.
+- **`secureCookie(r)` removed** — the conditional that previously returned
+  `false` on plain-HTTP localhost no longer exists.
+- **`sessionCookie(r, token)` removed** — replaced by `setSessionCookie(w, token)`;
+  the `http.SetCookie` call is now internal to the method and not visible at
+  call sites.
+
+### Files changed
+
+- `internal/ui/server.go` — replaced `sessionCookie` + `secureCookie` with
+  `setSessionCookie` / `clearSessionCookie`; logout path updated
+- `internal/ui/login.go` — two call sites updated
+- `internal/ui/setup_wizard.go` — call site updated
+- `internal/ui/server_test.go` — replaced `TestServer_LoginSetsHttpOnlyCookie`
+  + `TestServer_LoginSetsSecureCookieOverHTTPS` with
+  `TestServer_SessionCookieAttributes` (table-driven: plain-HTTP, TLS, reverse-proxy)
+  and `TestServer_LogoutClearsCookieSecurely`
+- `internal/ui/setup_wizard_test.go` — added
+  `TestSetupWizard_Step1SessionCookieIsSecure`
+- `docs/security/UI_SECURITY.md` — documentation updated
+
+---
+
 ## [v1.5.5] — 2026-06-10
 
 ### Summary

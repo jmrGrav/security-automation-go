@@ -36,55 +36,99 @@ func TestServer_RequiresSessionCookie(t *testing.T) {
 	}
 }
 
-func TestServer_LoginSetsHttpOnlyCookie(t *testing.T) {
-	srv, _, secretPath := newTestServer(t, nil)
-	_ = secretPath
+// TestServer_SessionCookieAttributes verifies the full security attribute set on
+// every login path: HttpOnly, SameSite=Strict, and Secure=true.
+// Secure is always true regardless of transport because the UI is bound to
+// 127.0.0.1 only, and both http://localhost and http://127.0.0.1 are treated
+// as "potentially trustworthy" by modern browsers (W3C Secure Contexts §3.2,
+// Chrome, Firefox 84+), so the Secure attribute is honoured on loopback
+// without HTTPS.
+func TestServer_SessionCookieAttributes(t *testing.T) {
+	cases := []struct {
+		name string
+		tls  bool
+		xfwd string
+	}{
+		{"plain_http_localhost", false, ""},
+		{"https_direct", true, ""},
+		{"reverse_proxy_https", false, "https"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv, _, _ := newTestServer(t, nil)
+			form := strings.NewReader("password=test-password-123!@#")
+			req := httptest.NewRequest(http.MethodPost, "/login", form)
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			if tc.tls {
+				req.TLS = &tls.ConnectionState{}
+			}
+			if tc.xfwd != "" {
+				req.Header.Set("X-Forwarded-Proto", tc.xfwd)
+			}
+			rr := httptest.NewRecorder()
+			srv.Handler().ServeHTTP(rr, req)
 
-	form := strings.NewReader("password=test-password-123!@#")
-	req := httptest.NewRequest(http.MethodPost, "/login", form)
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	rr := httptest.NewRecorder()
-	srv.Handler().ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusFound {
-		t.Fatalf("expected login redirect, got %d", rr.Code)
-	}
-	cookies := rr.Result().Cookies()
-	if len(cookies) == 0 {
-		t.Fatal("expected session cookie")
-	}
-	c := cookies[0]
-	if !c.HttpOnly {
-		t.Fatal("session cookie must be HttpOnly")
-	}
-	if c.SameSite != http.SameSiteStrictMode {
-		t.Fatalf("expected SameSite=Strict, got %v", c.SameSite)
-	}
-	if c.Secure {
-		t.Fatal("session cookie must not be Secure on plain HTTP")
+			if rr.Code != http.StatusFound {
+				t.Fatalf("expected login redirect, got %d", rr.Code)
+			}
+			cookies := rr.Result().Cookies()
+			if len(cookies) == 0 {
+				t.Fatal("expected session cookie")
+			}
+			c := cookies[0]
+			if !c.HttpOnly {
+				t.Fatal("session cookie must be HttpOnly")
+			}
+			if c.SameSite != http.SameSiteStrictMode {
+				t.Fatalf("expected SameSite=Strict, got %v", c.SameSite)
+			}
+			if !c.Secure {
+				t.Fatal("session cookie must always be Secure (localhost exception applies)")
+			}
+		})
 	}
 }
 
-func TestServer_LoginSetsSecureCookieOverHTTPS(t *testing.T) {
+// TestServer_LogoutClearsCookieSecurely ensures the logout clear-cookie also
+// carries Secure=true so the browser honours the Max-Age:-1 expiry on the
+// same Secure cookie that was originally set.
+func TestServer_LogoutClearsCookieSecurely(t *testing.T) {
 	srv, _, _ := newTestServer(t, nil)
 
+	// Log in first to obtain a valid session cookie.
 	form := strings.NewReader("password=test-password-123!@#")
-	req := httptest.NewRequest(http.MethodPost, "/login", form)
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Set("X-Forwarded-Proto", "https")
-	req.TLS = &tls.ConnectionState{}
-	rr := httptest.NewRecorder()
-	srv.Handler().ServeHTTP(rr, req)
+	loginReq := httptest.NewRequest(http.MethodPost, "/login", form)
+	loginReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	loginRR := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(loginRR, loginReq)
+	if loginRR.Code != http.StatusFound {
+		t.Fatalf("login failed: %d", loginRR.Code)
+	}
+	sessionCookie := loginRR.Result().Cookies()[0]
 
-	if rr.Code != http.StatusFound {
-		t.Fatalf("expected login redirect, got %d", rr.Code)
+	// Submit CSRF-less logout — just check the Set-Cookie header directly.
+	csrfToken := srv.csrfTokenFor(sessionCookie.Value)
+	logoutReq := httptest.NewRequest(http.MethodPost, "/logout", nil)
+	logoutReq.Header.Set("X-CSRF-Token", csrfToken)
+	logoutReq.AddCookie(sessionCookie)
+	logoutRR := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(logoutRR, logoutReq)
+
+	var clearCookie *http.Cookie
+	for _, c := range logoutRR.Result().Cookies() {
+		if c.Name == sessionCookieName {
+			clearCookie = c
+			break
+		}
 	}
-	cookies := rr.Result().Cookies()
-	if len(cookies) == 0 {
-		t.Fatal("expected session cookie")
+	if clearCookie == nil {
+		t.Fatal("expected logout to emit a clear-cookie")
 	}
-	if !cookies[0].Secure {
-		t.Fatal("session cookie must be Secure over HTTPS")
+	if !clearCookie.Secure {
+		t.Fatal("logout clear-cookie must be Secure so the browser expires the matching Secure session cookie")
+	}
+	if clearCookie.MaxAge != -1 {
+		t.Fatalf("expected MaxAge=-1, got %d", clearCookie.MaxAge)
 	}
 }
 

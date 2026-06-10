@@ -17,8 +17,13 @@ explicitly approved actions. It is not a public API.
 ## Authentication
 
 - Authentication is local and mandatory.
-- Session cookies are `HttpOnly` and `SameSite=Lax`.
-- `Secure` is set when the request is already HTTPS.
+- Session cookies are `HttpOnly`, `SameSite=Strict`, and `Secure=true`.
+- `Secure` is unconditionally `true`. Both `http://localhost` and
+  `http://127.0.0.1` qualify as "potentially trustworthy origins" under the
+  W3C Secure Contexts spec (§3.2), so modern browsers (Chrome, Firefox 84+)
+  honour the `Secure` attribute on the loopback interface even without HTTPS.
+  This eliminates CWE-614 / CodeQL `go/cookie-secure-not-set` at the source
+  rather than at each call site.
 - The UI secret lives in `UI_SECRET` and/or `UI_SECRET_FILE`.
 
 ## CSRF
