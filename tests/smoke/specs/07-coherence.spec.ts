@@ -15,7 +15,7 @@ test.describe('Cross-page coherence', () => {
 
   test('health JSON and dashboard CrowdSec status are consistent', async ({ page }) => {
     await page.goto('/health/json');
-    const rawHealthText = (await page.content()).replace(/<[^>]+>/g, '');
+    const rawHealthText = await page.evaluate(() => document.body.innerText);
     let health: Record<string, unknown> = {};
     try {
       health = JSON.parse(rawHealthText);
@@ -40,7 +40,7 @@ test.describe('Cross-page coherence', () => {
 
   test('Cloudflare configured in health → Cloudflare Diff shows Token YES', async ({ page }) => {
     await page.goto('/health/json');
-    const rawText = (await page.content()).replace(/<[^>]+>/g, '');
+    const rawText = await page.evaluate(() => document.body.innerText);
     let health: Record<string, unknown> = {};
     try {
       health = JSON.parse(rawText);

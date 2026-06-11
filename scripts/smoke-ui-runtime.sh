@@ -103,7 +103,7 @@ echo "[SMOKE] ✓ UI is reachable."
 echo "[SMOKE] Installing Playwright dependencies..."
 cd "$SMOKE_DIR"
 npm install --silent
-npx playwright install chromium --quiet 2>/dev/null || true
+npx playwright install chromium
 echo "[SMOKE] ✓ Playwright ready."
 
 # ── Screenshot directory ─────────────────────────────────────────────────────

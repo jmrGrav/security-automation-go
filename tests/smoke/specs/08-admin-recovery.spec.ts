@@ -38,7 +38,10 @@ function runCLI(args: string): { stdout: string; stderr: string } {
       : '';
     return { stdout, stderr };
   } catch (err: any) {
-    return { stdout: err.stdout ?? '', stderr: err.stderr ?? err.message };
+    const fileStderr = existsSync('/tmp/smoke-cli-stderr')
+      ? readFileSync('/tmp/smoke-cli-stderr', 'utf8')
+      : '';
+    return { stdout: err.stdout ?? '', stderr: fileStderr || (err.stderr ?? err.message) };
   }
 }
 

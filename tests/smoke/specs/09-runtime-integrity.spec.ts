@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 import { resolve } from 'path';
 import { login } from '../helpers/session';
 
@@ -46,10 +46,14 @@ interface HealthResponse {
 
 function runBackendStatus(): DBStatus | null {
   try {
-    const output = execSync(
-      `SECURITY_AUTOMATION_SMOKE_LIVE=1 SMOKE_STATE_DIR="${STATE_DIR}" ` +
-      `"${ROOT_DIR}/scripts/smoke-backend-status.sh" "${STATE_DIR}"`,
-      { encoding: 'utf8', timeout: 15_000 }
+    const output = execFileSync(
+      `${ROOT_DIR}/scripts/smoke-backend-status.sh`,
+      [STATE_DIR],
+      {
+        encoding: 'utf8',
+        timeout: 15_000,
+        env: { ...process.env, SECURITY_AUTOMATION_SMOKE_LIVE: '1', SMOKE_STATE_DIR: STATE_DIR },
+      }
     );
     return JSON.parse(output.trim());
   } catch (err: any) {
@@ -114,7 +118,7 @@ test.describe('Runtime integrity', () => {
     await login(page);
     if (!healthData) {
       await page.goto('/health/json');
-      const text = (await page.content()).replace(/<[^>]+>/g, '').trim();
+      const text = (await page.evaluate(() => document.body.innerText)).trim();
       try {
         healthData = JSON.parse(text);
       } catch {
@@ -200,8 +204,9 @@ test.describe('Runtime integrity', () => {
     const gemini = dbStatus.credentials['ai.gemini.api_key']?.present ?? false;
     const anyAIPresent = openai || anthropic || gemini;
 
+    const configuredCount = [openai, anthropic, gemini].filter(Boolean).length;
     console.log(
-      `[integrity] AI providers: openai=${openai}, anthropic=${anthropic}, gemini=${gemini}, ` +
+      `[integrity] AI providers: ${configuredCount}/3 configured in DB, ` +
       `health=${aiHealthCheck?.status ?? 'N/A'} "${aiHealthCheck?.reason ?? ''}"`
     );
 

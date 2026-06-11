@@ -30,13 +30,10 @@ test.describe('Cloudflare Diff', () => {
   test('Cloudflare Diff coherence: if health says configured, diff must not say token missing', async ({ page }) => {
     // Get health JSON first.
     await page.goto('/health/json');
-    const healthText = await page.content();
+    const healthText = await page.evaluate(() => document.body.innerText);
     let healthConfigured = false;
     try {
-      const health = JSON.parse(
-        // health/json renders in <pre> or <body> depending on the handler
-        healthText.replace(/<[^>]+>/g, '')
-      );
+      const health = JSON.parse(healthText);
       healthConfigured = JSON.stringify(health).toLowerCase().includes('"cloudflare"') &&
         !JSON.stringify(health).toLowerCase().includes('not_configured');
     } catch {
