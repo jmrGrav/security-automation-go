@@ -239,6 +239,7 @@ func (s *Server) routes() {
 	s.mux.Handle("GET /health/support-bundle", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleSupportBundle)))))
 	s.mux.Handle("GET /settings/runtime", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleRuntimeSettings)))))
 	s.mux.Handle("POST /settings/runtime", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleRuntimeSettingsPost)))))
+	s.mux.Handle("GET /status/runtime", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleRuntimeStatus)))))
 	s.registerCrowdSecAdminRoutes()
 }
 
