@@ -237,6 +237,9 @@ func (s *Server) routes() {
 	s.mux.Handle("GET /health/json", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleHealthJSON)))))
 	s.mux.Handle("POST /health/diagnostic", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleRunDiagnostic)))))
 	s.mux.Handle("GET /health/support-bundle", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleSupportBundle)))))
+	s.mux.Handle("GET /settings/runtime", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleRuntimeSettings)))))
+	s.mux.Handle("POST /settings/runtime", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleRuntimeSettingsPost)))))
+	s.mux.Handle("GET /status/runtime", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleRuntimeStatus)))))
 	s.registerCrowdSecAdminRoutes()
 }
 

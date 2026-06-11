@@ -34,6 +34,8 @@ templ Layout(title string, csrfToken string) {
 					<a href="/">Dashboard</a>
 					<a href="/providers">Providers</a>
 					<a href="/forensic">Forensic</a>
+					<a href="/settings/runtime">Settings</a>
+					<a href="/status/runtime">Runtime Status</a>
 					<form action="/logout" method="post" style="display:inline">
 						<input type="hidden" name="csrf_token" value={ csrfToken }/>
 						<button type="submit">Logout</button>

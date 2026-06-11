@@ -120,9 +120,11 @@ func newDaemonContext(ctx context.Context, logger *slog.Logger, srv *http.Server
 		sig := <-sigChan
 		logger.Info("received signal, shutting down", "signal", sig)
 
-		shutdownCtx, shutCancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer shutCancel()
-		_ = srv.Shutdown(shutdownCtx)
+		if srv != nil {
+			shutdownCtx, shutCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer shutCancel()
+			_ = srv.Shutdown(shutdownCtx)
+		}
 
 		cancel()
 	}()
@@ -225,10 +227,11 @@ func runDaemonWithLocker(ctx context.Context, logger *slog.Logger, orch *pipelin
 	if ownershipRepo != nil {
 		ownershipLineage = ownership.NewLineageQueryService(ownershipRepo)
 	}
-	srv, err := startAPIServer(logger, collector, j, qStore, orch, p, sm, dm, rec, br, am, fr, adm, evidence, ownershipLineage, metricsAddr)
-	if err != nil {
-		logger.Error("failed to start API server", "error", err)
-		return
+	srv, apiErr := startAPIServer(logger, collector, j, qStore, orch, p, sm, dm, rec, br, am, fr, adm, evidence, ownershipLineage, metricsAddr)
+	if apiErr != nil {
+		logger.Warn("admin API server unavailable — scheduler and security components will continue",
+			"error", apiErr,
+			"hint", "set CF_SYNC_API_TOKEN or CF_SYNC_API_TOKEN_FILE to enable the REST API")
 	}
 
 	if acquireLock {

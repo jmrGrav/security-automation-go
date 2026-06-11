@@ -278,21 +278,11 @@ func applyEnvOverrides(cfg *Config) {
 	if v := os.Getenv("CF_ZONE_ID"); v != "" {
 		cfg.Cloudflare.ZoneID = v
 	}
-	if v := os.Getenv("CLOUDFLARE_MUTATIONS_ENABLED"); v != "" {
-		if enabled, err := strconv.ParseBool(v); err == nil {
-			cfg.Cloudflare.MutationsEnabled = enabled
-		}
-	}
 	if v := os.Getenv("CS_API_KEY"); v != "" {
 		cfg.CrowdSec.APIKey = v
 	}
 	if v := os.Getenv("DECISIONS_LOG"); v != "" {
 		cfg.CrowdSec.DecisionsLog = v
-	}
-	if v := os.Getenv("CS_POLLER_ENABLED"); v != "" {
-		if enabled, err := strconv.ParseBool(v); err == nil {
-			cfg.CrowdSec.PollerEnabled = enabled
-		}
 	}
 	if v := os.Getenv("CS_POLLER_LAPI_URL"); v != "" {
 		cfg.CrowdSec.PollerLAPIURL = v
@@ -310,17 +300,6 @@ func applyEnvOverrides(cfg *Config) {
 	}
 	if v := os.Getenv("ABUSEIPDB_KEY"); v != "" {
 		cfg.AbuseIPDB.APIKey = v
-	}
-	if v := os.Getenv("ABUSEIPDB_ENABLED"); v != "" {
-		if enabled, err := strconv.ParseBool(v); err == nil {
-			cfg.AbuseIPDB.Enabled = enabled
-		}
-	}
-	if v := os.Getenv("ABUSEIPDB_REPORTING_ENABLED"); v != "" {
-		enabled, err := strconv.ParseBool(v)
-		if err == nil {
-			cfg.AbuseIPDB.ReportingEnabled = &enabled
-		}
 	}
 	if v := os.Getenv("SPAMHAUS_API_KEY"); v != "" {
 		cfg.Spamhaus.APIKey = v

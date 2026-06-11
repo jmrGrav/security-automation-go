@@ -190,6 +190,68 @@ func (s *SetupStore) GetRecoveryKeyHash(ctx context.Context) (string, bool, erro
 	return hash, true, nil
 }
 
+// RuntimeFlags holds the four feature-enable flags stored in ui_settings.
+type RuntimeFlags struct {
+	CSPollerEnabled            bool
+	CloudflareMutationsEnabled bool
+	AbuseIPDBEnabled           bool
+	BetterStackEnabled         bool
+}
+
+// GetRuntimeFlags reads all four feature flags from ui_settings.
+// Missing rows default to false (safe: off by default, operator must enable).
+func (s *SetupStore) GetRuntimeFlags(ctx context.Context) (RuntimeFlags, error) {
+	const op = "storage.sqlite.SetupStore.GetRuntimeFlags"
+	keys := []string{
+		"cs_poller_enabled",
+		"cloudflare_mutations_enabled",
+		"abuseipdb_enabled",
+		"betterstack_enabled",
+	}
+	var flags RuntimeFlags
+	for _, key := range keys {
+		v, ok, err := s.GetSetting(ctx, key)
+		if err != nil {
+			return flags, apperr.Wrap(op, err)
+		}
+		if !ok {
+			continue
+		}
+		enabled := v == "true"
+		switch key {
+		case "cs_poller_enabled":
+			flags.CSPollerEnabled = enabled
+		case "cloudflare_mutations_enabled":
+			flags.CloudflareMutationsEnabled = enabled
+		case "abuseipdb_enabled":
+			flags.AbuseIPDBEnabled = enabled
+		case "betterstack_enabled":
+			flags.BetterStackEnabled = enabled
+		}
+	}
+	return flags, nil
+}
+
+// SetRuntimeFlag persists a single feature flag.
+// Valid keys: cs_poller_enabled, cloudflare_mutations_enabled, abuseipdb_enabled, betterstack_enabled.
+func (s *SetupStore) SetRuntimeFlag(ctx context.Context, key string, enabled bool) error {
+	const op = "storage.sqlite.SetupStore.SetRuntimeFlag"
+	allowed := map[string]bool{
+		"cs_poller_enabled":            true,
+		"cloudflare_mutations_enabled": true,
+		"abuseipdb_enabled":            true,
+		"betterstack_enabled":          true,
+	}
+	if !allowed[key] {
+		return apperr.Newf(op, "unknown flag key %q", key)
+	}
+	v := "false"
+	if enabled {
+		v = "true"
+	}
+	return s.SetSetting(ctx, key, v)
+}
+
 // UpdateRecoveryKeyLastUsed records a successful recovery key use.
 func (s *SetupStore) UpdateRecoveryKeyLastUsed(ctx context.Context) error {
 	const op = "storage.sqlite.SetupStore.UpdateRecoveryKeyLastUsed"

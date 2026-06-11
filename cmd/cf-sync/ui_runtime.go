@@ -103,6 +103,21 @@ func runUIWithLocker(ctx context.Context, logger *slog.Logger, cfg *config.Confi
 		cfg.UI.MutationsEnabled = true
 	}
 
+	if rflags, err := setupStore.GetRuntimeFlags(ctx); err == nil {
+		if rflags.CSPollerEnabled {
+			cfg.CrowdSec.PollerEnabled = true
+		}
+		if rflags.CloudflareMutationsEnabled {
+			cfg.Cloudflare.MutationsEnabled = true
+			cfg.UI.MutationsEnabled = true
+		}
+		if rflags.AbuseIPDBEnabled {
+			cfg.AbuseIPDB.Enabled = true
+		}
+	} else {
+		logger.Warn("could not read runtime flags from SQLite", "error", err)
+	}
+
 	// Phase 5 — Setup Mode UX: log the wizard URL if setup is not yet complete.
 	// The operator sees this in journald immediately after systemctl start cf-sync.
 	if complete, _ := setupStore.IsComplete(ctx); !complete {

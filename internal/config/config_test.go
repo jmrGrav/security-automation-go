@@ -117,6 +117,8 @@ func TestConfig_RuntimeProfileEnvOverride(t *testing.T) {
 }
 
 func TestConfig_AbuseIPDBReportingEnabledEnvOverride(t *testing.T) {
+	// ABUSEIPDB_REPORTING_ENABLED is no longer honored — feature flags are
+	// managed via SQLite ui_settings. Verify the env var is a no-op.
 	os.Setenv("CF_API_TOKEN", "test-token")
 	os.Setenv("CF_ZONE_ID", "test-zone")
 	os.Setenv("ABUSEIPDB_REPORTING_ENABLED", "false")
@@ -128,8 +130,30 @@ func TestConfig_AbuseIPDBReportingEnabledEnvOverride(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to load config: %v", err)
 	}
-	if cfg.AbuseIPDB.ReportingEnabled == nil || *cfg.AbuseIPDB.ReportingEnabled {
-		t.Fatalf("expected abuseipdb reporting disabled env override, got %v", cfg.AbuseIPDB.ReportingEnabled)
+	// ReportingEnabled should remain at its default (nil) — not driven by env var.
+	if cfg.AbuseIPDB.ReportingEnabled != nil && !*cfg.AbuseIPDB.ReportingEnabled {
+		t.Fatalf("ABUSEIPDB_REPORTING_ENABLED must not be honored (use SQLite), got %v", cfg.AbuseIPDB.ReportingEnabled)
+	}
+}
+
+func TestApplyEnvOverrides_IgnoresEliminatedFlags(t *testing.T) {
+	t.Setenv("CLOUDFLARE_MUTATIONS_ENABLED", "1")
+	t.Setenv("CS_POLLER_ENABLED", "1")
+	t.Setenv("ABUSEIPDB_ENABLED", "1")
+	t.Setenv("ABUSEIPDB_REPORTING_ENABLED", "1")
+
+	cfg := DefaultConfig()
+	applyEnvOverrides(cfg)
+
+	// These env vars must no longer be honored — flags stay at default (false).
+	if cfg.Cloudflare.MutationsEnabled {
+		t.Error("CLOUDFLARE_MUTATIONS_ENABLED must not be honored (use SQLite)")
+	}
+	if cfg.CrowdSec.PollerEnabled {
+		t.Error("CS_POLLER_ENABLED must not be honored (use SQLite)")
+	}
+	if cfg.AbuseIPDB.Enabled {
+		t.Error("ABUSEIPDB_ENABLED must not be honored (use SQLite)")
 	}
 }
 

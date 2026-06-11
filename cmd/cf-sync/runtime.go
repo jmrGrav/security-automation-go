@@ -182,6 +182,22 @@ func runCFSync(configPath, mode string, dryRun bool, format string, metricsAddr 
 	if v, ok, _ := credentialStore.Lookup(ctx, "betterstack.source_token"); ok {
 		cfg.BetterStack.SourceToken = v
 	}
+
+	// Apply runtime feature flags from SQLite (single source of truth post env-elimination).
+	if rflags, err := setupStore.GetRuntimeFlags(ctx); err == nil {
+		if rflags.CSPollerEnabled {
+			cfg.CrowdSec.PollerEnabled = true
+		}
+		if rflags.CloudflareMutationsEnabled {
+			cfg.Cloudflare.MutationsEnabled = true
+		}
+		if rflags.AbuseIPDBEnabled {
+			cfg.AbuseIPDB.Enabled = true
+		}
+	} else {
+		logger.Warn("could not read runtime flags from SQLite — using config/env defaults", "error", err)
+	}
+
 	hc := initHTTPClient(cfg)
 	abuse, cf, betterClient := initExternalClients(cfg, hc)
 

@@ -17,10 +17,12 @@ func TestConfig_UIAndProviderEnvOverrides(t *testing.T) {
 	t.Setenv("ENRICHMENT_ASN_ENABLED", "1")
 	t.Setenv("ENRICHMENT_TIMEOUT_MS", "800")
 	t.Setenv("ENRICHMENT_CACHE_TTL", "6h")
+	// ABUSEIPDB_ENABLED and CLOUDFLARE_MUTATIONS_ENABLED are no longer honored
+	// (feature flags are managed via SQLite); set them to confirm they are no-ops.
 	t.Setenv("ABUSEIPDB_ENABLED", "1")
+	t.Setenv("CLOUDFLARE_MUTATIONS_ENABLED", "0")
 	t.Setenv("SPAMHAUS_ENABLED", "1")
 	t.Setenv("VIRUSTOTAL_ENABLED", "1")
-	t.Setenv("CLOUDFLARE_MUTATIONS_ENABLED", "0")
 	t.Setenv("SPAMHAUS_API_KEY", "spamhaus-key")
 	t.Setenv("VIRUSTOTAL_API_KEY", "virustotal-key")
 	t.Setenv("ABUSEIPDB_KEY", "abuse-key")
@@ -45,11 +47,17 @@ func TestConfig_UIAndProviderEnvOverrides(t *testing.T) {
 	if cfg.Enrichment.CacheTTL != 6*time.Hour {
 		t.Fatalf("unexpected enrichment cache ttl: %s", cfg.Enrichment.CacheTTL)
 	}
-	if !cfg.AbuseIPDB.Enabled || !cfg.Spamhaus.Enabled || !cfg.VirusTotal.Enabled {
-		t.Fatalf("unexpected provider toggles: abuse=%t spamhaus=%t virustotal=%t", cfg.AbuseIPDB.Enabled, cfg.Spamhaus.Enabled, cfg.VirusTotal.Enabled)
+	// ABUSEIPDB_ENABLED env var is now a no-op; AbuseIPDB.Enabled stays at default (false).
+	if cfg.AbuseIPDB.Enabled {
+		t.Fatalf("ABUSEIPDB_ENABLED must not be honored (use SQLite), got enabled=true")
 	}
+	// SPAMHAUS_ENABLED and VIRUSTOTAL_ENABLED are still honored via env.
+	if !cfg.Spamhaus.Enabled || !cfg.VirusTotal.Enabled {
+		t.Fatalf("unexpected provider toggles: spamhaus=%t virustotal=%t", cfg.Spamhaus.Enabled, cfg.VirusTotal.Enabled)
+	}
+	// CLOUDFLARE_MUTATIONS_ENABLED env var is now a no-op; default stays false.
 	if cfg.Cloudflare.MutationsEnabled {
-		t.Fatalf("expected Cloudflare mutations to be disabled by env override")
+		t.Fatalf("CLOUDFLARE_MUTATIONS_ENABLED must not be honored (use SQLite)")
 	}
 	if cfg.AbuseIPDB.APIKey != "abuse-key" {
 		t.Fatalf("unexpected AbuseIPDB key mapping")
