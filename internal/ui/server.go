@@ -811,9 +811,9 @@ func (s *Server) providerHealthViews() []ProviderHealth {
 		{
 			Name:           "Cloudflare",
 			Enabled:        s.cfg.Cloudflare.MutationsEnabled,
-			Configured:     strings.TrimSpace(s.cfg.Cloudflare.APIToken) != "" && strings.TrimSpace(s.cfg.Cloudflare.ZoneID) != "",
-			MaskedKey:      maskedCloudflareValue(s.cfg.Cloudflare.APIToken),
-			Status:         cloudflareHealthStatus(s.cfg.Cloudflare.APIToken, s.cfg.Cloudflare.ZoneID, s.cfg.Cloudflare.MutationsEnabled),
+			Configured:     s.cfSentinelToken() != "" && s.cfZoneIDFromSetup(context.Background()) != "",
+			MaskedKey:      s.cfMaskedKey(),
+			Status:         cloudflareHealthStatus(s.cfSentinelToken(), s.cfZoneIDFromSetup(context.Background()), s.cfg.Cloudflare.MutationsEnabled),
 			QuotaRemaining: "quota not exposed",
 			Notes:          []string{"live mutations remain feature-flagged"},
 		},
@@ -858,17 +858,17 @@ func (s *Server) dashboardConsoleView() DashboardConsoleView {
 		Statuses: []StatusItem{
 			{Label: "Runtime", Level: "healthy", Detail: "UI mode active"},
 			{Label: "CrowdSec", Level: statusLevelFromText(crowdSecHealthStatus(s.cfg.CrowdSec.DecisionsLog)), Detail: crowdSecHealthStatus(s.cfg.CrowdSec.DecisionsLog)},
-			{Label: "Cloudflare", Level: statusLevelFromText(cloudflareHealthStatus(s.cfg.Cloudflare.APIToken, s.cfg.Cloudflare.ZoneID, s.cfg.Cloudflare.MutationsEnabled)), Detail: cloudflareHealthStatus(s.cfg.Cloudflare.APIToken, s.cfg.Cloudflare.ZoneID, s.cfg.Cloudflare.MutationsEnabled)},
-			{Label: "OpenResty", Level: statusLevelFromText(openRestyStatus(s.cfg.OpenResty.EventsFile)), Detail: openRestyStatus(s.cfg.OpenResty.EventsFile)},
+			{Label: "Cloudflare", Level: statusLevelFromText(cloudflareHealthStatus(s.cfSentinelToken(), s.cfZoneIDFromSetup(context.Background()), s.cfg.Cloudflare.MutationsEnabled)), Detail: cloudflareHealthStatus(s.cfSentinelToken(), s.cfZoneIDFromSetup(context.Background()), s.cfg.Cloudflare.MutationsEnabled)},
+			{Label: "OpenResty", Level: openRestyDashboardLevel(detectors), Detail: openRestyDashboardDetail(detectors, s.cfg.OpenResty.EventsFile)},
 			{Label: "Nginx", Level: statusLevelFromText(nginxStatus(s.cfg.CrowdSec.NginxLogDir)), Detail: nginxStatus(s.cfg.CrowdSec.NginxLogDir)},
 			{Label: "SQLite WAL", Level: statusLevelFromText(sqliteWALStatus(s.cfg.StateDir)), Detail: sqliteWALStatus(s.cfg.StateDir)},
 			{Label: "UI", Level: boolStatus(s.cfg.UI.Enabled), Detail: uiStatus(s.cfg.UI.Enabled, s.cfg.UI.Addr)},
-			{Label: "HA / fencing", Level: "warning", Detail: "read-only UI shell"},
-			{Label: "Replay", Level: "warning", Detail: "reserved route"},
-			{Label: "Recovery", Level: "warning", Detail: "reserved route"},
+			{Label: "HA / fencing", Level: "disabled", Detail: "read-only UI shell"},
+			{Label: "Replay", Level: "disabled", Detail: "not wired"},
+			{Label: "Recovery", Level: "disabled", Detail: "not wired"},
 			{Label: "Ownership", Level: "healthy", Detail: "lineage preserved in runtime"},
 			{Label: "UI mutations", Level: boolStatus(s.cfg.UI.MutationsEnabled), Detail: boolDetail(s.cfg.UI.MutationsEnabled, "enabled", "disabled")},
-			{Label: "Cloudflare mutations", Level: cloudflareLevel(s.cfg.Cloudflare.APIToken, s.cfg.Cloudflare.ZoneID, s.cfg.Cloudflare.MutationsEnabled), Detail: cloudflareHealthStatus(s.cfg.Cloudflare.APIToken, s.cfg.Cloudflare.ZoneID, s.cfg.Cloudflare.MutationsEnabled)},
+			{Label: "Cloudflare mutations", Level: cloudflareLevel(s.cfSentinelToken(), s.cfZoneIDFromSetup(context.Background()), s.cfg.Cloudflare.MutationsEnabled), Detail: cloudflareHealthStatus(s.cfSentinelToken(), s.cfZoneIDFromSetup(context.Background()), s.cfg.Cloudflare.MutationsEnabled)},
 			{Label: "Shadow / cutover", Level: "disabled", Detail: "not wired in UI shell"},
 		},
 		AIProviders: s.providerDashboardEntries(),
@@ -889,6 +889,62 @@ func maskedCloudflareValue(token string) string {
 		return "missing"
 	}
 	return redactValue(token)
+}
+
+// cfSentinelToken returns a non-empty string if a Cloudflare API token is configured
+// in either the runtime config or the encrypted credential store. The returned string
+// is a presence sentinel only — do not log or surface it as an actual token value.
+func (s *Server) cfSentinelToken() string {
+	if t := strings.TrimSpace(s.cfg.Cloudflare.APIToken); t != "" {
+		return t
+	}
+	if credentialConfigured(context.Background(), s.credentialStore, "cloudflare.api_token") {
+		return "ok"
+	}
+	return ""
+}
+
+func (s *Server) cfMaskedKey() string {
+	if t := strings.TrimSpace(s.cfg.Cloudflare.APIToken); t != "" {
+		return maskedCloudflareValue(t)
+	}
+	if credentialConfigured(context.Background(), s.credentialStore, "cloudflare.api_token") {
+		return "configured (encrypted)"
+	}
+	return "missing"
+}
+
+func openRestyDashboardLevel(detectors []detect.Result) string {
+	for _, d := range detectors {
+		if d.Name == "openresty" {
+			if d.Healthy {
+				return "healthy"
+			}
+			if d.Installed {
+				return "degraded"
+			}
+			return "disabled"
+		}
+	}
+	return "disabled"
+}
+
+func openRestyDashboardDetail(detectors []detect.Result, eventsFile string) string {
+	for _, d := range detectors {
+		if d.Name == "openresty" {
+			if d.Healthy {
+				if strings.TrimSpace(eventsFile) != "" {
+					return "OpenResty active (WAF events)"
+				}
+				return "OpenResty active (nginx log mode)"
+			}
+			if d.Installed {
+				return "OpenResty installed (service inactive)"
+			}
+			return "optional — not installed"
+		}
+	}
+	return "optional — not installed"
 }
 
 func maskedCrowdSecValue(key string) string {
@@ -978,15 +1034,6 @@ func maskedProviderValue(cfgValue string, sp SecretProvider, key string) string 
 	return redactValue(v)
 }
 
-func (s *Server) runtimeStatus() RuntimeStatusView {
-	return RuntimeStatusView{
-		CrowdSec:   crowdSecStatus(s.cfg.CrowdSec.DecisionsLog),
-		OpenResty:  openRestyStatus(s.cfg.OpenResty.EventsFile),
-		Cloudflare: cloudflareStatus(s.cfg.Cloudflare.APIToken, s.cfg.Cloudflare.ZoneID, s.cfg.Cloudflare.MutationsEnabled),
-		UI:         uiStatus(s.cfg.UI.Enabled, s.cfg.UI.Addr),
-	}
-}
-
 func crowdSecStatus(decisionsLog string) string {
 	if strings.TrimSpace(decisionsLog) == "" {
 		return "CrowdSec unavailable / read-only fallback"
@@ -995,16 +1042,6 @@ func crowdSecStatus(decisionsLog string) string {
 		return "CrowdSec unavailable / read-only fallback"
 	}
 	return "CrowdSec ready"
-}
-
-func openRestyStatus(eventsFile string) string {
-	if strings.TrimSpace(eventsFile) == "" {
-		return "OpenResty unavailable / nginx log mode"
-	}
-	if _, err := os.Stat(eventsFile); err != nil {
-		return "OpenResty unavailable / nginx log mode"
-	}
-	return "OpenResty ready"
 }
 
 func cloudflareStatus(token, zoneID string, live bool) string {

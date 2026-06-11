@@ -75,8 +75,8 @@ func (s *Server) buildDetectConfig() detect.Config {
 		DecisionsLog:        s.cfg.CrowdSec.DecisionsLog,
 		NginxLogDir:         s.cfg.CrowdSec.NginxLogDir,
 		OpenRestyEventsFile: s.cfg.OpenResty.EventsFile,
-		CloudflareToken:     s.cfg.Cloudflare.APIToken,
-		CloudflareZoneID:    s.cfg.Cloudflare.ZoneID,
+		CloudflareToken:     s.cfSentinelToken(),
+		CloudflareZoneID:    s.cfZoneIDFromSetup(context.Background()),
 	}
 }
 

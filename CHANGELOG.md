@@ -2,44 +2,42 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased] — cookie Secure hardening
+## [v1.6.0] — Unreleased
 
 ### Summary
 
-Structural fix for CWE-614 / CodeQL `go/cookie-secure-not-set`. The
-conditional `secureCookie(r)` helper (returning `false` on plain HTTP) has been
-replaced by two single-emitter methods — `setSessionCookie` and
-`clearSessionCookie` — that unconditionally set `Secure: true`. This is safe
-because the UI binds to `127.0.0.1` only, and both `http://localhost` and
-`http://127.0.0.1` are "potentially trustworthy origins" under the W3C Secure
-Contexts spec (§3.2); modern browsers (Chrome, Firefox 84+) store and send
-`Secure` cookies over the loopback interface without HTTPS.
+Operator console cleanup sprint. UI source-of-truth unified across Health, Wizard step 8, and Dashboard. Trusted Networks page converted to a responsive table. Cloudflare Diff gains a clear Operator Summary panel. Wizard step 8 now reads actual dry-run/mutations state from the store instead of showing defaults. Flaky integration test eliminated (bcrypt cost override). Data race fix (cfg snapshot). Dead code removed. Wizard-restart guidance added to RUNBOOK. CWE-614 eliminated structurally (single-emitter Secure cookies).
+
+### Features
+
+- **Trusted Networks UX v2** — Registry page replaced card grid with a responsive `<table>` layout: Name, Kind, CIDRs (2 visible + `<details>` expand), Protection badge, Allowlist (CF/CS sync), Status. Wrapped in `overflow-x:auto` for narrow viewports.
+- **Cloudflare Diff operator summary** — New Operator Summary panel at the top of the Cloudflare Diff page: Configured YES/NO, Token YES/NO, Zone YES/NO, Mode (DRY-RUN/LIVE), Quota, Next action. Uses `cfSentinelToken()`/`cfZoneIDFromSetup()` — the same credential-store-aware source of truth as Health and Dashboard.
 
 ### Security
 
-- **CWE-614 eliminated structurally** — `Secure: true` is now a compile-time
-  constant in the single pair of cookie-emitting methods. Future call sites
-  cannot accidentally omit it; CodeQL can no longer rediscover the pattern on
-  new files.
-- **`secureCookie(r)` removed** — the conditional that previously returned
-  `false` on plain-HTTP localhost no longer exists.
-- **`sessionCookie(r, token)` removed** — replaced by `setSessionCookie(w, token)`;
-  the `http.SetCookie` call is now internal to the method and not visible at
-  call sites.
+- **CWE-614 eliminated structurally** — `Secure: true` is now a compile-time constant in the single pair of cookie-emitting methods (`setSessionCookie` / `clearSessionCookie`). Future call sites cannot accidentally omit it; CodeQL can no longer rediscover the pattern on new files. `secureCookie(r)` and `sessionCookie(r, token)` removed.
 
-### Files changed
+### Bug Fixes
 
-- `internal/ui/server.go` — replaced `sessionCookie` + `secureCookie` with
-  `setSessionCookie` / `clearSessionCookie`; logout path updated
-- `internal/ui/login.go` — two call sites updated
-- `internal/ui/setup_wizard.go` — call site updated
-- `internal/ui/server_test.go` — replaced `TestServer_LoginSetsHttpOnlyCookie`
-  + `TestServer_LoginSetsSecureCookieOverHTTPS` with
-  `TestServer_SessionCookieAttributes` (table-driven: plain-HTTP, TLS, reverse-proxy)
-  and `TestServer_LogoutClearsCookieSecurely`
-- `internal/ui/setup_wizard_test.go` — added
-  `TestSetupWizard_Step1SessionCookieIsSecure`
-- `docs/security/UI_SECURITY.md` — documentation updated
+- **Wizard step 8 source of truth** — Runtime Summary in setup step 8 previously used a raw `credentialStore.Lookup` call (diverging from the Dashboard) and hardcoded `"true (default)"` and `"disabled (default)"` for dry-run and mutations. Now uses `cfSentinelToken()` and reads actual `dry_run`/`mutations_enabled` values from `setupStore`, matching what the operator console shows.
+- **CrowdSec LAPI key not loaded (G5)** — `runUIWithLocker` did not look up `crowdsec.lapi_key` from the credential store. Added after the existing `betterstack.source_token` lookup.
+- **Data race G1** — `runtime.go` passed the `cfg` pointer to the UI goroutine while also writing credential fields. Fixed by snapshotting `uiCfg := *cfg` before launching the goroutine.
+- **Wizard-wait restart guidance (G8)** — Wizard completion handler now logs a journald `INFO` message reminding the operator to run `systemctl restart cf-sync`. Documented in `docs/operations/RUNBOOK.md`.
+
+### Testing
+
+- **Flaky test eliminated** — `TestUIFreshInstallWizardAndConservativeRestart` intermittently timed out (~34–50 s) under `-race` because bcrypt cost-12 under CPU contention exceeded the HTTP client timeout. Fix: `cmd/cf-sync/testmain_test.go` overrides bcrypt to `MinCost` before all tests in the package. Test now runs in 1–6 s, 5/5 passes with `-race -count=5`.
+- Updated `TestTrustedNetworks_RenderRegistryEntries` assertions to match the new table layout (protection/allowlist labels).
+
+### Cleanup
+
+- **Dead code removed (G6)** — Removed unused `runtimeStatus()` method and `openRestyStatus()` function from `internal/ui/server.go`.
+- **Stub badges corrected (G7)** — Replay and Drift workflow pages: "Execution" / "Convergence" badges changed from `warning` to `disabled`. Dashboard stub panels (HA/fencing, Replay, Recovery) confirmed non-warning.
+- **Sidebar Soon labels** — Replay, Deban, Recovery, Drift nav items marked `Soon: true`.
+
+### Documentation
+
+- `docs/operations/RUNBOOK.md` — Added "Service restart after first-run wizard" section explaining the wizard-wait design gap and the required `systemctl restart cf-sync` step.
 
 ---
 

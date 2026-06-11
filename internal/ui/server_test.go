@@ -215,13 +215,18 @@ func TestServer_DashboardShowsFallbackAndCloudflareStates(t *testing.T) {
 	body := rr.Body.String()
 	for _, want := range []string{
 		"CrowdSec unavailable / read-only fallback",
-		"OpenResty unavailable / nginx log mode",
 		"Cloudflare configured dry-run",
 		"UI ready on 127.0.0.1:9091",
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("dashboard missing %q: %s", want, body)
 		}
+	}
+	// OpenResty detail is now driven by the system detector (binary+service),
+	// so the exact text is environment-dependent. Verify that some OpenResty
+	// panel exists rather than a specific message.
+	if !strings.Contains(body, "OpenResty") {
+		t.Fatal("dashboard missing OpenResty panel")
 	}
 }
 

@@ -43,23 +43,16 @@ func TestTrustedNetworks_RenderRegistryEntries(t *testing.T) {
 		"GitHub Copilot",
 		"Anthropic",
 		"OpenAI ChatGPT-User",
-		"NoHardBan=true",
-		"HardBanAllowed=false",
-		"allowlisted=false",
-		"Cloudflare whitelist not synced",
-		"CrowdSec allowlist not synced",
-		"SourceURL",
+		"no hard ban",
+		"CF: not synced",
+		"CS: not synced",
 		"manual review required / too volatile",
+		// Table headers
+		"Name", "Kind", "CIDRs", "Protection", "Allowlist", "Status",
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("trusted networks page missing %q: %s", want, body)
 		}
-	}
-	if !strings.Contains(body, "https://openai.com/gptbot.json") {
-		t.Fatalf("expected source URL to be rendered, got: %s", body)
-	}
-	if !strings.Contains(body, "https://api.github.com/meta") {
-		t.Fatalf("expected GitHub source URL to be rendered, got: %s", body)
 	}
 	if strings.Contains(body, "auto-allowlist") {
 		t.Fatalf("page must not render auto-allowlist action: %s", body)

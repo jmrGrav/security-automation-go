@@ -128,6 +128,39 @@ If a live cleanup run is interrupted, the process stops before the next destruct
 
 `cf-allowlist-sync` is list-only and does not mutate Cloudflare.
 
+## Service restart after first-run wizard
+
+When `cf-sync -mode ui` starts **before** the first-run wizard is complete, the
+service enters a wizard-wait loop and does not initialise background
+orchestration (scheduler, Cloudflare sync). The UI is still served on port 9091
+and the wizard can be completed normally, but the orchestration does not start
+automatically once setup is marked done.
+
+**Action required after completing the wizard for the first time:**
+
+```bash
+sudo systemctl restart cf-sync
+```
+
+After the restart, the service detects the completed setup state, loads all
+credentials from the encrypted store, and starts the full orchestration
+alongside the operator console.
+
+This behaviour is by design: the service reads setup state once at startup to
+decide which code path to execute. The wizard completion handler logs the
+following message to journald as a reminder:
+
+```
+level=INFO msg="setup complete — restart cf-sync to enable background orchestration"
+```
+
+You can confirm orchestration is running by checking that port 9092 (metrics /
+API server) is listening:
+
+```bash
+ss -tlnp | grep 9092
+```
+
 ## Release and cutover checklist
 
 Use [RELEASE_CUTOVER_CHECKLIST.md](RELEASE_CUTOVER_CHECKLIST.md) for the final operator gate.

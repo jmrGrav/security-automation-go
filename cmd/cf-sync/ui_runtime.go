@@ -91,6 +91,9 @@ func runUIWithLocker(ctx context.Context, logger *slog.Logger, cfg *config.Confi
 	if v, ok, _ := credentialStore.Lookup(ctx, "betterstack.source_token"); ok {
 		cfg.BetterStack.SourceToken = v
 	}
+	if v, ok, _ := credentialStore.Lookup(ctx, "crowdsec.lapi_key"); ok {
+		cfg.CrowdSec.APIKey = v
+	}
 
 	// Apply wizard settings as runtime overrides (wizard stores these in SQLite).
 	if v, ok, _ := setupStore.GetSetting(ctx, "ui_addr"); ok && v != "" {

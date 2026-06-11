@@ -19,14 +19,15 @@ type workflowSection struct {
 }
 
 type workflowProjectionView struct {
-	Title     string
-	Headline  string
-	Subtitle  string
-	Active    string
-	Intro     string
-	Badges    []StatusItem
-	Sections  []workflowSection
-	EmptyText string
+	Title       string
+	Headline    string
+	Subtitle    string
+	Active      string
+	Intro       string
+	Badges      []StatusItem
+	SummaryRows []keyValueRow
+	Sections    []workflowSection
+	EmptyText   string
 }
 
 func workflowProjectionPage(view workflowProjectionView) templ.Component {
@@ -37,6 +38,19 @@ func workflowProjectionPage(view workflowProjectionView) templ.Component {
 		Active:      view.Active,
 		BadgeLabels: view.Badges,
 		Body: templ.ComponentFunc(func(ctx context.Context, w io.Writer) error {
+			if len(view.SummaryRows) > 0 {
+				if _, err := fmt.Fprint(w, `<div class="panel"><h3 style="margin:0 0 .65rem">Operator Summary</h3><div class="kv">`); err != nil {
+					return err
+				}
+				for _, row := range view.SummaryRows {
+					if _, err := fmt.Fprintf(w, `<div class="row"><span>%s</span><span>%s</span></div>`, html.EscapeString(row.Key), html.EscapeString(valueOrUnknown(row.Value))); err != nil {
+						return err
+					}
+				}
+				if _, err := fmt.Fprint(w, `</div></div>`); err != nil {
+					return err
+				}
+			}
 			if _, err := fmt.Fprint(w, `<div class="panel"><p class="muted">`); err != nil {
 				return err
 			}
@@ -111,12 +125,22 @@ func renderWorkflowSection(w io.Writer, section workflowSection) error {
 
 func (s *Server) cloudflareDiffView() workflowProjectionView {
 	cloudflare := s.providerHealthEntry("Cloudflare")
-	desiredMode := cloudflareModeText(s.cfg.Cloudflare.APIToken, s.cfg.Cloudflare.ZoneID, s.cfg.Cloudflare.MutationsEnabled)
+	tokenConfigured := s.cfSentinelToken() != ""
+	zoneConfigured := s.cfZoneIDFromSetup(context.Background()) != ""
+	desiredMode := cloudflareModeText(s.cfSentinelToken(), s.cfZoneIDFromSetup(context.Background()), s.cfg.Cloudflare.MutationsEnabled)
 	desiredRows := []keyValueRow{
 		{Key: "mode", Value: desiredMode},
 		{Key: "mutations enabled", Value: boolDetail(s.cfg.Cloudflare.MutationsEnabled, "enabled", "disabled")},
-		{Key: "token configured", Value: configuredText(strings.TrimSpace(s.cfg.Cloudflare.APIToken) != "")},
-		{Key: "zone configured", Value: configuredText(strings.TrimSpace(s.cfg.Cloudflare.ZoneID) != "")},
+		{Key: "token configured", Value: configuredText(tokenConfigured)},
+		{Key: "zone configured", Value: configuredText(zoneConfigured)},
+	}
+	summaryRows := []keyValueRow{
+		{Key: "configured", Value: boolDetail(tokenConfigured && zoneConfigured, "YES", "NO")},
+		{Key: "token", Value: boolDetail(tokenConfigured, "YES", "NO — configure via wizard")},
+		{Key: "zone", Value: boolDetail(zoneConfigured, "YES", "NO — configure via wizard")},
+		{Key: "mode", Value: strings.ToUpper(desiredMode)},
+		{Key: "quota", Value: cloudflare.QuotaRemaining},
+		{Key: "next action", Value: cloudflareDiffNextAction(tokenConfigured, zoneConfigured, desiredMode)},
 	}
 	observedRows := []keyValueRow{
 		{Key: "provider status", Value: cloudflare.Status},
@@ -130,10 +154,10 @@ func (s *Server) cloudflareDiffView() workflowProjectionView {
 		{Key: "quota reset", Value: cloudflare.QuotaReset},
 	}
 	missing := []string{}
-	if strings.TrimSpace(s.cfg.Cloudflare.APIToken) == "" {
+	if !tokenConfigured {
 		missing = append(missing, "API token is missing from the local configuration")
 	}
-	if strings.TrimSpace(s.cfg.Cloudflare.ZoneID) == "" {
+	if !zoneConfigured {
 		missing = append(missing, "zone ID is missing from the local configuration")
 	}
 	if strings.EqualFold(cloudflare.ConfiguredState, "missing") {
@@ -147,11 +171,12 @@ func (s *Server) cloudflareDiffView() workflowProjectionView {
 		"no live mutation path is exposed from the UI",
 	}
 	return workflowProjectionView{
-		Title:    "Cloudflare Diff",
-		Headline: "Cloudflare Diff",
-		Subtitle: "Read-only desired-versus-observed projection for Cloudflare boundary health.",
-		Active:   "/cloudflare/diff",
-		Intro:    "This view compares the local Cloudflare intent with the currently observed provider posture. It is forensic only and does not execute mutations.",
+		Title:       "Cloudflare Diff",
+		Headline:    "Cloudflare Diff",
+		Subtitle:    "Read-only desired-versus-observed projection for Cloudflare boundary health.",
+		Active:      "/cloudflare/diff",
+		Intro:       "This view compares the local Cloudflare intent with the currently observed provider posture. It is forensic only and does not execute mutations.",
+		SummaryRows: summaryRows,
 		Badges: []StatusItem{
 			{Label: "State", Level: providerStateClass(cloudflare.Status, strings.EqualFold(cloudflare.EnabledState, "enabled"), strings.EqualFold(cloudflare.ConfiguredState, "configured")), Detail: valueOrFallback(cloudflare.Status, "unknown")},
 			{Label: "Mode", Level: "dry-run", Detail: desiredMode},
@@ -185,7 +210,7 @@ func (s *Server) replayView() workflowProjectionView {
 		Intro:    "Replay remains read-only in the UI shell. This page explains the operator-facing data that will be shown once the replay store is wired through the control-plane.",
 		Badges: []StatusItem{
 			{Label: "Mode", Level: "dry-run", Detail: "read-only"},
-			{Label: "Execution", Level: "warning", Detail: "not wired"},
+			{Label: "Execution", Level: "disabled", Detail: "not available"},
 		},
 		Sections: []workflowSection{
 			{Title: "Checkpoints", Description: "Runtime checkpoints visible to the UI server.", Rows: []keyValueRow{
@@ -267,7 +292,7 @@ func (s *Server) driftView() workflowProjectionView {
 		Intro:    "Drift is read-only in the UI shell. The page is reserved for eventual convergence, oscillation, and ownership projection without exposing mutation controls.",
 		Badges: []StatusItem{
 			{Label: "Mode", Level: "dry-run", Detail: "read-only"},
-			{Label: "Convergence", Level: "warning", Detail: "not wired"},
+			{Label: "Convergence", Level: "disabled", Detail: "not available"},
 		},
 		Sections: []workflowSection{
 			{Title: "Active drift", Description: "Current drift indicators visible to the UI server.", Rows: []keyValueRow{
@@ -322,6 +347,21 @@ func cloudflareDiffSummary(entry providerHealthCenterEntry, desiredMode string) 
 		return "Cloudflare is intentionally held in dry-run mode by local feature flags."
 	default:
 		return "Read-only diff projection only; no live mutation path is exposed from this console."
+	}
+}
+
+func cloudflareDiffNextAction(tokenConfigured, zoneConfigured bool, mode string) string {
+	switch {
+	case !tokenConfigured:
+		return "configure API token via setup wizard"
+	case !zoneConfigured:
+		return "configure zone ID via setup wizard"
+	case strings.EqualFold(mode, "missing"):
+		return "complete Cloudflare configuration before enabling"
+	case strings.EqualFold(mode, "dry-run"):
+		return "review dry-run outputs, then enable mutations via config if satisfied"
+	default:
+		return "monitor live boundary — no action required"
 	}
 }
 
