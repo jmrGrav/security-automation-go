@@ -167,7 +167,7 @@ func (s *Server) handleSetupStep1Post(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	s.sessions[sessionToken] = time.Now().Add(sessionTTL)
 	s.mu.Unlock()
-	http.SetCookie(w, s.sessionCookie(r, sessionToken))
+	s.setSessionCookie(w, sessionToken)
 
 	_ = s.setupStore.SetCurrentStep(r.Context(), 2)
 	http.Redirect(w, r, "/setup/step/2", http.StatusFound)

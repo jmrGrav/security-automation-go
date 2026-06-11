@@ -259,3 +259,45 @@ func TestStep9Post_DryRunCompletesWithoutCFToken(t *testing.T) {
 	}
 	t.Log("step 9 GET renders without crashing — PASS (CSRF test requires session)")
 }
+
+// TestSetupWizard_Step1SessionCookieIsSecure verifies that the session cookie
+// issued by the wizard step 1 (first-run, plain HTTP localhost) has Secure=true.
+// This is correct because http://127.0.0.1 is a "potentially trustworthy origin"
+// under the W3C Secure Contexts spec — modern browsers store Secure cookies on
+// the loopback interface without HTTPS.
+func TestSetupWizard_Step1SessionCookieIsSecure(t *testing.T) {
+	store := &fakeSetupStore{step: 1, complete: false, settings: map[string]string{}}
+	srv := newTestServerWithSetup(t, store)
+
+	// A strong enough password to pass the complexity check.
+	pwd := "WizardTestPass1!@#Long"
+	form := strings.NewReader("new_password=" + pwd + "&confirm_password=" + pwd)
+	req := httptest.NewRequest(http.MethodPost, "/setup/step/1", form)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusFound {
+		t.Fatalf("expected redirect after step 1, got %d — body: %s", rr.Code, rr.Body.String())
+	}
+
+	var sessionCookie *http.Cookie
+	for _, c := range rr.Result().Cookies() {
+		if c.Name == "ui_session" {
+			sessionCookie = c
+			break
+		}
+	}
+	if sessionCookie == nil {
+		t.Fatal("expected session cookie after wizard step 1 password creation")
+	}
+	if !sessionCookie.Secure {
+		t.Fatal("wizard session cookie must be Secure (localhost secure context applies)")
+	}
+	if !sessionCookie.HttpOnly {
+		t.Fatal("wizard session cookie must be HttpOnly")
+	}
+	if sessionCookie.SameSite != http.SameSiteStrictMode {
+		t.Fatalf("expected SameSite=Strict, got %v", sessionCookie.SameSite)
+	}
+}

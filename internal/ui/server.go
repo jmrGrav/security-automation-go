@@ -252,15 +252,7 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 		s.pruneSessionsLocked(time.Now().UTC())
 		s.mu.Unlock()
 	}
-	http.SetCookie(w, &http.Cookie{
-		Name:     sessionCookieName,
-		Value:    "",
-		Path:     "/",
-		MaxAge:   -1,
-		HttpOnly: true,
-		SameSite: http.SameSiteStrictMode,
-		Secure:   secureCookie(r),
-	})
+	s.clearSessionCookie(w)
 	s.audit.Record("logout", map[string]string{"actor": "local"})
 	http.Redirect(w, r, "/login", http.StatusFound)
 }
@@ -632,25 +624,38 @@ func (s *Server) isAuthed(r *http.Request) bool {
 	return ok
 }
 
-func (s *Server) sessionCookie(r *http.Request, token string) *http.Cookie {
-	return &http.Cookie{
+// setSessionCookie writes the session cookie to the response.
+// Secure is unconditionally true: the UI binds to 127.0.0.1 only, and both
+// http://localhost and http://127.0.0.1 qualify as "potentially trustworthy
+// origins" under the W3C Secure Contexts spec (§3.2), so modern browsers
+// (Chrome, Firefox 84+) store and send Secure cookies over the loopback
+// interface without HTTPS. Keeping Secure:true as a compile-time constant also
+// prevents CodeQL go/cookie-secure-not-set from re-triggering on future
+// call sites.
+func (s *Server) setSessionCookie(w http.ResponseWriter, token string) {
+	http.SetCookie(w, &http.Cookie{
 		Name:     sessionCookieName,
 		Value:    token,
 		Path:     "/",
 		HttpOnly: true,
 		SameSite: http.SameSiteStrictMode,
-		Secure:   secureCookie(r),
-	}
+		Secure:   true,
+	})
 }
 
-func secureCookie(r *http.Request) bool {
-	if r.TLS != nil {
-		return true
-	}
-	if strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
-		return true
-	}
-	return false
+// clearSessionCookie instructs the browser to delete the session cookie.
+// Secure must match the original Set-Cookie attributes so the browser honours
+// the Max-Age:-1 expiry on the matching cookie.
+func (s *Server) clearSessionCookie(w http.ResponseWriter) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     sessionCookieName,
+		Value:    "",
+		Path:     "/",
+		MaxAge:   -1,
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+		Secure:   true,
+	})
 }
 
 func (s *Server) csrfTokenFor(sessionToken string) string {

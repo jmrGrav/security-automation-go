@@ -78,7 +78,7 @@ func (s *Server) handleLoginJSON(w http.ResponseWriter, r *http.Request) {
 	s.mu.Unlock()
 
 	// Set session cookie
-	http.SetCookie(w, s.sessionCookie(r, sessionToken))
+	s.setSessionCookie(w, sessionToken)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{
@@ -130,7 +130,7 @@ func (s *Server) handleLoginForm(w http.ResponseWriter, r *http.Request) {
 	s.sessions[sessionToken] = time.Now().Add(sessionTTL)
 	s.pruneSessionsLocked(time.Now().UTC())
 	s.mu.Unlock()
-	http.SetCookie(w, s.sessionCookie(r, sessionToken))
+	s.setSessionCookie(w, sessionToken)
 	s.audit.Record("login_success", map[string]string{"actor": "local"})
 	http.Redirect(w, r, "/", http.StatusFound)
 }
