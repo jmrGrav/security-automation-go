@@ -321,6 +321,18 @@ func runCFSync(configPath, mode string, dryRun bool, format string, metricsAddr 
 	if mode == "daemon" || mode == "ui" {
 		wafReplay := newWAFReplayService(cf, abuse, securityTelemetry, trustRegistry, cfg, reportingStores)
 		runDaemonWithLocker(ctx, logger, orch, collector, jsonlJournal, qStore, stateStore, sm, driftMem, cooldownMgr, evidenceRecorder, bundleReg, activationMgr, fedRes, admController, reportingStores.Evidence, ownershipRepo, s.GetPool(), outboxWorker, scopeDir, cfg.Interval, metricsAddr, cfg.Cloudflare.ZoneID, wafReplay, cursorStore, quotaRefreshers, false)
+		// In ui mode the HTTP server runs in a goroutine above. If runDaemonWithLocker
+		// returns early (e.g. API token not configured) while the context is still live,
+		// keep the process alive so the UI goroutine can continue serving.
+		if mode == "ui" && ctx.Err() == nil {
+			sigChan := make(chan os.Signal, 1)
+			signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+			defer signal.Stop(sigChan)
+			select {
+			case <-sigChan:
+			case <-ctx.Done():
+			}
+		}
 	} else if mode == "evidence" {
 		runEvidenceCLI(ctx, reportingStores.Evidence, args, format)
 	} else if mode == "ownership" {
