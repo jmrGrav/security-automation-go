@@ -307,9 +307,11 @@ test.describe('Runtime integrity', () => {
     }
 
     if (dbHasToken && !healthSaysMissing) {
-      // If DB has token and health says configured, diff must not say token missing
+      // If DB has token and health says configured, diff must not say token missing.
+      // Use a span-pair regex to avoid false positives from unrelated "no" words in
+      // the same single-line HTML (e.g. "no live mutation path" in a badge further down).
       expect(body, 'Cloudflare Diff must not say "token missing" when DB has token')
-        .not.toMatch(/token.*no|token.*missing/i);
+        .not.toMatch(/>\s*token\s*<\/span>\s*<span[^>]*>\s*(?:NO|missing)/i);
     }
 
     console.log(

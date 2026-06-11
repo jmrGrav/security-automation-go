@@ -45,7 +45,9 @@ test.describe('Authenticated pages render without error', () => {
   });
 
   test('unauthenticated request to protected page redirects to login', async ({ browser }) => {
-    const freshCtx = await browser.newContext();
+    // browser.newContext() without explicit storageState inherits the project-level
+    // storageState; an empty state is required to guarantee no session cookie is sent.
+    const freshCtx = await browser.newContext({ storageState: { cookies: [], origins: [] } });
     const page = await freshCtx.newPage();
     await page.goto('/health');
     expect(page.url()).toContain('/login');
