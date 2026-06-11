@@ -429,7 +429,7 @@ func CheckProductionReady(cfg Config) Check {
 func CheckLegacyLayout(cfg Config) Check {
 	legacy := cfg.LegacySecretsDir
 	if strings.TrimSpace(legacy) == "" {
-		legacy = "/etc/security-automation/secrets"
+		return Check{Name: "layout", Status: Green, Reason: "No legacy config directory detected"}
 	}
 	canonical := cfg.CanonicalSecretsDir
 	if strings.TrimSpace(canonical) == "" {

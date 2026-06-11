@@ -33,7 +33,7 @@ type Config struct {
 	DecisionsLog              string
 	NginxLogDir               string
 	OpenRestyEventsFile       string
-	// LegacySecretsDir is the pre-V1.4 config directory. Default: /etc/security-automation/secrets
+	// LegacySecretsDir is the pre-V1.4 config directory. When empty, the legacy-layout check is skipped.
 	LegacySecretsDir string
 	// CanonicalSecretsDir is the canonical runtime credential/state directory. Default: /var/lib/security-automation-go/runtime
 	CanonicalSecretsDir string

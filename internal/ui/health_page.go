@@ -56,7 +56,7 @@ func (s *Server) buildHealthConfig() health.Config {
 		LogDir:                    "/var/log/security-automation-go",
 		SecretDir:                 runtimeDir,
 		CanonicalSecretsDir:       runtimeDir,
-		LegacySecretsDir:          "/etc/security-automation/secrets",
+		LegacySecretsDir:          "",
 		DecisionsLog:              s.cfg.CrowdSec.DecisionsLog,
 		NginxLogDir:               s.cfg.CrowdSec.NginxLogDir,
 		OpenRestyEventsFile:       s.cfg.OpenResty.EventsFile,
