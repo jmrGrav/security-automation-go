@@ -29,6 +29,10 @@ func (f *fakeGateStore) SetSetting(_ context.Context, k, v string) error {
 	f.settings[k] = v
 	return nil
 }
+func (f *fakeGateStore) GetAuthEpoch(_ context.Context) (int64, error)             { return 0, nil }
+func (f *fakeGateStore) IncrementAuthEpoch(_ context.Context) (int64, error)       { return 1, nil }
+func (f *fakeGateStore) GetPasswordChangeRequired(_ context.Context) (bool, error) { return false, nil }
+func (f *fakeGateStore) SetPasswordChangeRequired(_ context.Context, _ bool) error { return nil }
 
 func (f *fakeCredentialStore) Lookup(_ context.Context, key string) (string, bool, error) {
 	v, ok := f.values[key]

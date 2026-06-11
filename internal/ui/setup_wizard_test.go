@@ -33,6 +33,12 @@ func (f *fakeSetupStore) SetSetting(_ context.Context, k, v string) error {
 	f.settings[k] = v
 	return nil
 }
+func (f *fakeSetupStore) GetAuthEpoch(_ context.Context) (int64, error)       { return 0, nil }
+func (f *fakeSetupStore) IncrementAuthEpoch(_ context.Context) (int64, error) { return 1, nil }
+func (f *fakeSetupStore) GetPasswordChangeRequired(_ context.Context) (bool, error) {
+	return false, nil
+}
+func (f *fakeSetupStore) SetPasswordChangeRequired(_ context.Context, _ bool) error { return nil }
 
 func newTestServerWithSetup(t *testing.T, store ui.SetupStorer) *ui.Server {
 	t.Helper()

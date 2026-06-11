@@ -35,6 +35,7 @@ func (s *Server) buildHealthConfig() health.Config {
 	openAIConfigured := false
 	anthropicConfigured := false
 	geminiConfigured := false
+	crowdSecLAPIConfigured := false
 	if s.credentialStore != nil {
 		cloudflareConfigured = credentialConfigured(context.Background(), s.credentialStore, "cloudflare.api_token")
 		abuseConfigured = credentialConfigured(context.Background(), s.credentialStore, "abuseipdb.api_key")
@@ -42,6 +43,7 @@ func (s *Server) buildHealthConfig() health.Config {
 		openAIConfigured = credentialConfigured(context.Background(), s.credentialStore, "ai.openai.api_key")
 		anthropicConfigured = credentialConfigured(context.Background(), s.credentialStore, "ai.anthropic.api_key")
 		geminiConfigured = credentialConfigured(context.Background(), s.credentialStore, "ai.gemini.api_key")
+		crowdSecLAPIConfigured = credentialConfigured(context.Background(), s.credentialStore, "crowdsec.lapi_key")
 	}
 	return health.Config{
 		CloudflareTokenConfigured: cloudflareConfigured,
@@ -49,6 +51,7 @@ func (s *Server) buildHealthConfig() health.Config {
 		AbuseIPDBConfigured:       abuseConfigured,
 		AbuseIPDBEnabled:          s.cfg.AbuseIPDB.Enabled,
 		BetterStackConfigured:     betterstackConfigured,
+		CrowdSecLAPIKeyConfigured: crowdSecLAPIConfigured,
 		StateDir:                  s.cfg.StateDir,
 		LogDir:                    "/var/log/security-automation-go",
 		SecretDir:                 runtimeDir,

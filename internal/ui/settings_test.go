@@ -40,6 +40,12 @@ func (s *testAdminStore) SetSetting(_ context.Context, k, v string) error {
 	s.settings[k] = v
 	return nil
 }
+func (s *testAdminStore) GetAuthEpoch(_ context.Context) (int64, error)       { return 0, nil }
+func (s *testAdminStore) IncrementAuthEpoch(_ context.Context) (int64, error) { return 1, nil }
+func (s *testAdminStore) GetPasswordChangeRequired(_ context.Context) (bool, error) {
+	return false, nil
+}
+func (s *testAdminStore) SetPasswordChangeRequired(_ context.Context, _ bool) error { return nil }
 
 // seedAdminHash creates a testAdminStore with a low-cost bcrypt hash for speed in tests.
 // Production code uses cost 12; tests use bcrypt.MinCost (4) to avoid multi-second delays

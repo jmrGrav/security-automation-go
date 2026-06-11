@@ -1,0 +1,54 @@
+import { test, expect } from '@playwright/test';
+import { login } from '../helpers/session';
+import { assertNoSecretLeakage } from '../helpers/redact';
+
+// Pages that must render (HTTP 200) and not leak secrets or panic.
+const AUTH_REQUIRED_PAGES = [
+  '/trusted-networks',
+  '/audit',
+  '/forensic',
+  '/about',
+  '/health',
+  '/intelligence',
+  '/timeline',
+  '/replay',
+  '/deban',
+  '/recovery',
+  '/drift',
+];
+
+test.describe('Authenticated pages render without error', () => {
+  test.beforeEach(async ({ page }) => {
+    await login(page);
+  });
+
+  for (const path of AUTH_REQUIRED_PAGES) {
+    test(`GET ${path} returns 200 and no panic`, async ({ page }) => {
+      const response = await page.goto(path);
+      expect(response?.status(), `${path} must return 200`).toBe(200);
+      const body = await page.content();
+      assertNoSecretLeakage(body, path);
+      const forbidden = ['panic:', 'goroutine', 'runtime error'];
+      for (const f of forbidden) {
+        expect(body, `${path} must not contain "${f}"`).not.toContain(f);
+      }
+    });
+  }
+
+  test('Trusted Networks table renders with expected columns', async ({ page }) => {
+    await page.goto('/trusted-networks');
+    const body = await page.content();
+    // v1.6.0 converted this page to a responsive table.
+    const hasTable = body.includes('<table') || body.includes('table');
+    expect(hasTable, 'Trusted Networks must render a table layout').toBe(true);
+    assertNoSecretLeakage(body, '/trusted-networks');
+  });
+
+  test('unauthenticated request to protected page redirects to login', async ({ browser }) => {
+    const freshCtx = await browser.newContext();
+    const page = await freshCtx.newPage();
+    await page.goto('/health');
+    expect(page.url()).toContain('/login');
+    await freshCtx.close();
+  });
+});

@@ -115,7 +115,7 @@ func LoginPage(errorText string) templ.Component {
 				return templ_7745c5c3_Err
 			}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<form action=\"/login\" method=\"post\"><label for=\"secret\">Secret</label> <input id=\"secret\" name=\"secret\" type=\"password\" autocomplete=\"current-password\"> <button type=\"submit\">Sign in</button></form></main></body></html>")
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<form action=\"/login\" method=\"post\"><label for=\"password\">Password</label> <input id=\"password\" name=\"password\" type=\"password\" autocomplete=\"current-password\"> <button type=\"submit\">Sign in</button></form></main></body></html>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

@@ -6,7 +6,7 @@ All notable changes to this project will be documented in this file.
 
 ### Summary
 
-Operator console cleanup sprint. UI source-of-truth unified across Health, Wizard step 8, and Dashboard. Trusted Networks page converted to a responsive table. Cloudflare Diff gains a clear Operator Summary panel. Wizard step 8 now reads actual dry-run/mutations state from the store instead of showing defaults. Flaky integration test eliminated (bcrypt cost override). Data race fix (cfg snapshot). Dead code removed. Wizard-restart guidance added to RUNBOOK. CWE-614 eliminated structurally (single-emitter Secure cookies).
+Operator console cleanup sprint plus Admin Recovery System. UI source-of-truth unified across Health, Wizard step 8, and Dashboard. Trusted Networks page converted to a responsive table. Cloudflare Diff gains a clear Operator Summary panel. Wizard step 8 now reads actual dry-run/mutations state from the store instead of showing defaults. Flaky integration test eliminated (bcrypt cost override). Data race fix (cfg snapshot). Dead code removed. Wizard-restart guidance added to RUNBOOK. New: admin password reset and recovery key CLI, cross-process session invalidation via auth_epoch. CWE-614 eliminated structurally (single-emitter Secure cookies).
 
 ### Features
 
@@ -35,9 +35,17 @@ Operator console cleanup sprint. UI source-of-truth unified across Health, Wizar
 - **Stub badges corrected (G7)** — Replay and Drift workflow pages: "Execution" / "Convergence" badges changed from `warning` to `disabled`. Dashboard stub panels (HA/fencing, Replay, Recovery) confirmed non-warning.
 - **Sidebar Soon labels** — Replay, Deban, Recovery, Drift nav items marked `Soon: true`.
 
+### Security
+
+- **Admin Password Reset CLI** — `sudo cf-sync -mode admin reset-password` generates a cryptographically random temporary password (bcrypt stored, never logged), sets `password_change_required=true` in SQLite, and increments `auth_epoch` to invalidate all active UI sessions without requiring a server restart. Requires local root.
+- **Admin Recovery Key** — `sudo cf-sync -mode admin recovery-key create/rotate` generates a 256-bit random recovery key, shows it once to stdout, and stores only its bcrypt hash (cost 12) in the new `admin_recovery_keys` SQLite table (migration 17). `sudo cf-sync -mode admin recover` reads the key with masked terminal input, verifies via bcrypt, then resets the password. Root required. The plaintext key and temporary password are never written to logs, journald, or the database. Five audit events are emitted to `<stateDir>/ui-audit.log`: `admin_password_reset`, `admin_sessions_invalidated`, `admin_recovery_key_created`, `admin_recovery_key_rotated`, `admin_recovery_used`.
+- **Cross-process session invalidation** — UI server tracks `auth_epoch` (atomic int64 + SQLite `ui_settings`). On each `getSession` call the server reads the DB epoch; if it has advanced since the last cached value, all in-memory sessions are flushed immediately. CLI resets take effect on the next request to the running server without a restart.
+- **Forced password change gate** — `forcePasswordChangeMiddleware` now checks `password_change_required` in addition to bootstrap-active, ensuring CLI-initiated resets force a UI password change regardless of whether a hash already exists.
+
 ### Documentation
 
 - `docs/operations/RUNBOOK.md` — Added "Service restart after first-run wizard" section explaining the wizard-wait design gap and the required `systemctl restart cf-sync` step.
+- `docs/operations/RUNBOOK.md` — Added "Admin password reset and account recovery" section covering all CLI commands, security invariants, and the never-implemented list.
 
 ---
 
