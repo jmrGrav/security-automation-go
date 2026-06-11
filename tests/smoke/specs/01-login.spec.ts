@@ -4,7 +4,9 @@ import { assertNoSecretLeakage } from '../helpers/redact';
 
 test.describe('Login / session', () => {
   // Auth flow tests must start without a pre-loaded session.
-  test.use({ storageState: undefined });
+  // storageState: undefined does NOT override the project-level value in Playwright —
+  // an explicit empty state is required to guarantee no session cookie is sent.
+  test.use({ storageState: { cookies: [], origins: [] } });
 
   test('login page renders without error', async ({ page }) => {
     await page.goto('/login');

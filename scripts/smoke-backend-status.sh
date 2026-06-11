@@ -37,22 +37,23 @@ fi
 STATE_DIR="${1:-${SMOKE_STATE_DIR:-/var/lib/security-automation-go}}"
 DB_PATH="$STATE_DIR/runtime.db"
 
-if [[ ! -f "$DB_PATH" ]]; then
-  echo "{\"error\":\"database not found at $DB_PATH\"}"
-  exit 1
-fi
-
-# The DB is owned by the service account (0600). If we can't read it directly,
-# fall back to running sqlite3 as the service user via sudo.
-if ! sqlite3 "$DB_PATH" ".tables" &>/dev/null 2>&1; then
+# The state dir is 0750 owned by security-automation; the calling user (e.g. jm)
+# cannot traverse it, so -f returns false even when the file exists.
+# Check existence via the service account first, then fall back to direct access.
+if sudo -n -u security-automation test -f "$DB_PATH" 2>/dev/null; then
+  # File exists — use sudo sqlite3 (service account owns the DB at 0600).
   if sudo -n -u security-automation sqlite3 "$DB_PATH" ".tables" &>/dev/null 2>&1; then
     SQLITE="sudo -n -u security-automation sqlite3"
   else
-    echo "{\"error\":\"cannot read $DB_PATH — run as root or add NOPASSWD rule: security-automation-go ALL=(security-automation) NOPASSWD: /usr/bin/sqlite3\"}"
+    echo "{\"error\":\"cannot read $DB_PATH — add NOPASSWD rule: ALL=(security-automation) NOPASSWD: /usr/bin/sqlite3\"}"
     exit 1
   fi
-else
+elif [[ -f "$DB_PATH" ]]; then
+  # Accessible directly (e.g. running as root or matching user).
   SQLITE="sqlite3"
+else
+  echo "{\"error\":\"database not found at $DB_PATH\"}"
+  exit 1
 fi
 
 # ── Known credential keys ────────────────────────────────────────────────────
