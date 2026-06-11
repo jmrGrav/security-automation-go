@@ -108,3 +108,75 @@ func TestSetupStore_SetSettingOverwrite(t *testing.T) {
 		t.Errorf("want 'second', got %q", val)
 	}
 }
+
+func TestSetupStoreRuntimeFlags(t *testing.T) {
+	s := newTestSetupStore(t)
+	ctx := context.Background()
+
+	// Defaults: unset flags return false
+	flags, err := s.GetRuntimeFlags(ctx)
+	if err != nil {
+		t.Fatalf("GetRuntimeFlags: %v", err)
+	}
+	if flags.CSPollerEnabled {
+		t.Error("want CSPollerEnabled=false by default")
+	}
+	if flags.CloudflareMutationsEnabled {
+		t.Error("want CloudflareMutationsEnabled=false by default")
+	}
+	if flags.AbuseIPDBEnabled {
+		t.Error("want AbuseIPDBEnabled=false by default")
+	}
+	if flags.BetterStackEnabled {
+		t.Error("want BetterStackEnabled=false by default")
+	}
+
+	// Set one flag; others remain false
+	if err := s.SetRuntimeFlag(ctx, "cs_poller_enabled", true); err != nil {
+		t.Fatalf("SetRuntimeFlag: %v", err)
+	}
+	flags2, err := s.GetRuntimeFlags(ctx)
+	if err != nil {
+		t.Fatalf("GetRuntimeFlags after set: %v", err)
+	}
+	if !flags2.CSPollerEnabled {
+		t.Error("want CSPollerEnabled=true after set")
+	}
+	if flags2.CloudflareMutationsEnabled {
+		t.Error("want CloudflareMutationsEnabled still false")
+	}
+
+	// Round-trip false
+	if err := s.SetRuntimeFlag(ctx, "cs_poller_enabled", false); err != nil {
+		t.Fatalf("SetRuntimeFlag false: %v", err)
+	}
+	flags3, _ := s.GetRuntimeFlags(ctx)
+	if flags3.CSPollerEnabled {
+		t.Error("want CSPollerEnabled=false after unset")
+	}
+
+	// Test all four flags round-trip
+	for _, key := range []string{"cloudflare_mutations_enabled", "abuseipdb_enabled", "betterstack_enabled"} {
+		if err := s.SetRuntimeFlag(ctx, key, true); err != nil {
+			t.Fatalf("SetRuntimeFlag %s: %v", key, err)
+		}
+	}
+	flags4, err := s.GetRuntimeFlags(ctx)
+	if err != nil {
+		t.Fatalf("GetRuntimeFlags all-true: %v", err)
+	}
+	if !flags4.CloudflareMutationsEnabled {
+		t.Error("want CloudflareMutationsEnabled=true")
+	}
+	if !flags4.AbuseIPDBEnabled {
+		t.Error("want AbuseIPDBEnabled=true")
+	}
+	if !flags4.BetterStackEnabled {
+		t.Error("want BetterStackEnabled=true")
+	}
+
+	// Unknown key must return error
+	if err := s.SetRuntimeFlag(ctx, "unknown_flag", true); err == nil {
+		t.Error("want error for unknown flag key")
+	}
+}
