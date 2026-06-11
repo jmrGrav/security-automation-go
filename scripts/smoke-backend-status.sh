@@ -42,6 +42,19 @@ if [[ ! -f "$DB_PATH" ]]; then
   exit 1
 fi
 
+# The DB is owned by the service account (0600). If we can't read it directly,
+# fall back to running sqlite3 as the service user via sudo.
+if ! sqlite3 "$DB_PATH" ".tables" &>/dev/null 2>&1; then
+  if sudo -n -u security-automation sqlite3 "$DB_PATH" ".tables" &>/dev/null 2>&1; then
+    SQLITE="sudo -n -u security-automation sqlite3"
+  else
+    echo "{\"error\":\"cannot read $DB_PATH — run as root or add NOPASSWD rule: security-automation-go ALL=(security-automation) NOPASSWD: /usr/bin/sqlite3\"}"
+    exit 1
+  fi
+else
+  SQLITE="sqlite3"
+fi
+
 # ── Known credential keys ────────────────────────────────────────────────────
 CREDENTIAL_KEYS=(
   "cloudflare.api_token"
@@ -65,7 +78,7 @@ SETTINGS_KEYS=(
 creds_json=""
 for key in "${CREDENTIAL_KEYS[@]}"; do
   # Returns "1|1" (present|enabled) or empty (absent)
-  result=$(sqlite3 "$DB_PATH" \
+  result=$($SQLITE "$DB_PATH" \
     "SELECT '1', enabled FROM credential_secrets WHERE name='$key' LIMIT 1;" \
     2>/dev/null || echo "")
 
@@ -88,7 +101,7 @@ done
 # ── Query ui_settings ────────────────────────────────────────────────────────
 settings_json=""
 for key in "${SETTINGS_KEYS[@]}"; do
-  value=$(sqlite3 "$DB_PATH" \
+  value=$($SQLITE "$DB_PATH" \
     "SELECT value FROM ui_settings WHERE key='$key' LIMIT 1;" \
     2>/dev/null || echo "")
 
