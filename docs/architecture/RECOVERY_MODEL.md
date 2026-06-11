@@ -1,7 +1,7 @@
 # Recovery Model
 
-**Status:** Current as of v1.5.4  
-**Updated:** 2026-06-10
+**Status:** Current as of v1.6.0  
+**Updated:** 2026-06-11
 
 ---
 

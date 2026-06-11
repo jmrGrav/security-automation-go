@@ -6,7 +6,7 @@ All notable changes to this project will be documented in this file.
 
 ### Summary
 
-Operator console cleanup sprint plus Admin Recovery System. UI source-of-truth unified across Health, Wizard step 8, and Dashboard. Trusted Networks page converted to a responsive table. Cloudflare Diff gains a clear Operator Summary panel. Wizard step 8 now reads actual dry-run/mutations state from the store instead of showing defaults. Flaky integration test eliminated (bcrypt cost override). Data race fix (cfg snapshot). Dead code removed. Wizard-restart guidance added to RUNBOOK. New: admin password reset and recovery key CLI, cross-process session invalidation via auth_epoch. CWE-614 eliminated structurally (single-emitter Secure cookies).
+Operator console cleanup sprint, Admin Recovery System, and env-elimination. UI source-of-truth unified across Health, Wizard step 8, and Dashboard. Trusted Networks page converted to a responsive table. Cloudflare Diff gains a clear Operator Summary panel. Wizard step 8 now reads actual dry-run/mutations state from the store instead of showing defaults. Flaky integration test eliminated (bcrypt cost override). Data race fix (cfg snapshot). Dead code removed. Wizard-restart guidance added to RUNBOOK. New: admin password reset and recovery key CLI, cross-process session invalidation via auth_epoch. CWE-614 eliminated structurally (single-emitter Secure cookies). **SQLite is now the single source of truth for runtime feature flags**; `CLOUDFLARE_MUTATIONS_ENABLED`, `CS_POLLER_ENABLED`, `ABUSEIPDB_ENABLED` env vars removed. Admin API token (`CF_SYNC_API_TOKEN`) absence is non-fatal (WARN).
 
 ### Features
 
@@ -46,6 +46,15 @@ Operator console cleanup sprint plus Admin Recovery System. UI source-of-truth u
 
 - `docs/operations/RUNBOOK.md` — Added "Service restart after first-run wizard" section explaining the wizard-wait design gap and the required `systemctl restart cf-sync` step.
 - `docs/operations/RUNBOOK.md` — Added "Admin password reset and account recovery" section covering all CLI commands, security invariants, and the never-implemented list.
+
+### Env-Elimination (feature flags → SQLite)
+
+- **SQLite single source of truth** — Feature flags (`cs_poller_enabled`, `cloudflare_mutations_enabled`, `abuseipdb_enabled`) are now stored in `ui_settings` (SQLite) and managed via the operator UI at `/settings/runtime`. The env vars `CLOUDFLARE_MUTATIONS_ENABLED`, `CS_POLLER_ENABLED`, `ABUSEIPDB_ENABLED`, and `ABUSEIPDB_REPORTING_ENABLED` are no longer read by `applyEnvOverrides`; they can be removed from `.env` files.
+- **`SetupStore.GetRuntimeFlags` / `SetRuntimeFlag`** — New methods on `SetupStore` for reading and writing the four runtime booleans. Unknown key returns error.
+- **Runtime Settings UI** — New page at `/settings/runtime` with CSRF-protected POST: four checkboxes, saved-banner, audit record.
+- **Runtime Status UI** — New page at `/status/runtime` with per-component status badges (enabled/disabled/unconfigured) and 30-second auto-refresh.
+- **Admin API token non-fatal** — `startAPIServer` failure (e.g., `CF_SYNC_API_TOKEN` absent) is now a `WARN` instead of a fatal `return`. The scheduler, WAF replay poller, and AbuseIPDB outbox start regardless.
+- **Legacy secrets path removed** — `internal/health/checks.go` no longer falls back to `/etc/security-automation/secrets` (the path without `-go`) when `LegacySecretsDir` is empty.
 
 ---
 

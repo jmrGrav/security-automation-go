@@ -9,7 +9,7 @@ Go control-plane that synchronises [CrowdSec](https://crowdsec.net/) decisions t
 [Cloudflare](https://www.cloudflare.com/), reports abusive IPs to
 [AbuseIPDB](https://www.abuseipdb.com/), and drives WAF follow-up actions.
 
-**Status: v1.5.4** — first-run wizard, encrypted CredentialStore, CrowdSec Go integration. Production-ready.
+**Status: v1.6.0 candidate** — first-run wizard, encrypted CredentialStore, CrowdSec Go integration, SQLite as single source of truth for feature flags, admin recovery CLI. Production-ready.
 
 ## Architecture
 
@@ -32,7 +32,7 @@ go vet ./...
 gofmt -l .
 go test ./...
 go test -race ./...
-make package         # dist/security-automation-go_1.5.4_amd64.deb
+make package         # dist/security-automation-go_1.6.0_amd64.deb
 ```
 
 ## Quick install
@@ -40,10 +40,10 @@ make package         # dist/security-automation-go_1.5.4_amd64.deb
 Download the latest `.deb` from [Releases](https://github.com/jmrGrav/security-automation-go/releases):
 
 ```bash
-curl -LO https://github.com/jmrGrav/security-automation-go/releases/download/v1.5.4/security-automation-go_1.5.4_amd64.deb
-curl -LO https://github.com/jmrGrav/security-automation-go/releases/download/v1.5.4/SHA256SUMS
+curl -LO https://github.com/jmrGrav/security-automation-go/releases/download/v1.6.0/security-automation-go_1.6.0_amd64.deb
+curl -LO https://github.com/jmrGrav/security-automation-go/releases/download/v1.6.0/SHA256SUMS
 sha256sum -c SHA256SUMS
-sudo dpkg -i security-automation-go_1.5.4_amd64.deb
+sudo dpkg -i security-automation-go_1.6.0_amd64.deb
 sudo systemctl start cf-sync
 ```
 
