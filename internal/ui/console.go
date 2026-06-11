@@ -206,14 +206,14 @@ func ConsoleLayout(view shellView) templ.Component {
 			.kv { display: grid; gap: .4rem; }
 			.row {
 				display: grid;
-				grid-template-columns: minmax(8rem, 13rem) minmax(0, 1fr);
+				grid-template-columns: minmax(6rem, 9rem) minmax(0, 1fr);
 				gap: 1rem;
 				align-items: start;
 				border-top: 1px solid #edf1f7;
 				padding: .55rem 0;
 			}
 			.row:first-child { border-top: 0; padding-top: 0; }
-			.row span:last-child { text-align: right; overflow-wrap: anywhere; }
+			.row span:last-child { overflow-wrap: anywhere; }
 			table {
 				width: 100%;
 				border-collapse: collapse;
@@ -591,16 +591,21 @@ func AboutPage(active string, view BuildInfoView) templ.Component {
 			if _, err := fmt.Fprint(w, `<section class="grid">`); err != nil {
 				return err
 			}
-			if err := renderKeyValuePanel(w, "Build", []keyValueRow{
+			buildRows := []keyValueRow{
 				{Key: "Version", Value: view.Version},
 				{Key: "Git commit", Value: view.GitCommit},
 				{Key: "Build date", Value: view.BuildDate},
 				{Key: "Go version", Value: view.GoVersion},
 				{Key: "OS / arch", Value: view.GOOS + " / " + view.GOARCH},
-				{Key: "Packages", Value: view.PackageCount},
-				{Key: "Go files", Value: view.GoFileCount},
-				{Key: "Approx LOC", Value: view.ApproxLOC},
-			}); err != nil {
+			}
+			if view.PackageCount != "" {
+				buildRows = append(buildRows,
+					keyValueRow{Key: "Packages", Value: view.PackageCount},
+					keyValueRow{Key: "Go files", Value: view.GoFileCount},
+					keyValueRow{Key: "Approx LOC", Value: view.ApproxLOC},
+				)
+			}
+			if err := renderKeyValuePanel(w, "Build", buildRows); err != nil {
 				return err
 			}
 			if err := renderKeyValuePanel(w, "Features", toKeyValues(view.FeatureStatus)); err != nil {
@@ -609,8 +614,10 @@ func AboutPage(active string, view BuildInfoView) templ.Component {
 			if err := renderKeyValuePanel(w, "Providers", keyValueRowsFromStrings(view.ProviderStatus)); err != nil {
 				return err
 			}
-			if err := renderListPanel(w, "AI assistance / development tools", view.AIAttribution, "unknown"); err != nil {
-				return err
+			if len(view.AIAttribution) > 0 {
+				if err := renderListPanel(w, "AI assistance / development tools", view.AIAttribution, ""); err != nil {
+					return err
+				}
 			}
 			_, err := fmt.Fprint(w, `</section>`)
 			return err
@@ -780,9 +787,6 @@ func BuildInfoFromConfig(cfg *config.Config, providers []ProviderHealth, auditSi
 		view.ApproxLOC = metrics.LOC
 	}
 	view.AIAttribution = loadAIAttribution()
-	if len(view.AIAttribution) == 0 {
-		view.AIAttribution = []string{"unknown"}
-	}
 	return view
 }
 

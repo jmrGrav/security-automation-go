@@ -13,12 +13,15 @@ const SCREENSHOT_DIR = process.env.SMOKE_SCREENSHOT_DIR || '/tmp/security-automa
 
 export default defineConfig({
   testDir: './specs',
+  globalSetup: './global-setup',
   timeout: 30_000,
   retries: 0,
   workers: 1,
 
   use: {
     baseURL: BASE_URL,
+    // Re-use the session saved by globalSetup to avoid hitting the login rate limiter.
+    storageState: process.env.SMOKE_ADMIN_PASSWORD ? '.auth/user.json' : undefined,
     // Screenshots only on failure — stored locally, never committed.
     screenshot: 'only-on-failure',
     screenshotPath: SCREENSHOT_DIR,

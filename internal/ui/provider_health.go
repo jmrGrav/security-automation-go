@@ -42,7 +42,7 @@ type providerHealthCenterEntry struct {
 }
 
 func (s *Server) providerHealthCenterView() []providerHealthCenterEntry {
-	cloudflareConfigured := strings.TrimSpace(s.cfg.Cloudflare.APIToken) != "" && strings.TrimSpace(s.cfg.Cloudflare.ZoneID) != ""
+	cloudflareConfigured := s.cfSentinelToken() != "" && s.cfZoneIDFromSetup(context.Background()) != ""
 	crowdSecConfigured := strings.TrimSpace(s.cfg.CrowdSec.APIKey) != "" || strings.TrimSpace(s.cfg.CrowdSec.DecisionsLog) != ""
 	abuseConfigured := strings.TrimSpace(providerConfiguredValue(s.cfg.AbuseIPDB.APIKey, s.secretProvider, "ABUSEIPDB_KEY")) != ""
 	spamhausConfigured := strings.TrimSpace(providerConfiguredValue(s.cfg.Spamhaus.APIKey, s.secretProvider, "SPAMHAUS_API_KEY")) != ""

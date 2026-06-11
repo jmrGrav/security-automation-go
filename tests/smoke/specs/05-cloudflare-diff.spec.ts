@@ -23,8 +23,7 @@ test.describe('Cloudflare Diff', () => {
     const body = await page.content();
     // The Operator Summary panel was added in v1.6.0.
     // It must show YES/NO/DRY-RUN — not a blank or error state.
-    const hasOperatorSummary = body.includes('Configured') || body.includes('Token') || body.includes('Mode');
-    expect(hasOperatorSummary, 'Operator Summary panel must be present').toBe(true);
+    expect(body, 'Operator Summary panel must be present').toContain('Operator Summary');
   });
 
   test('Cloudflare Diff coherence: if health says configured, diff must not say token missing', async ({ page }) => {

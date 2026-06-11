@@ -33,8 +33,9 @@ test.describe('Cross-page coherence', () => {
       await page.goto('/');
       const dashboard = await page.content();
       // Dashboard must not claim CrowdSec is unconfigured if health says it is.
-      expect(dashboard.toLowerCase(), 'Dashboard must not contradict CrowdSec health status')
-        .not.toMatch(/crowdsec.*unconfigured|crowdsec.*not configured/i);
+      // Limit the span to 80 chars to avoid false matches across HTML sections.
+      expect(dashboard, 'Dashboard must not contradict CrowdSec health status')
+        .not.toMatch(/crowdsec.{0,80}(?:unconfigured|not configured)/i);
     }
   });
 

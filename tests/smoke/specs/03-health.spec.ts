@@ -34,10 +34,8 @@ test.describe('Health Center', () => {
   });
 
   test('health shows Cloudflare status — not contradicted by Dashboard', async ({ page }) => {
-    const [healthResp, dashboardResp] = await Promise.all([
-      page.goto('/health/json').then(r => r?.text()),
-      page.goto('/').then(async () => page.content()),
-    ]);
+    const healthResp = await page.goto('/health/json').then(r => r?.text());
+    const dashboardResp = await page.goto('/').then(() => page.content());
 
     const health = JSON.parse(healthResp ?? '{}');
     const cfHealthConfigured = JSON.stringify(health).toLowerCase().includes('cloudflare');

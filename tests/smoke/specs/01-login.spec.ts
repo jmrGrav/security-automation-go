@@ -3,6 +3,9 @@ import { login, logout, getSessionCookieAttrs } from '../helpers/session';
 import { assertNoSecretLeakage } from '../helpers/redact';
 
 test.describe('Login / session', () => {
+  // Auth flow tests must start without a pre-loaded session.
+  test.use({ storageState: undefined });
+
   test('login page renders without error', async ({ page }) => {
     await page.goto('/login');
     expect(page.url()).toContain('/login');
