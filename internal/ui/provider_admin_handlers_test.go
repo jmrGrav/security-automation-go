@@ -110,6 +110,54 @@ func TestProviderManagementEnableRequiresReadableSecret(t *testing.T) {
 	}
 }
 
+func TestUnifiedProvidersPageShowsAllNineProviders(t *testing.T) {
+	srv, _, _ := newTestServer(t, nil)
+	cookie := loginCookie(t, srv, "test-password-123!@#")
+
+	req := httptest.NewRequest(http.MethodGet, "/providers", nil)
+	req.AddCookie(cookie)
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rr.Code)
+	}
+	body := rr.Body.String()
+	for _, want := range []string{
+		"OpenAI", "Anthropic", "Gemini",
+		"AbuseIPDB", "Spamhaus", "VirusTotal",
+		"Cloudflare", "CrowdSec", "BetterStack",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("unified providers page missing %q", want)
+		}
+	}
+}
+
+func TestNonAIProviderReplaceKeyWritesToCredentialStore(t *testing.T) {
+	srv, db, _ := newCredentialStoreServer(t, nil)
+	cookie := loginCookie(t, srv, "test-password-123!@#")
+	csrf := srv.csrfTokenFor(cookie.Value)
+
+	req := httptest.NewRequest(http.MethodPost, "/admin/providers/abuseipdb/key", strings.NewReader("confirm_replace=yes&new_api_key=abuse-test-key-xyz"))
+	req.AddCookie(cookie)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("X-CSRF-Token", csrf)
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusSeeOther {
+		t.Fatalf("expected redirect, got %d: %s", rr.Code, rr.Body.String())
+	}
+	rec, ok, err := sqlite.NewCredentialStore(db).Get(context.Background(), "ABUSEIPDB_KEY")
+	if err != nil {
+		t.Fatalf("load credential: %v", err)
+	}
+	if !ok || rec.Value != "abuse-test-key-xyz" {
+		t.Fatalf("credential not stored: ok=%v value=%q", ok, rec.Value)
+	}
+}
+
 func TestProviderManagementTestProviderUsesStubAndRedacts(t *testing.T) {
 	srv, db, secretPath := newCredentialStoreServer(t, map[string]string{
 		"AI_PROVIDER_OPENAI_ENABLED": "true",

@@ -670,3 +670,228 @@ func enabledBadgeState(enabled bool) string {
 	}
 	return "disabled"
 }
+
+// nonAICredentialKey returns the credential-store key for a non-AI provider by its URL-slug name.
+// Returns "" for providers that are config-managed (no credential store key).
+func nonAICredentialKey(name string) string {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "abuseipdb":
+		return "ABUSEIPDB_KEY"
+	case "spamhaus":
+		return "SPAMHAUS_API_KEY"
+	case "virustotal":
+		return "VIRUSTOTAL_API_KEY"
+	default:
+		return ""
+	}
+}
+
+func nonAIProviderDisplayName(slug string) string {
+	switch strings.ToLower(strings.TrimSpace(slug)) {
+	case "abuseipdb":
+		return "AbuseIPDB"
+	case "spamhaus":
+		return "Spamhaus"
+	case "virustotal":
+		return "VirusTotal"
+	case "cloudflare":
+		return "Cloudflare"
+	case "crowdsec":
+		return "CrowdSec"
+	case "betterstack":
+		return "BetterStack"
+	default:
+		return slug
+	}
+}
+
+func nonAIProviderCategory(slug string) string {
+	switch strings.ToLower(strings.TrimSpace(slug)) {
+	case "abuseipdb":
+		return "reporting"
+	case "spamhaus", "virustotal":
+		return "enrichment"
+	case "cloudflare":
+		return "detection"
+	case "crowdsec":
+		return "detection"
+	case "betterstack":
+		return "logging"
+	default:
+		return "provider"
+	}
+}
+
+// UnifiedProvidersPage renders all providers on a single management page.
+// AI providers (OpenAI, Anthropic, Gemini) are shown with full key/enable/test management.
+// Non-AI providers with credential-store keys (AbuseIPDB, Spamhaus, VirusTotal) show key replace forms.
+// Infrastructure providers (Cloudflare, CrowdSec, BetterStack) are shown read-only.
+func UnifiedProvidersPage(view UnifiedProvidersView, csrfToken string) templ.Component {
+	return ConsoleLayout(shellView{
+		Title:    "Providers",
+		Headline: "Providers",
+		Subtitle: "All provider credentials and health. AI providers support full key/enable/test management. Enrichment/reporting providers support key rotation. Infrastructure providers are config-managed.",
+		Active:   "/providers",
+		Body: templ.ComponentFunc(func(ctx context.Context, w io.Writer) error {
+			if _, err := fmt.Fprint(w, `<div class="panel"><p class="muted">Keys are never rendered or prefilled. Credential store keys are encrypted in SQLite. Infrastructure providers (Cloudflare, CrowdSec, BetterStack) require config-file changes — no mutation endpoints are exposed here.</p></div>`); err != nil {
+				return err
+			}
+			if view.Error != "" {
+				if _, err := fmt.Fprintf(w, `<div class="panel"><p class="error">%s</p></div>`, html.EscapeString(view.Error)); err != nil {
+					return err
+				}
+			}
+			// Reporting & enrichment providers
+			hasNonAI := false
+			for _, e := range view.NonAI {
+				if e.HasKeyManagement {
+					hasNonAI = true
+					break
+				}
+			}
+			if hasNonAI {
+				if _, err := fmt.Fprint(w, `<h2 class="section-heading">Reporting &amp; Enrichment Providers</h2><section class="grid">`); err != nil {
+					return err
+				}
+				for _, e := range view.NonAI {
+					if !e.HasKeyManagement {
+						continue
+					}
+					if err := renderNonAIProviderCard(w, e, csrfToken); err != nil {
+						return err
+					}
+				}
+				if _, err := fmt.Fprint(w, `</section>`); err != nil {
+					return err
+				}
+			}
+			// AI providers
+			if len(view.AI.Providers) > 0 {
+				if _, err := fmt.Fprint(w, `<h2 class="section-heading">AI Providers</h2><section class="grid">`); err != nil {
+					return err
+				}
+				for _, p := range view.AI.Providers {
+					if err := renderProviderManagementCard(w, p, csrfToken); err != nil {
+						return err
+					}
+				}
+				if _, err := fmt.Fprint(w, `</section>`); err != nil {
+					return err
+				}
+			}
+			// Infrastructure providers (config-managed, read-only)
+			hasInfra := false
+			for _, e := range view.NonAI {
+				if !e.HasKeyManagement {
+					hasInfra = true
+					break
+				}
+			}
+			if hasInfra {
+				if _, err := fmt.Fprint(w, `<h2 class="section-heading">Infrastructure Providers</h2><p class="muted" style="margin:0 0 1rem">These providers are configured via config file. No credential rotation or enable/disable is available through this UI.</p><section class="grid">`); err != nil {
+					return err
+				}
+				for _, e := range view.NonAI {
+					if e.HasKeyManagement {
+						continue
+					}
+					if err := renderInfraProviderCard(w, e); err != nil {
+						return err
+					}
+				}
+				if _, err := fmt.Fprint(w, `</section>`); err != nil {
+					return err
+				}
+			}
+			return nil
+		}),
+	})
+}
+
+func renderNonAIProviderCard(w io.Writer, e NonAIProviderEntry, csrfToken string) error {
+	if _, err := fmt.Fprint(w, `<div class="panel">`); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(w, `<h2>%s</h2>`, html.EscapeString(e.Name)); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(w, `<div class="badges"><span class="badge %s">%s</span><span class="badge %s">%s</span><span class="badge info">%s</span></div>`,
+		html.EscapeString(stateBadgeClass(enabledBadgeState(e.Enabled))),
+		html.EscapeString(strings.ToUpper(enabledBadgeState(e.Enabled))),
+		html.EscapeString(stateBadgeClass(providerManagementStatus(e.Enabled, func() string {
+			if e.Configured {
+				return "configured"
+			}
+			return providerStatusMissingSecret
+		}(), ""))),
+		func() string {
+			if e.Configured {
+				return "CONFIGURED"
+			}
+			return "MISSING KEY"
+		}(),
+		html.EscapeString(e.Category),
+	); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprint(w, `<div class="kv">`); err != nil {
+		return err
+	}
+	if err := renderProviderHealthRow(w, "credential store", "SQLite (encrypted)"); err != nil {
+		return err
+	}
+	if e.MaskedKey != "" {
+		if err := renderProviderHealthRow(w, "current key", e.MaskedKey); err != nil {
+			return err
+		}
+	}
+	if e.Notes != "" {
+		if err := renderProviderHealthRow(w, "notes", e.Notes); err != nil {
+			return err
+		}
+	}
+	if _, err := fmt.Fprintf(w,
+		`<form action="/admin/providers/%s/key" method="post"><input type="hidden" name="csrf_token" value="%s"/><input type="hidden" name="confirm_replace" value="yes"/><label>new api key</label><input type="password" name="new_api_key" autocomplete="new-password" spellcheck="false"/><button type="submit">Replace Key</button></form>`,
+		html.EscapeString(strings.ToLower(e.Name)),
+		html.EscapeString(csrfToken),
+	); err != nil {
+		return err
+	}
+	_, err := fmt.Fprint(w, `</div></div>`)
+	return err
+}
+
+func renderInfraProviderCard(w io.Writer, e NonAIProviderEntry) error {
+	if _, err := fmt.Fprint(w, `<div class="panel">`); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(w, `<h2>%s</h2>`, html.EscapeString(e.Name)); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(w, `<div class="badges"><span class="badge %s">%s</span><span class="badge %s">%s</span><span class="badge info">%s</span><span class="badge muted">config-managed</span></div>`,
+		html.EscapeString(stateBadgeClass(enabledBadgeState(e.Enabled))),
+		html.EscapeString(strings.ToUpper(enabledBadgeState(e.Enabled))),
+		html.EscapeString(stateBadgeClass(func() string {
+			if e.Configured {
+				return "configured"
+			}
+			return "missing"
+		}())),
+		func() string {
+			if e.Configured {
+				return "CONFIGURED"
+			}
+			return "NOT CONFIGURED"
+		}(),
+		html.EscapeString(e.Category),
+	); err != nil {
+		return err
+	}
+	if e.Notes != "" {
+		if _, err := fmt.Fprintf(w, `<p class="muted">%s</p>`, html.EscapeString(e.Notes)); err != nil {
+			return err
+		}
+	}
+	_, err := fmt.Fprint(w, `</div>`)
+	return err
+}
