@@ -113,6 +113,12 @@ func (s *ReportingEvidenceStore) Search(ctx context.Context, opts reporting.Evid
 		query += " AND decision = ?"
 		args = append(args, strings.TrimSpace(opts.Decision))
 	}
+	if opts.AbuseIPDBReported {
+		query += " AND json_extract(data, '$.abuseipdb_reported') = 1"
+	}
+	if opts.Suppressed {
+		query += " AND json_extract(data, '$.suppressed') = 1"
+	}
 	if !opts.From.IsZero() {
 		query += " AND timestamp >= ?"
 		args = append(args, opts.From.UTC())
@@ -164,6 +170,45 @@ func (s *ReportingEvidenceStore) Search(ctx context.Context, opts reporting.Evid
 		return nil, apperr.Wrap(op, err)
 	}
 	return out, nil
+}
+
+func (s *ReportingEvidenceStore) Count(ctx context.Context, opts reporting.EvidenceSearchOptions) (int, error) {
+	const op = "storage.sqlite.ReportingEvidenceStore.Count"
+	query := `SELECT COUNT(*) FROM abuseipdb_reporting_evidence WHERE 1=1`
+	args := []any{}
+	if strings.TrimSpace(opts.IP) != "" {
+		query += " AND ip = ?"
+		args = append(args, strings.TrimSpace(opts.IP))
+	}
+	if strings.TrimSpace(opts.Source) != "" {
+		query += " AND source = ?"
+		args = append(args, strings.TrimSpace(opts.Source))
+	}
+	if strings.TrimSpace(opts.SuppressionReason) != "" {
+		query += " AND suppression_reason = ?"
+		args = append(args, strings.TrimSpace(opts.SuppressionReason))
+	}
+	if strings.TrimSpace(opts.Decision) != "" {
+		query += " AND decision = ?"
+		args = append(args, strings.TrimSpace(opts.Decision))
+	}
+	if opts.AbuseIPDBReported {
+		query += " AND json_extract(data, '$.abuseipdb_reported') = 1"
+	}
+	if opts.Suppressed {
+		query += " AND json_extract(data, '$.suppressed') = 1"
+	}
+	if !opts.From.IsZero() {
+		query += " AND timestamp >= ?"
+		args = append(args, opts.From.UTC())
+	}
+	if !opts.To.IsZero() {
+		query += " AND timestamp <= ?"
+		args = append(args, opts.To.UTC())
+	}
+	var count int
+	err := s.db.Conn().QueryRowContext(ctx, query, args...).Scan(&count)
+	return count, apperr.Wrap(op, err)
 }
 
 func (s *ReportingEvidenceStore) noteWrite() {

@@ -51,6 +51,7 @@ func (s *Store) ReadAll() ([]Cycle, error) {
 
 	var cycles []Cycle
 	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
 	for scanner.Scan() {
 		var c Cycle
 		if err := json.Unmarshal(scanner.Bytes(), &c); err != nil {

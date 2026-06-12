@@ -923,12 +923,8 @@ func (s *Server) dashboardConsoleView(ctx context.Context) DashboardConsoleView 
 
 	reportedTotal := 0
 	if s.evidence != nil {
-		if evs, err := s.evidence.Search(ctx, reporting.EvidenceSearchOptions{Limit: 100_000}); err == nil {
-			for _, ev := range evs {
-				if ev.AbuseIPDBReported {
-					reportedTotal++
-				}
-			}
+		if n, err := s.evidence.Count(ctx, reporting.EvidenceSearchOptions{AbuseIPDBReported: true}); err == nil {
+			reportedTotal = n
 		}
 	}
 

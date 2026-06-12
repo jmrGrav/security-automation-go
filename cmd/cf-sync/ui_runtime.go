@@ -29,10 +29,10 @@ import (
 )
 
 func runUI(ctx context.Context, logger *slog.Logger, cfg *config.Config) error {
-	return runUIWithLocker(ctx, logger, cfg, true, nil)
+	return runUIWithLocker(ctx, logger, cfg, true, nil, nil)
 }
 
-func runUIWithLocker(ctx context.Context, logger *slog.Logger, cfg *config.Config, acquireLock bool, evidenceHolder *lazyEvidenceStore) error {
+func runUIWithLocker(ctx context.Context, logger *slog.Logger, cfg *config.Config, acquireLock bool, evidenceHolder *lazyEvidenceStore, sharedDB *sqlite.DB) error {
 	if !cfg.UI.Enabled {
 		return errors.New("ui mode requires UI_ENABLED=1 or ui.enabled=true")
 	}
@@ -74,12 +74,19 @@ func runUIWithLocker(ctx context.Context, logger *slog.Logger, cfg *config.Confi
 		logger.Info("instance lock acquired", "lock_file", lockFile)
 	}
 
-	// Open SQLite for setup wizard state persistence.
-	setupDB, err := sqlite.New(cfg.StateDir)
-	if err != nil {
-		return fmt.Errorf("open setup db: %w", err)
+	// Use the shared DB handle when available (daemon+UI co-process) to avoid two
+	// concurrent connection pools migrating the same file. Standalone -mode ui opens its own.
+	var setupDB *sqlite.DB
+	if sharedDB != nil {
+		setupDB = sharedDB
+	} else {
+		var dbErr error
+		setupDB, dbErr = sqlite.New(cfg.StateDir)
+		if dbErr != nil {
+			return fmt.Errorf("open setup db: %w", dbErr)
+		}
+		defer setupDB.Close()
 	}
-	defer setupDB.Close()
 	setupStore := sqlite.NewSetupStore(setupDB)
 	credentialStore := sqlite.NewCredentialStore(setupDB)
 

@@ -214,6 +214,16 @@ func (s *fakeEvidenceStore) Search(_ context.Context, opts reporting.EvidenceSea
 	return out, nil
 }
 
+func (s *fakeEvidenceStore) Count(_ context.Context, opts reporting.EvidenceSearchOptions) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	n := len(s.evidence)
+	if opts.Limit > 0 && n > opts.Limit {
+		n = opts.Limit
+	}
+	return n, nil
+}
+
 func withURIs(event classifier.Event, uris []string) classifier.Event {
 	event.URIs = uris
 	event.URI = uris[0]

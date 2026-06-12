@@ -133,17 +133,8 @@ func runCFSync(configPath, mode string, dryRun bool, format string, metricsAddr 
 		cfg.UI.Enabled = true // Force enable
 	}
 
-	// Always start UI server in background if enabled.
-	evidenceHolder := &lazyEvidenceStore{}
-	if cfg.UI.Enabled {
-		uiCfg := *cfg // snapshot: runUIWithLocker writes its own credential fields; avoid race with writes below
-		go func() {
-			if err := runUIWithLocker(ctx, logger, &uiCfg, false, evidenceHolder); err != nil {
-				logger.Error("UI server failed", "error", err)
-			}
-		}()
-	}
-
+	// Open the main DB before launching the UI goroutine so both share a single connection
+	// pool against runtime.db and migrations never run concurrently in the same process.
 	bootstrapDB, err := sqlite.New(cfg.StateDir)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -152,6 +143,17 @@ func runCFSync(configPath, mode string, dryRun bool, format string, metricsAddr 
 	defer bootstrapDB.Close()
 	setupStore := sqlite.NewSetupStore(bootstrapDB)
 	credentialStore := sqlite.NewCredentialStore(bootstrapDB)
+
+	// Always start UI server in background if enabled.
+	evidenceHolder := &lazyEvidenceStore{}
+	if cfg.UI.Enabled {
+		uiCfg := *cfg // snapshot: runUIWithLocker writes its own credential fields; avoid race with writes below
+		go func() {
+			if err := runUIWithLocker(ctx, logger, &uiCfg, false, evidenceHolder, bootstrapDB); err != nil {
+				logger.Error("UI server failed", "error", err)
+			}
+		}()
+	}
 
 	// If in UI mode and setup is not yet complete, wait for operator.
 	if mode == "ui" {

@@ -28,38 +28,14 @@ func (s *Server) buildPipelineHealthView(ctx context.Context) PipelineHealthView
 		return PipelineHealthView{Error: "Evidence store not available — daemon not yet started."}
 	}
 
-	// Load up to 100k rows for counting. Counts become unreliable past this cap.
-	const searchCap = 100_000
-	all, err := s.evidence.Search(ctx, reporting.EvidenceSearchOptions{Limit: searchCap})
-	if err != nil {
-		return PipelineHealthView{Error: fmt.Sprintf("Error loading evidence: %v", err)}
-	}
-
-	counters := make(map[string]*PipelineHealthRow, len(pipelineSources))
-	for _, src := range pipelineSources {
-		counters[src.slug] = &PipelineHealthRow{Source: src.display}
-	}
-
-	for _, ev := range all {
-		row, ok := counters[ev.Source]
-		if !ok {
-			continue
-		}
-		row.Classified++
-		switch {
-		case ev.AbuseIPDBReported:
-			row.Reported++
-		case ev.Suppressed:
-			row.Suppressed++
-		case ev.Decision == "report_pending":
-			row.Pending++
-		}
-	}
-
 	rows := make([]PipelineHealthRow, 0, len(pipelineSources))
 	total := PipelineHealthRow{Source: "Total"}
 	for _, src := range pipelineSources {
-		row := *counters[src.slug]
+		row := PipelineHealthRow{Source: src.display}
+		row.Classified, _ = s.evidence.Count(ctx, reporting.EvidenceSearchOptions{Source: src.slug})
+		row.Reported, _ = s.evidence.Count(ctx, reporting.EvidenceSearchOptions{Source: src.slug, AbuseIPDBReported: true})
+		row.Suppressed, _ = s.evidence.Count(ctx, reporting.EvidenceSearchOptions{Source: src.slug, Suppressed: true})
+		row.Pending, _ = s.evidence.Count(ctx, reporting.EvidenceSearchOptions{Source: src.slug, Decision: "report_pending"})
 		rows = append(rows, row)
 		total.Classified += row.Classified
 		total.Reported += row.Reported
@@ -68,9 +44,8 @@ func (s *Server) buildPipelineHealthView(ctx context.Context) PipelineHealthView
 	}
 
 	return PipelineHealthView{
-		Rows:      rows,
-		Total:     total,
-		Truncated: len(all) >= searchCap,
+		Rows:  rows,
+		Total: total,
 	}
 }
 

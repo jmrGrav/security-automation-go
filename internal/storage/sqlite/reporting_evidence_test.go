@@ -327,3 +327,85 @@ func TestReportReservationStoreClaimRetryableLeasesRowsUntilClaimExpires(t *test
 		t.Fatalf("expected row to be retryable after claim lease expiry, got %+v", third)
 	}
 }
+
+func TestReportingEvidenceStore_Count(t *testing.T) {
+	dir := t.TempDir()
+	db, err := New(dir)
+	if err != nil {
+		t.Fatalf("new db: %v", err)
+	}
+	defer db.Close()
+
+	ctx := context.Background()
+	store := NewReportingEvidenceStore(db)
+
+	evs := []reporting.DecisionEvidence{
+		{EvidenceID: "ev-1", Source: "cloudflare_waf", IP: "1.1.1.1", AbuseIPDBReported: true, Decision: "report", Timestamp: time.Now()},
+		{EvidenceID: "ev-2", Source: "cloudflare_waf", IP: "2.2.2.2", AbuseIPDBReported: false, Suppressed: true, Decision: "suppressed", Timestamp: time.Now()},
+		{EvidenceID: "ev-3", Source: "crowdsec_waf", IP: "3.3.3.3", AbuseIPDBReported: false, Decision: "report_pending", Timestamp: time.Now()},
+	}
+	for _, ev := range evs {
+		if err := store.Append(ctx, ev); err != nil {
+			t.Fatalf("append: %v", err)
+		}
+	}
+
+	total, err := store.Count(ctx, reporting.EvidenceSearchOptions{})
+	if err != nil {
+		t.Fatalf("count all: %v", err)
+	}
+	if total != 3 {
+		t.Errorf("count all: want 3, got %d", total)
+	}
+
+	reported, err := store.Count(ctx, reporting.EvidenceSearchOptions{AbuseIPDBReported: true})
+	if err != nil {
+		t.Fatalf("count reported: %v", err)
+	}
+	if reported != 1 {
+		t.Errorf("count reported: want 1, got %d", reported)
+	}
+
+	suppressed, err := store.Count(ctx, reporting.EvidenceSearchOptions{Suppressed: true})
+	if err != nil {
+		t.Fatalf("count suppressed: %v", err)
+	}
+	if suppressed != 1 {
+		t.Errorf("count suppressed: want 1, got %d", suppressed)
+	}
+
+	bySrc, err := store.Count(ctx, reporting.EvidenceSearchOptions{Source: "crowdsec_waf"})
+	if err != nil {
+		t.Fatalf("count by source: %v", err)
+	}
+	if bySrc != 1 {
+		t.Errorf("count by source: want 1, got %d", bySrc)
+	}
+}
+
+func TestReportingEvidenceStore_SearchAbuseIPDBReportedFilter(t *testing.T) {
+	dir := t.TempDir()
+	db, err := New(dir)
+	if err != nil {
+		t.Fatalf("new db: %v", err)
+	}
+	defer db.Close()
+
+	ctx := context.Background()
+	store := NewReportingEvidenceStore(db)
+
+	if err := store.Append(ctx, reporting.DecisionEvidence{EvidenceID: "r1", IP: "1.1.1.1", AbuseIPDBReported: true, Timestamp: time.Now()}); err != nil {
+		t.Fatalf("append: %v", err)
+	}
+	if err := store.Append(ctx, reporting.DecisionEvidence{EvidenceID: "r2", IP: "2.2.2.2", AbuseIPDBReported: false, Timestamp: time.Now()}); err != nil {
+		t.Fatalf("append: %v", err)
+	}
+
+	results, err := store.Search(ctx, reporting.EvidenceSearchOptions{AbuseIPDBReported: true})
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	if len(results) != 1 || results[0].EvidenceID != "r1" {
+		t.Errorf("expected only reported ev, got %+v", results)
+	}
+}

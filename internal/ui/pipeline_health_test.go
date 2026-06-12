@@ -41,12 +41,38 @@ func (s *stubEvidenceStore) Search(_ context.Context, opts reporting.EvidenceSea
 		if opts.Source != "" && ev.Source != opts.Source {
 			continue
 		}
+		if opts.AbuseIPDBReported && !ev.AbuseIPDBReported {
+			continue
+		}
+		if opts.Suppressed && !ev.Suppressed {
+			continue
+		}
+		if opts.Decision != "" && ev.Decision != opts.Decision {
+			continue
+		}
 		out = append(out, ev)
+	}
+	if opts.Offset > 0 {
+		if opts.Offset >= len(out) {
+			return nil, nil
+		}
+		out = out[opts.Offset:]
 	}
 	if opts.Limit > 0 && len(out) > opts.Limit {
 		out = out[:opts.Limit]
 	}
 	return out, nil
+}
+
+func (s *stubEvidenceStore) Count(_ context.Context, opts reporting.EvidenceSearchOptions) (int, error) {
+	results, err := s.Search(context.Background(), reporting.EvidenceSearchOptions{
+		Source:            opts.Source,
+		Decision:          opts.Decision,
+		AbuseIPDBReported: opts.AbuseIPDBReported,
+		Suppressed:        opts.Suppressed,
+		SuppressionReason: opts.SuppressionReason,
+	})
+	return len(results), err
 }
 
 func TestPipelineHealthMatrix(t *testing.T) {

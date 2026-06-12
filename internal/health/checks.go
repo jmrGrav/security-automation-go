@@ -3,6 +3,7 @@ package health
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"syscall"
 )
@@ -176,15 +177,20 @@ func CheckOpenResty(cfg Config) Check {
 	if strings.TrimSpace(cfg.OpenRestyEventsFile) == "" {
 		return Check{Name: "openresty", Status: Green, Reason: "OpenResty not configured (optional)"}
 	}
-	if _, err := os.Stat(cfg.OpenRestyEventsFile); err != nil {
+	// Check the directory, not the file itself. The pipeline removes the events file after
+	// each processing cycle, so the file is legitimately absent between cycles. A missing
+	// directory means the path is misconfigured or OpenResty has never run; a missing file
+	// alone just means no events are pending right now.
+	dir := filepath.Dir(cfg.OpenRestyEventsFile)
+	if _, err := os.Stat(dir); err != nil {
 		return Check{
 			Name:        "openresty",
 			Status:      Yellow,
-			Reason:      "Events file configured but missing: " + cfg.OpenRestyEventsFile,
-			Remediation: "Ensure OpenResty is running and lua state is being written",
+			Reason:      "Events directory configured but missing: " + dir,
+			Remediation: "Ensure OpenResty is running and lua writes to " + cfg.OpenRestyEventsFile,
 		}
 	}
-	return Check{Name: "openresty", Status: Green, Reason: "Events file present"}
+	return Check{Name: "openresty", Status: Green, Reason: "OpenResty events directory present"}
 }
 
 func CheckNginx(cfg Config) Check {

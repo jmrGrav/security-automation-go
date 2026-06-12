@@ -46,6 +46,12 @@ func (f *fakeEvidenceStore) Search(_ context.Context, opts reporting.EvidenceSea
 		if opts.SuppressionReason != "" && r.SuppressionReason != opts.SuppressionReason {
 			continue
 		}
+		if opts.AbuseIPDBReported && !r.AbuseIPDBReported {
+			continue
+		}
+		if opts.Suppressed && !r.Suppressed {
+			continue
+		}
 		out = append(out, r)
 	}
 	limit := opts.Limit
@@ -60,6 +66,18 @@ func (f *fakeEvidenceStore) Search(_ context.Context, opts reporting.EvidenceSea
 		end = len(out)
 	}
 	return out[opts.Offset:end], nil
+}
+
+func (f *fakeEvidenceStore) Count(_ context.Context, opts reporting.EvidenceSearchOptions) (int, error) {
+	all, err := f.Search(context.Background(), reporting.EvidenceSearchOptions{
+		IP:                opts.IP,
+		Source:            opts.Source,
+		Decision:          opts.Decision,
+		SuppressionReason: opts.SuppressionReason,
+		AbuseIPDBReported: opts.AbuseIPDBReported,
+		Suppressed:        opts.Suppressed,
+	})
+	return len(all), err
 }
 
 func TestEvidencePage_RequiresAuth(t *testing.T) {

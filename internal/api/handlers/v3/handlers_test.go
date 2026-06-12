@@ -36,6 +36,11 @@ func (s fakeEvidenceStore) Search(_ context.Context, opts reporting.EvidenceSear
 	return out, nil
 }
 
+func (s fakeEvidenceStore) Count(_ context.Context, opts reporting.EvidenceSearchOptions) (int, error) {
+	out, err := s.Search(context.Background(), opts)
+	return len(out), err
+}
+
 type fakeLineageStore struct {
 	items     map[string]ownership.LineageEvent
 	lastLimit int
