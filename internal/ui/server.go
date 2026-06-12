@@ -29,6 +29,7 @@ import (
 	"github.com/jm/security-automation-go/internal/observability/metrics"
 	"github.com/jm/security-automation-go/internal/security"
 	"github.com/jm/security-automation-go/internal/security/enrichment"
+	"github.com/jm/security-automation-go/internal/services/reporting"
 )
 
 const (
@@ -67,6 +68,7 @@ type Options struct {
 	AuditSink           AuditSink
 	Logger              *slog.Logger
 	Enrichment          *enrichment.Service
+	EvidenceStore       reporting.EvidenceStore
 	AIExplain           aigateway.Gateway
 	AIExplainBuilder    func(ai.Config) aigateway.Gateway
 	AIConfig            ai.Config
@@ -101,6 +103,7 @@ type Server struct {
 	aiExplainBuilder    func(ai.Config) aigateway.Gateway
 	providerFactories   map[string]ProviderFactory
 	setupStore          SetupStorer
+	evidence            reporting.EvidenceStore
 	validateCloudflare  func(context.Context, string, string) error
 	validateAbuseIPDB   func(context.Context, string) error
 	validateBetterStack func(context.Context, string) error
@@ -143,6 +146,7 @@ func NewServer(cfg *config.Config, opts Options) (*Server, error) {
 		limiter:             newRateLimiter(20, time.Minute),
 		uiSecret:            uiSecret,
 		enrichment:          opts.Enrichment,
+		evidence:            opts.EvidenceStore,
 		aiBaseConfig:        opts.AIConfig,
 		aiConfig:            effectiveAIConfig,
 		aiExplainBuilder:    opts.AIExplainBuilder,
@@ -215,6 +219,7 @@ func (s *Server) routes() {
 	s.mux.Handle("POST /admin/providers/{name}/disable", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleProviderDisable)))))
 	s.mux.Handle("GET /forensic", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleForensicPage)))))
 	s.mux.Handle("POST /forensic", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleForensicLookup)))))
+	s.mux.Handle("GET /evidence", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleEvidencePage)))))
 	s.mux.Handle("GET /about", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleAboutPage)))))
 	s.mux.Handle("GET /system", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleAboutPage)))))
 	s.mux.Handle("GET /audit", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleAuditTrailPage)))))
@@ -582,23 +587,30 @@ func (s *Server) handleForensicLookup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if s.enrichment == nil {
-		view.Error = "enrichment service not configured"
-		renderForensicPage(r.Context(), w, view)
-		return
-	}
-
-	summary, err := s.enrichment.Enrich(r.Context(), ip, enrichment.LookupOptions{ManualForensics: true})
-	if err != nil {
-		view.Error = fmt.Sprintf("enrichment failed: %v", err)
-		renderForensicPage(r.Context(), w, view)
-		return
-	}
-
 	s.audit.Record("forensic_lookup", map[string]string{"ip": ipStr})
-	view.Summary = summary
-	view.Assess = s.enrichment.Assess(summary)
-	view.HasData = true
+
+	if s.enrichment != nil {
+		summary, err := s.enrichment.Enrich(r.Context(), ip, enrichment.LookupOptions{ManualForensics: true})
+		if err == nil {
+			view.Summary = summary
+			view.Assess = s.enrichment.Assess(summary)
+			view.HasEnrichment = true
+		} else {
+			view.EnrichmentError = fmt.Sprintf("enrichment failed: %v", err)
+		}
+	}
+
+	if s.evidence != nil {
+		local, err := s.evidence.Search(r.Context(), reporting.EvidenceSearchOptions{
+			IP:    ipStr,
+			Limit: 20,
+		})
+		if err == nil {
+			view.LocalEvidence = local
+		}
+	}
+
+	view.HasData = view.HasEnrichment || len(view.LocalEvidence) > 0
 	renderForensicPage(r.Context(), w, view)
 }
 
@@ -948,7 +960,9 @@ func openRestyDashboardDetail(detectors []detect.Result, eventsFile string) stri
 		if d.Name == "openresty" {
 			if d.Healthy {
 				if strings.TrimSpace(eventsFile) != "" {
-					return "OpenResty active (WAF events)"
+					if _, err := os.Stat(eventsFile); err == nil {
+						return "OpenResty active (WAF events)"
+					}
 				}
 				return "OpenResty active (nginx log mode)"
 			}

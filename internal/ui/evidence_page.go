@@ -1,0 +1,211 @@
+package ui
+
+import (
+	"context"
+	"fmt"
+	"html"
+	"io"
+	"net/http"
+	"strconv"
+	"strings"
+
+	"github.com/a-h/templ"
+	"github.com/jm/security-automation-go/internal/services/reporting"
+)
+
+const evidencePageSize = 50
+
+type EvidenceView struct {
+	Filter    string
+	Page      int
+	PageSize  int
+	Total     int
+	HasPrev   bool
+	HasNext   bool
+	Entries   []reporting.DecisionEvidence
+	Badges    []StatusItem
+	EmptyText string
+}
+
+func (s *Server) handleEvidencePage(w http.ResponseWriter, r *http.Request) {
+	filter := strings.TrimSpace(r.URL.Query().Get("filter"))
+	page := parsePositiveInt(r.URL.Query().Get("page"), 1)
+	pageSize := clampInt(parsePositiveInt(r.URL.Query().Get("limit"), evidencePageSize), 10, 200)
+
+	view := EvidenceView{
+		Filter:    filter,
+		Page:      page,
+		PageSize:  pageSize,
+		EmptyText: "No WAF events recorded yet. Events will appear here once the daemon processes security events.",
+	}
+
+	if s.evidence == nil {
+		view.EmptyText = "Evidence store not available — daemon not yet started."
+		_ = EvidencePage(view).Render(r.Context(), w)
+		return
+	}
+
+	opts := reporting.EvidenceSearchOptions{
+		Limit:  10000,
+		Offset: 0,
+	}
+	switch filter {
+	case "reported":
+		// Reported filter: search for AbuseIPDB-reported events. We use a
+		// broad search and filter client-side since EvidenceSearchOptions
+		// doesn't expose an AbuseIPDBReported field directly.
+	case "suppressed":
+		opts.SuppressionReason = "low_confidence"
+	}
+
+	all, err := s.evidence.Search(r.Context(), opts)
+	if err != nil {
+		view.EmptyText = fmt.Sprintf("Error loading evidence: %v", err)
+		_ = EvidencePage(view).Render(r.Context(), w)
+		return
+	}
+
+	if filter == "reported" {
+		filtered := all[:0]
+		for _, ev := range all {
+			if ev.AbuseIPDBReported {
+				filtered = append(filtered, ev)
+			}
+		}
+		all = filtered
+	}
+
+	total := len(all)
+	start := (page - 1) * pageSize
+	var entries []reporting.DecisionEvidence
+	hasPrev, hasNext := false, false
+	if start < total {
+		end := start + pageSize
+		if end > total {
+			end = total
+		}
+		entries = all[start:end]
+		hasPrev = start > 0
+		hasNext = end < total
+	}
+
+	reportedCount := 0
+	for _, ev := range all {
+		if ev.AbuseIPDBReported {
+			reportedCount++
+		}
+	}
+
+	badges := []StatusItem{
+		{Label: "Total events", Level: "healthy", Detail: strconv.Itoa(total)},
+		{Label: "Reported", Level: "live", Detail: strconv.Itoa(reportedCount)},
+		{Label: "Page", Level: "badge", Detail: fmt.Sprintf("%d / %d", page, maxInt(1, (total+pageSize-1)/pageSize))},
+	}
+	if filter != "" {
+		badges = append(badges, StatusItem{Label: "Filter", Level: "warning", Detail: filter})
+	}
+
+	view.Total = total
+	view.HasPrev = hasPrev
+	view.HasNext = hasNext
+	view.Entries = entries
+	view.Badges = badges
+	if total == 0 {
+		view.EmptyText = "No matching events."
+	}
+
+	_ = EvidencePage(view).Render(r.Context(), w)
+}
+
+func EvidencePage(view EvidenceView) templ.Component {
+	return ConsoleLayout(shellView{
+		Title:       "WAF Events",
+		Headline:    "WAF Event History",
+		Subtitle:    "Paginated view of all processed WAF events from the scoped evidence store.",
+		Active:      "/evidence",
+		BadgeLabels: view.Badges,
+		Body: templ.ComponentFunc(func(ctx context.Context, w io.Writer) error {
+			if _, err := fmt.Fprint(w, `<div class="panel"><form method="get" action="/evidence" class="stack"><div class="row" style="grid-template-columns: minmax(8rem, 9rem) minmax(0, 1fr)"><span>Filter</span><span><select name="filter"><option value=""`); err != nil {
+				return err
+			}
+			if view.Filter == "" {
+				if _, err := fmt.Fprint(w, ` selected`); err != nil {
+					return err
+				}
+			}
+			if _, err := fmt.Fprint(w, `>All events</option><option value="reported"`); err != nil {
+				return err
+			}
+			if view.Filter == "reported" {
+				if _, err := fmt.Fprint(w, ` selected`); err != nil {
+					return err
+				}
+			}
+			if _, err := fmt.Fprint(w, `>Reported to AbuseIPDB</option><option value="suppressed"`); err != nil {
+				return err
+			}
+			if view.Filter == "suppressed" {
+				if _, err := fmt.Fprint(w, ` selected`); err != nil {
+					return err
+				}
+			}
+			if _, err := fmt.Fprint(w, `>Low confidence (suppressed)</option></select></span></div><div class="row" style="grid-template-columns: minmax(8rem, 9rem) minmax(0, 1fr)"><span>Limit</span><span><input name="limit" type="number" min="10" max="200" value="`); err != nil {
+				return err
+			}
+			if _, err := io.WriteString(w, strconv.Itoa(view.PageSize)); err != nil {
+				return err
+			}
+			if _, err := fmt.Fprint(w, `" /></span></div><div class="stack" style="flex-direction:row; flex-wrap:wrap"><button type="submit">Apply</button>`); err != nil {
+				return err
+			}
+			if view.HasPrev {
+				prevURL := fmt.Sprintf(`/evidence?filter=%s&page=%d&limit=%d`, html.EscapeString(view.Filter), view.Page-1, view.PageSize)
+				if _, err := fmt.Fprintf(w, `<a class="badge" href="%s">← Prev</a>`, prevURL); err != nil {
+					return err
+				}
+			}
+			if view.HasNext {
+				nextURL := fmt.Sprintf(`/evidence?filter=%s&page=%d&limit=%d`, html.EscapeString(view.Filter), view.Page+1, view.PageSize)
+				if _, err := fmt.Fprintf(w, `<a class="badge" href="%s">Next →</a>`, nextURL); err != nil {
+					return err
+				}
+			}
+			if _, err := fmt.Fprint(w, `</div></form></div>`); err != nil {
+				return err
+			}
+
+			if len(view.Entries) == 0 {
+				return writeEmptyState(w, view.EmptyText)
+			}
+
+			if _, err := fmt.Fprint(w, `<table><thead><tr><th>timestamp</th><th>source</th><th>IP</th><th>type</th><th>score</th><th>confidence</th><th>decision</th><th>status</th></tr></thead><tbody>`); err != nil {
+				return err
+			}
+			for _, ev := range view.Entries {
+				statusBadge := `<span class="badge">ok</span>`
+				switch {
+				case ev.AbuseIPDBReported:
+					statusBadge = `<span class="badge bad">AbuseIPDB</span>`
+				case ev.Suppressed:
+					statusBadge = `<span class="badge warning">suppressed</span>`
+				case ev.Decision == "report_pending":
+					statusBadge = `<span class="badge live">pending</span>`
+				}
+				if _, err := fmt.Fprintf(w, `<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%d</td><td>%.2f</td><td>%s</td><td>%s</td></tr>`,
+					html.EscapeString(ev.Timestamp.Format("2006-01-02 15:04:05")),
+					html.EscapeString(ev.Source),
+					html.EscapeString(ev.IP),
+					html.EscapeString(ev.AbuseType),
+					ev.RiskScore,
+					ev.Confidence,
+					html.EscapeString(ev.Decision),
+					statusBadge,
+				); err != nil {
+					return err
+				}
+			}
+			_, err := fmt.Fprint(w, `</tbody></table>`)
+			return err
+		}),
+	})
+}

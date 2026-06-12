@@ -147,9 +147,9 @@ func TestForensic_ProtectedNetworkShowsBadge(t *testing.T) {
 	}
 }
 
-func TestForensic_NoEnrichmentServiceShowsError(t *testing.T) {
+func TestForensic_NoEnrichmentServiceReturnsEmptyState(t *testing.T) {
 	srv, _, _ := newTestServer(t, map[string]string{"UI_SECRET": "test-secret"})
-	// enrichment is nil (not wired)
+	// enrichment and evidence are both nil — lookup should succeed with empty state
 	cookie := loginCookie(t, srv, "test-password-123!@#")
 
 	req := httptest.NewRequest(http.MethodPost, "/forensic", strings.NewReader("ip=203.0.113.1"))
@@ -159,8 +159,12 @@ func TestForensic_NoEnrichmentServiceShowsError(t *testing.T) {
 	rr := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rr, req)
 
-	if !strings.Contains(rr.Body.String(), "enrichment service not configured") {
-		t.Fatalf("expected service-not-configured error, got: %s", rr.Body.String())
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	// Should not show enrichment-not-configured as a fatal error — just no data
+	if strings.Contains(rr.Body.String(), "enrichment service not configured") {
+		t.Fatalf("no longer expected enrichment-not-configured error on nil enrichment, got: %s", rr.Body.String())
 	}
 }
 

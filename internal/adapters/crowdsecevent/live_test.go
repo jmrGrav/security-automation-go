@@ -39,7 +39,7 @@ func TestLiveSourceReadsRecentBansAndCorrelatesURIs(t *testing.T) {
 	}
 }
 
-func TestLiveSourceSkipsMalformedAndUncorrelatedEntries(t *testing.T) {
+func TestLiveSourceSkipsMalformedEntries(t *testing.T) {
 	dir := t.TempDir()
 	decisionsLog := filepath.Join(dir, "decisions.log")
 	nginxDir := filepath.Join(dir, "nginx")
@@ -50,7 +50,7 @@ func TestLiveSourceSkipsMalformedAndUncorrelatedEntries(t *testing.T) {
 	content := strings.Join([]string{
 		`{"dt":"` + now + `","cs":{"event_type":"decision","origin":"crowdsec","type":"ban","scenario":"crowdsecurity/http-sensitive-files","ip":"8.8.8.8","id":"abc"}}`,
 		`{"dt":"bad-time","cs":{"event_type":"decision","origin":"crowdsec","type":"ban","scenario":"crowdsecurity/http-sensitive-files","ip":"8.8.4.4","id":"def"}}`,
-		`{"dt":"` + now + `","cs":{"event_type":"decision","origin":"crowdsec","type":"ban","scenario":"crowdsecurity/http-sensitive-files","ip":"8.8.4.4","id":"ghi"}}`,
+		`{"dt":"` + now + `","cs":{"event_type":"decision","origin":"crowdsec","type":"ban","scenario":"crowdsecurity/ssh-bf","ip":"8.8.4.4","id":"ghi"}}`,
 	}, "\n") + "\n"
 	if err := os.WriteFile(decisionsLog, []byte(content), 0644); err != nil {
 		t.Fatalf("write decisions log: %v", err)
@@ -65,10 +65,46 @@ func TestLiveSourceSkipsMalformedAndUncorrelatedEntries(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read: %v", err)
 	}
-	if len(events) != 1 {
-		t.Fatalf("expected only one correlated valid event, got %d", len(events))
+	// 8.8.8.8 has nginx URI; 8.8.4.4 (ssh-bf) has no nginx URI but must not
+	// be silently dropped — Normalize() will use "unknown" as URI placeholder.
+	if len(events) != 2 {
+		t.Fatalf("expected 2 events (http + no-uri non-http ban), got %d", len(events))
 	}
-	if events[0].IP != "8.8.8.8" || events[0].URIs[0] != "/wp-login.php" {
-		t.Fatalf("unexpected event: %+v", events[0])
+	var httpEvent, noURIEvent RawEvent
+	for _, ev := range events {
+		if ev.IP == "8.8.8.8" {
+			httpEvent = ev
+		} else {
+			noURIEvent = ev
+		}
+	}
+	if httpEvent.IP == "" || len(httpEvent.URIs) != 1 || httpEvent.URIs[0] != "/wp-login.php" {
+		t.Fatalf("unexpected http event: %+v", httpEvent)
+	}
+	if noURIEvent.IP != "8.8.4.4" || len(noURIEvent.URIs) != 0 {
+		t.Fatalf("unexpected no-uri event: %+v", noURIEvent)
+	}
+	if noURIEvent.RuleName != "crowdsecurity/ssh-bf" {
+		t.Fatalf("expected rule_name to carry scenario as explicit ban reason, got %q", noURIEvent.RuleName)
+	}
+}
+
+// Non-HTTP bans (SSH brute-force, raw TCP) have no nginx URI. Normalize must
+// substitute "unknown" so the event passes through the pipeline.
+func TestNormalizeEmptyURIsFallsBackToUnknown(t *testing.T) {
+	ev, err := Normalize(RawEvent{
+		IP:        "1.2.3.4",
+		URIs:      nil,
+		RuleID:    "ssh-1",
+		RuleName:  "crowdsecurity/ssh-bf",
+		Timestamp: time.Now().UTC(),
+		Hits:      1,
+		WindowSec: 3600,
+	})
+	if err != nil {
+		t.Fatalf("Normalize with empty URIs must not error: %v", err)
+	}
+	if ev.URI != "unknown" || len(ev.URIs) != 1 || ev.URIs[0] != "unknown" {
+		t.Fatalf("expected URI=unknown, got %+v", ev)
 	}
 }

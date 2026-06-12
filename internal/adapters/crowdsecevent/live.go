@@ -97,9 +97,6 @@ func (s *LiveSource) Read(ctx context.Context) ([]RawEvent, error) {
 		}
 
 		uris := s.lookupURIs(ip, 5)
-		if len(uris) == 0 {
-			continue
-		}
 
 		events = append(events, RawEvent{
 			IP:        ip,

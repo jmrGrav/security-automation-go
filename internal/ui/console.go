@@ -348,6 +348,7 @@ func consoleNav(active string) []navItem {
 		{Label: "Providers", Href: "/providers"},
 		{Label: "Health", Href: "/health"},
 		{Label: "Forensic", Href: "/forensic"},
+		{Label: "WAF Events", Href: "/evidence"},
 		{Label: "Security Intelligence", Href: "/intelligence"},
 		{Label: "Timeline", Href: "/timeline"},
 		{Label: "Audit Trail", Href: "/audit"},

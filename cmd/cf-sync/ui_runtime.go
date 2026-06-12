@@ -28,10 +28,10 @@ import (
 )
 
 func runUI(ctx context.Context, logger *slog.Logger, cfg *config.Config) error {
-	return runUIWithLocker(ctx, logger, cfg, true)
+	return runUIWithLocker(ctx, logger, cfg, true, nil)
 }
 
-func runUIWithLocker(ctx context.Context, logger *slog.Logger, cfg *config.Config, acquireLock bool) error {
+func runUIWithLocker(ctx context.Context, logger *slog.Logger, cfg *config.Config, acquireLock bool, evidenceHolder *lazyEvidenceStore) error {
 	if !cfg.UI.Enabled {
 		return errors.New("ui mode requires UI_ENABLED=1 or ui.enabled=true")
 	}
@@ -146,6 +146,7 @@ func runUIWithLocker(ctx context.Context, logger *slog.Logger, cfg *config.Confi
 		SecretProvider:  ui.NewFileSecretProvider(cfg.UI.SecretFile),
 		AuditSink:       auditSink,
 		Logger:          logger,
+		EvidenceStore:   evidenceHolder,
 		AIExplainBuilder: func(effective ai.Config) aigateway.Gateway {
 			return aigateway.NewService(effective, buildAIProviders(effective, logger), nil, auditSink)
 		},
