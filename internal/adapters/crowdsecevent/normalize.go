@@ -27,7 +27,10 @@ func Normalize(raw RawEvent) (classifier.Event, error) {
 	}
 	uris := normalizeURIs(raw.URIs)
 	if len(uris) == 0 {
-		return classifier.Event{}, fmt.Errorf("crowdsecevent normalize: at least one uri is required")
+		// Non-HTTP bans (SSH brute-force, raw TCP) have no nginx URI. Use
+		// "unknown" so the event is not silently dropped — the rule_name
+		// (CrowdSec scenario) carries the explicit reason for the ban.
+		uris = []string{"unknown"}
 	}
 	return classifier.Event{
 		IP:        raw.IP,
