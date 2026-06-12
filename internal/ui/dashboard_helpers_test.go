@@ -1,12 +1,16 @@
 package ui
 
 import (
+	"context"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
 
 	"github.com/jm/security-automation-go/internal/config"
 	"github.com/jm/security-automation-go/internal/detect"
+	"github.com/jm/security-automation-go/internal/services/reporting"
 )
 
 // ---------------------------------------------------------------------------
@@ -118,7 +122,7 @@ func TestOpenRestyDashboardDetail_WAFEventsFileMissing(t *testing.T) {
 
 func TestDashboard_StubPanelsAreDisabled(t *testing.T) {
 	srv := newCFTestServer(t, nil, "tok", "zone")
-	view := srv.dashboardConsoleView()
+	view := srv.dashboardConsoleView(context.Background())
 	for _, label := range []string{"HA / fencing", "Replay", "Recovery"} {
 		for _, item := range view.Statuses {
 			if item.Label == label && item.Level == "warning" {
@@ -142,6 +146,74 @@ func TestWorkflowPages_StubBadgesAreDisabled(t *testing.T) {
 				t.Errorf("%s page badge %q must not carry warning level", tc.name, b.Label)
 			}
 		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Dashboard reported total from evidence store
+// ---------------------------------------------------------------------------
+
+func TestDashboard_ReportedTotalFromEvidenceStore(t *testing.T) {
+	srv, _, _ := newTestServer(t, nil)
+	srv.evidence = &stubEvidenceStore{
+		items: []reporting.DecisionEvidence{
+			{EvidenceID: "a", Source: "cloudflare_waf", AbuseIPDBReported: true},
+			{EvidenceID: "b", Source: "cloudflare_waf", AbuseIPDBReported: true},
+			{EvidenceID: "c", Source: "crowdsec_waf", Suppressed: true},
+		},
+	}
+
+	view := srv.dashboardConsoleView(context.Background())
+
+	if !view.EvidenceWired {
+		t.Fatal("EvidenceWired should be true when evidence store is set")
+	}
+	if view.ReportedTotal != 2 {
+		t.Errorf("ReportedTotal: want 2, got %d", view.ReportedTotal)
+	}
+}
+
+func TestDashboard_ReportedTotalZeroWhenEvidenceNotWired(t *testing.T) {
+	srv := newCFTestServer(t, nil, "tok", "zone")
+	// srv.evidence is nil — daemon not wired
+
+	view := srv.dashboardConsoleView(context.Background())
+
+	if view.EvidenceWired {
+		t.Fatal("EvidenceWired should be false when evidence store is nil")
+	}
+	if view.ReportedTotal != 0 {
+		t.Errorf("ReportedTotal should be 0 when not wired, got %d", view.ReportedTotal)
+	}
+}
+
+func TestDashboard_ReportedTotalAppearsInPage(t *testing.T) {
+	srv, _, _ := newTestServer(t, nil)
+	srv.evidence = &stubEvidenceStore{
+		items: []reporting.DecisionEvidence{
+			{EvidenceID: "x", Source: "cloudflare_waf", AbuseIPDBReported: true},
+			{EvidenceID: "y", Source: "cloudflare_waf", AbuseIPDBReported: true},
+			{EvidenceID: "z", Source: "cloudflare_waf", AbuseIPDBReported: true},
+		},
+	}
+	cookie := loginCookie(t, srv, "test-password-123!@#")
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.AddCookie(cookie)
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rr.Code)
+	}
+	body := rr.Body.String()
+	if !strings.Contains(body, "AbuseIPDB Reported") {
+		t.Errorf("dashboard should show AbuseIPDB Reported widget: %s", body)
+	}
+	if !strings.Contains(body, "3") {
+		t.Errorf("dashboard should show reported count 3: %s", body)
+	}
+	if !strings.Contains(body, `/evidence?filter=reported`) {
+		t.Errorf("dashboard reported widget should link to /evidence?filter=reported: %s", body)
 	}
 }
 

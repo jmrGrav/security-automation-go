@@ -479,6 +479,19 @@ func DashboardConsolePage(view DashboardConsoleView) templ.Component {
 			); err != nil {
 				return err
 			}
+			// AbuseIPDB reported total — sourced from evidence store (persists across restarts)
+			if view.EvidenceWired {
+				if _, err := fmt.Fprintf(w,
+					`<div class="panel"><h2>AbuseIPDB Reported</h2>`+
+						`<div class="badge error" style="font-size:1.4rem;padding:.4rem .9rem">%d</div>`+
+						`<p class="muted">Total IPs reported to AbuseIPDB (all-time, from evidence store)</p>`+
+						`<a href="/evidence?filter=reported">View reported events &#x2192;</a>`+
+						`</div>`,
+					view.ReportedTotal,
+				); err != nil {
+					return err
+				}
+			}
 			_, err := fmt.Fprint(w, `</section>`)
 			return err
 		}),
