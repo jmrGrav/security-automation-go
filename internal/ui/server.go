@@ -128,7 +128,7 @@ func NewServer(cfg *config.Config, opts Options) (*Server, error) {
 		return nil, fmt.Errorf("load ui secret: %w", err)
 	}
 
-	state, loaded, err := loadAIProviderState(cfg.UI.ProviderStateFile)
+	state, loaded, err := loadAIStateFromStoreOrFile(context.Background(), opts.SetupStore, cfg.UI.ProviderStateFile)
 	if err != nil {
 		return nil, fmt.Errorf("load ai provider state: %w", err)
 	}

@@ -158,12 +158,55 @@ func TestNonAIProviderReplaceKeyWritesToCredentialStore(t *testing.T) {
 	}
 }
 
+func TestAIProviderStatePersistsToSQLiteAndSurvivesReload(t *testing.T) {
+	srv, db, _ := newCredentialStoreServer(t, map[string]string{
+		"AI_PROVIDER_OPENAI_MODEL": "gpt-4.1-mini",
+	})
+	if err := sqlite.NewCredentialStore(db).Set(context.Background(), "ai.openai.api_key", "test-key", true); err != nil {
+		t.Fatalf("seed credential: %v", err)
+	}
+	cookie := loginCookie(t, srv, "test-password-123!@#")
+	csrf := srv.csrfTokenFor(cookie.Value)
+
+	req := httptest.NewRequest(http.MethodPost, "/admin/providers/openai/enable", strings.NewReader(""))
+	req.AddCookie(cookie)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("X-CSRF-Token", csrf)
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusSeeOther {
+		t.Fatalf("expected redirect after enable, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	// Verify persisted to SQLite
+	store := sqlite.NewSetupStore(db)
+	v, ok, err := store.GetSetting(context.Background(), "ai.openai.enabled")
+	if err != nil {
+		t.Fatalf("read sqlite: %v", err)
+	}
+	if !ok || v != "true" {
+		t.Fatalf("expected ai.openai.enabled=true in sqlite, got ok=%v v=%q", ok, v)
+	}
+
+	// Verify the view reflects the persisted state
+	req2 := httptest.NewRequest(http.MethodGet, "/providers", nil)
+	req2.AddCookie(cookie)
+	rr2 := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr2, req2)
+	if rr2.Code != http.StatusOK {
+		t.Fatalf("providers page %d: %s", rr2.Code, rr2.Body.String())
+	}
+	if !strings.Contains(rr2.Body.String(), "ENABLED") {
+		t.Fatalf("providers page does not show ENABLED after sqlite-persisted enable: %s", rr2.Body.String())
+	}
+}
+
 func TestProviderManagementTestProviderUsesStubAndRedacts(t *testing.T) {
-	srv, db, secretPath := newCredentialStoreServer(t, map[string]string{
+	srv, db, _ := newCredentialStoreServer(t, map[string]string{
 		"AI_PROVIDER_OPENAI_ENABLED": "true",
 		"AI_PROVIDER_OPENAI_MODEL":   "gpt-4.1-mini",
 	})
-	stateFile := filepath.Join(filepath.Dir(secretPath), "ai-providers.env")
 	if err := sqlite.NewCredentialStore(db).Set(context.Background(), "ai.openai.api_key", "test-secret", true); err != nil {
 		t.Fatalf("seed credential: %v", err)
 	}
@@ -181,9 +224,9 @@ func TestProviderManagementTestProviderUsesStubAndRedacts(t *testing.T) {
 	if rr.Code != http.StatusSeeOther {
 		t.Fatalf("expected redirect after test, got %d", rr.Code)
 	}
-	state, _, err := loadAIProviderState(stateFile)
+	state, _, err := loadAIProviderStateFromStore(context.Background(), sqlite.NewSetupStore(db))
 	if err != nil {
-		t.Fatalf("load state: %v", err)
+		t.Fatalf("load state from sqlite: %v", err)
 	}
 	if state.OpenAI.LastTestStatus != providerTestRateLimited {
 		t.Fatalf("expected rate limited test status, got %#v", state.OpenAI)

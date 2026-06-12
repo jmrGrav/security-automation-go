@@ -322,6 +322,100 @@ func syncDir(dir string) error {
 	return nil
 }
 
+func aiProviderSettingKey(name AIProviderName, field string) string {
+	return "ai." + strings.ToLower(string(name)) + "." + field
+}
+
+func loadAIProviderStateFromStore(ctx context.Context, store SetupStorer) (AIProviderState, bool, error) {
+	var state AIProviderState
+	seen := false
+	for _, name := range providerNames() {
+		rec := AIProviderRecord{}
+		if v, ok, err := store.GetSetting(ctx, aiProviderSettingKey(name, "enabled")); err != nil {
+			return AIProviderState{}, false, err
+		} else if ok {
+			rec.Enabled, _ = strconv.ParseBool(v)
+			seen = true
+		}
+		if v, ok, err := store.GetSetting(ctx, aiProviderSettingKey(name, "model")); err != nil {
+			return AIProviderState{}, false, err
+		} else if ok {
+			rec.Model = v
+			seen = true
+		}
+		if v, ok, err := store.GetSetting(ctx, aiProviderSettingKey(name, "last_test_at")); err != nil {
+			return AIProviderState{}, false, err
+		} else if ok && v != "" {
+			rec.LastTestAt, _ = time.Parse(time.RFC3339, v)
+			seen = true
+		}
+		if v, ok, err := store.GetSetting(ctx, aiProviderSettingKey(name, "last_test_status")); err != nil {
+			return AIProviderState{}, false, err
+		} else if ok {
+			rec.LastTestStatus = v
+			seen = true
+		}
+		if v, ok, err := store.GetSetting(ctx, aiProviderSettingKey(name, "last_test_latency_ms")); err != nil {
+			return AIProviderState{}, false, err
+		} else if ok && v != "" {
+			if n, parseErr := strconv.Atoi(v); parseErr == nil {
+				rec.LastTestLatencyMS = n
+			}
+			seen = true
+		}
+		if v, ok, err := store.GetSetting(ctx, aiProviderSettingKey(name, "last_error_code")); err != nil {
+			return AIProviderState{}, false, err
+		} else if ok {
+			rec.LastErrorCode = v
+			seen = true
+		}
+		setProviderStateRecord(&state, name, rec)
+	}
+	return state, seen, nil
+}
+
+func saveAIProviderStateToStore(ctx context.Context, store SetupStorer, state AIProviderState) error {
+	for _, name := range providerNames() {
+		rec := providerStateRecord(state, name)
+		if err := store.SetSetting(ctx, aiProviderSettingKey(name, "enabled"), strconv.FormatBool(rec.Enabled)); err != nil {
+			return err
+		}
+		if err := store.SetSetting(ctx, aiProviderSettingKey(name, "model"), rec.Model); err != nil {
+			return err
+		}
+		testAt := ""
+		if !rec.LastTestAt.IsZero() {
+			testAt = rec.LastTestAt.UTC().Format(time.RFC3339)
+		}
+		if err := store.SetSetting(ctx, aiProviderSettingKey(name, "last_test_at"), testAt); err != nil {
+			return err
+		}
+		if err := store.SetSetting(ctx, aiProviderSettingKey(name, "last_test_status"), rec.LastTestStatus); err != nil {
+			return err
+		}
+		if err := store.SetSetting(ctx, aiProviderSettingKey(name, "last_test_latency_ms"), strconv.Itoa(rec.LastTestLatencyMS)); err != nil {
+			return err
+		}
+		if err := store.SetSetting(ctx, aiProviderSettingKey(name, "last_error_code"), rec.LastErrorCode); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func loadAIStateFromStoreOrFile(ctx context.Context, store SetupStorer, filePath string) (AIProviderState, bool, error) {
+	if store != nil {
+		state, loaded, err := loadAIProviderStateFromStore(ctx, store)
+		if err != nil {
+			return AIProviderState{}, false, err
+		}
+		if loaded {
+			return state, true, nil
+		}
+	}
+	return loadAIProviderState(filePath)
+}
+
 func providerStatePathHint(path string) string {
 	lines := []string{
 		fmt.Sprintf("impossible to write the provider state at %s", path),
