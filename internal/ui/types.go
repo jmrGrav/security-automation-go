@@ -1,10 +1,26 @@
 package ui
 
 import (
+	"time"
+
 	"github.com/jm/security-automation-go/internal/security/audit"
 	"github.com/jm/security-automation-go/internal/security/enrichment"
 	"github.com/jm/security-automation-go/internal/services/reporting"
 )
+
+// CFSyncView is the view model for the /sync (Cloudflare ban sync) page.
+type CFSyncView struct {
+	HasData      bool
+	CycleAt      time.Time
+	AgreementPct float64
+	InSync       bool
+	ToAdd        []string // IPs Go would add to CF
+	ToDelete     []string // IPs Go would remove from CF
+	ActiveBans   int
+	CFRules      int
+	CycleCount   int // total cycles in store
+	Error        string
+}
 
 type ProviderView struct {
 	Name       string
