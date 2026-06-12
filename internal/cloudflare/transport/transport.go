@@ -92,8 +92,13 @@ func (t *Transport) Request(ctx context.Context, method, path string, query url.
 		)
 	}
 
-	// 1. Check for basic HTTP errors (other than 429 which might be retried)
-	if resp.StatusCode >= 400 && resp.StatusCode != http.StatusTooManyRequests {
+	if resp.StatusCode == http.StatusTooManyRequests {
+		if retryAfter := CloudflareRetryAfter(resp); retryAfter > 0 {
+			return nil, "", apperr.Newf(op, "HTTP 429 rate limited: retry after %s", retryAfter)
+		}
+		return nil, "", apperr.Newf(op, "HTTP 429 rate limited")
+	}
+	if resp.StatusCode >= 400 {
 		return nil, "", apperr.Newf(op, "HTTP %d: %s", resp.StatusCode, string(raw))
 	}
 

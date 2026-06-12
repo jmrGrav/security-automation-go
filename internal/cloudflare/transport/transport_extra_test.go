@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -22,6 +23,46 @@ func TestCloudflareRetryAfter(t *testing.T) {
 	}
 	if got := transport.CloudflareRetryAfter(nil); got != 0 {
 		t.Fatalf("expected zero on nil response, got %s", got)
+	}
+}
+
+func TestTransport_Request_429_ReturnsExplicitError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Retry-After", "30")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`error code: 1015`))
+	}))
+	defer srv.Close()
+
+	redirectClient := &redirectingClient{base: srv.URL, inner: srv.Client()}
+	tr := transport.New(redirectClient, "tok")
+	_, _, err := tr.Request(context.Background(), http.MethodGet, "/test", nil, nil, "")
+	if err == nil {
+		t.Fatal("HTTP 429 must return an error, not nil")
+	}
+	if !strings.Contains(err.Error(), "429") {
+		t.Errorf("error should mention 429, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "rate limited") {
+		t.Errorf("error should mention rate limited, got: %v", err)
+	}
+}
+
+func TestTransport_Request_429_WithoutRetryAfter(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`error code: 1015`))
+	}))
+	defer srv.Close()
+
+	redirectClient := &redirectingClient{base: srv.URL, inner: srv.Client()}
+	tr := transport.New(redirectClient, "tok")
+	_, _, err := tr.Request(context.Background(), http.MethodGet, "/test", nil, nil, "")
+	if err == nil {
+		t.Fatal("HTTP 429 without Retry-After must still return an error")
+	}
+	if !strings.Contains(err.Error(), "rate limited") {
+		t.Errorf("error should mention rate limited, got: %v", err)
 	}
 }
 

@@ -46,6 +46,8 @@ type EvidenceSearchOptions struct {
 	Source            string
 	Decision          string
 	SuppressionReason string
+	AbuseIPDBReported bool
+	Suppressed        bool
 	From              time.Time
 	To                time.Time
 	Limit             int
@@ -57,6 +59,7 @@ type EvidenceStore interface {
 	List(ctx context.Context, limit int) ([]DecisionEvidence, error)
 	Get(ctx context.Context, evidenceID string) (DecisionEvidence, bool, error)
 	Search(ctx context.Context, opts EvidenceSearchOptions) ([]DecisionEvidence, error)
+	Count(ctx context.Context, opts EvidenceSearchOptions) (int, error)
 }
 
 const (

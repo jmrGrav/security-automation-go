@@ -45,56 +45,36 @@ func (s *Server) handleEvidencePage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	opts := reporting.EvidenceSearchOptions{
-		Limit:  10000,
-		Offset: 0,
-	}
+	baseOpts := reporting.EvidenceSearchOptions{}
 	switch filter {
 	case "reported":
-		// Reported filter: search for AbuseIPDB-reported events. We use a
-		// broad search and filter client-side since EvidenceSearchOptions
-		// doesn't expose an AbuseIPDBReported field directly.
+		baseOpts.AbuseIPDBReported = true
 	case "suppressed":
-		opts.SuppressionReason = "low_confidence"
+		baseOpts.Suppressed = true
 	}
 
-	all, err := s.evidence.Search(r.Context(), opts)
+	total, err := s.evidence.Count(r.Context(), baseOpts)
 	if err != nil {
 		view.EmptyText = fmt.Sprintf("Error loading evidence: %v", err)
 		_ = EvidencePage(view).Render(r.Context(), w)
 		return
 	}
 
-	if filter == "reported" {
-		filtered := all[:0]
-		for _, ev := range all {
-			if ev.AbuseIPDBReported {
-				filtered = append(filtered, ev)
-			}
-		}
-		all = filtered
+	offset := (page - 1) * pageSize
+	pageOpts := baseOpts
+	pageOpts.Limit = pageSize
+	pageOpts.Offset = offset
+	entries, err := s.evidence.Search(r.Context(), pageOpts)
+	if err != nil {
+		view.EmptyText = fmt.Sprintf("Error loading evidence: %v", err)
+		_ = EvidencePage(view).Render(r.Context(), w)
+		return
 	}
 
-	total := len(all)
-	start := (page - 1) * pageSize
-	var entries []reporting.DecisionEvidence
-	hasPrev, hasNext := false, false
-	if start < total {
-		end := start + pageSize
-		if end > total {
-			end = total
-		}
-		entries = all[start:end]
-		hasPrev = start > 0
-		hasNext = end < total
-	}
+	hasPrev := offset > 0
+	hasNext := offset+pageSize < total
 
-	reportedCount := 0
-	for _, ev := range all {
-		if ev.AbuseIPDBReported {
-			reportedCount++
-		}
-	}
+	reportedCount, _ := s.evidence.Count(r.Context(), reporting.EvidenceSearchOptions{AbuseIPDBReported: true})
 
 	badges := []StatusItem{
 		{Label: "Total events", Level: "healthy", Detail: strconv.Itoa(total)},

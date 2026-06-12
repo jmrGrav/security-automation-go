@@ -60,6 +60,11 @@ func (f *fakeEvidenceStore) Search(_ context.Context, opts reporting.EvidenceSea
 	return out, nil
 }
 
+func (f *fakeEvidenceStore) Count(_ context.Context, opts reporting.EvidenceSearchOptions) (int, error) {
+	out, err := f.Search(context.Background(), reporting.EvidenceSearchOptions{Limit: opts.Limit})
+	return len(out), err
+}
+
 func TestProcessSinceSuppressesBenignBootstrap(t *testing.T) {
 	recorder := &sinks.RecorderSink{}
 	reporter := &fakeReporter{}

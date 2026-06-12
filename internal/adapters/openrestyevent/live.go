@@ -31,21 +31,37 @@ func (s *LiveSource) Read(ctx context.Context) ([]RawEvent, error) {
 	if s == nil || strings.TrimSpace(s.EventsFile) == "" {
 		return nil, nil
 	}
+	procFile := strings.TrimSuffix(s.EventsFile, filepath.Ext(s.EventsFile)) + ".processing"
+
+	// Recover any stale .processing file left by a prior crash before checking for new events.
+	// On Linux, os.Rename overwrites an existing destination, so without this check a new
+	// events file would silently overwrite the stale one, losing the previous batch.
+	if _, err := os.Stat(procFile); err == nil {
+		events, parseErr := s.parseProcessingFile(procFile)
+		_ = os.Remove(procFile) // always remove: either consumed successfully or unrecoverable
+		if parseErr == nil && len(events) > 0 {
+			return events, nil
+		}
+	}
+
 	if _, err := os.Stat(s.EventsFile); err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
 		}
 		return nil, err
 	}
-	procFile := strings.TrimSuffix(s.EventsFile, filepath.Ext(s.EventsFile)) + ".processing"
 	if err := os.Rename(s.EventsFile, procFile); err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
 		}
 		return nil, err
 	}
-	defer func() { _ = os.Remove(procFile) }()
+	events, err := s.parseProcessingFile(procFile)
+	_ = os.Remove(procFile)
+	return events, err
+}
 
+func (s *LiveSource) parseProcessingFile(procFile string) ([]RawEvent, error) {
 	f, err := os.Open(procFile)
 	if err != nil {
 		return nil, err

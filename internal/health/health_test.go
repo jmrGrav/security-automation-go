@@ -218,6 +218,24 @@ func TestCheckOpenResty_NotConfigured(t *testing.T) {
 	}
 }
 
+func TestCheckOpenResty_DirectoryPresentFileAbsent_IsGreen(t *testing.T) {
+	// Simulates the normal post-processing state: directory exists, events file consumed.
+	dir := t.TempDir()
+	eventsFile := dir + "/events.jsonl" // file does NOT exist, directory does
+	c := health.CheckOpenResty(health.Config{OpenRestyEventsFile: eventsFile})
+	if c.Status != health.Green {
+		t.Errorf("expected GREEN when directory present but file absent (normal cycle), got %s: %s", c.Status, c.Reason)
+	}
+}
+
+func TestCheckOpenResty_DirectoryAbsent_IsYellow(t *testing.T) {
+	// Simulates a genuinely misconfigured or never-run OpenResty path.
+	c := health.CheckOpenResty(health.Config{OpenRestyEventsFile: "/nonexistent-dir-xyz/events.jsonl"})
+	if c.Status != health.Yellow {
+		t.Errorf("expected YELLOW when events directory missing, got %s: %s", c.Status, c.Reason)
+	}
+}
+
 func TestCheckNginx_NotConfigured(t *testing.T) {
 	c := health.CheckNginx(health.Config{})
 	if c.Status != health.Green {

@@ -55,3 +55,10 @@ func (s *lazyEvidenceStore) Search(ctx context.Context, opts reporting.EvidenceS
 	}
 	return nil, nil
 }
+
+func (s *lazyEvidenceStore) Count(ctx context.Context, opts reporting.EvidenceSearchOptions) (int, error) {
+	if inner := s.get(); inner != nil {
+		return inner.Count(ctx, opts)
+	}
+	return 0, nil
+}
