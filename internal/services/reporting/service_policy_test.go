@@ -124,6 +124,54 @@ func TestBenignBootstrapTelemetryOnly(t *testing.T) {
 	}
 }
 
+// Known scanner UAs (sqlmap, nikto, python-requests, curl) must not be suppressed
+// as low_confidence even when their score is in the 5–9 range. The risk assessment
+// applies a confidence floor of 0.75 for these UAs, above the 0.70 threshold.
+func TestKnownScannerUANotSuppressedAsLowConfidence(t *testing.T) {
+	cases := []struct {
+		ua string
+	}{
+		{"sqlmap/1.7 (https://sqlmap.org)"},
+		{"nikto/2.1.6"},
+		{"python-requests/2.31.0"},
+		{"curl/7.88.1"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.ua, func(t *testing.T) {
+			service := reporting.New(&fakeReporter{}, &sinks.RecorderSink{}, trust.DefaultRegistry(), time.Minute)
+			event, err := cloudflareevent.Normalize(cloudflareevent.RawEvent{
+				IP: "1.2.3.4", URI: "/admin", UserAgent: tc.ua, Timestamp: time.Now().UTC(), Hits: 1, WindowSec: 300, RuleID: "r1",
+			})
+			if err != nil {
+				t.Fatalf("normalize: %v", err)
+			}
+			result, err := service.Process(context.Background(), reporting.Request{Source: abuseformat.SourceCloudflareWAF, Event: event})
+			if err != nil {
+				t.Fatalf("process: %v", err)
+			}
+			if result.SuppressionReason == "low_confidence" {
+				t.Errorf("UA=%q: scanner must not be suppressed as low_confidence", tc.ua)
+			}
+		})
+	}
+}
+
+// Regression: benign probes without a scanner UA (e.g. wordpress probe with low hit
+// count) must still be suppressed as low_confidence — the fix must not broaden.
+func TestWordPressProbeWithoutScannerUARemainsSuppressed(t *testing.T) {
+	service := reporting.New(&fakeReporter{}, &sinks.RecorderSink{}, trust.DefaultRegistry(), time.Minute)
+	event, _ := cloudflareevent.Normalize(cloudflareevent.RawEvent{
+		IP: "1.2.3.4", URI: "/wp-login.php", Timestamp: time.Now().UTC(), Hits: 1, WindowSec: 300,
+	})
+	result, err := service.Process(context.Background(), reporting.Request{Source: abuseformat.SourceCloudflareWAF, Event: event})
+	if err != nil {
+		t.Fatalf("process: %v", err)
+	}
+	if !result.Suppressed {
+		t.Fatalf("wordpress probe without scanner UA should be suppressed, got %+v", result)
+	}
+}
+
 func TestExploitAttemptReported(t *testing.T) {
 	reporter := &fakeReporter{}
 	recorder := &sinks.RecorderSink{}
