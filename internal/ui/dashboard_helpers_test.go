@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"os"
 	"strings"
 	"testing"
 
@@ -93,10 +94,21 @@ func TestOpenRestyDashboardDetail_NginxLogMode(t *testing.T) {
 	}
 }
 
-func TestOpenRestyDashboardDetail_WAFEvents(t *testing.T) {
+func TestOpenRestyDashboardDetail_WAFEventsFileExists(t *testing.T) {
+	eventsFile := t.TempDir() + "/events.jsonl"
+	if err := os.WriteFile(eventsFile, []byte(""), 0644); err != nil {
+		t.Fatalf("write events file: %v", err)
+	}
 	detectors := []detect.Result{{Name: "openresty", Installed: true, Healthy: true}}
-	if got := openRestyDashboardDetail(detectors, "/var/log/openresty/events.jsonl"); !strings.Contains(got, "WAF events") {
-		t.Errorf("expected WAF events detail, got %q", got)
+	if got := openRestyDashboardDetail(detectors, eventsFile); !strings.Contains(got, "WAF events") {
+		t.Errorf("expected WAF events detail when file exists, got %q", got)
+	}
+}
+
+func TestOpenRestyDashboardDetail_WAFEventsFileMissing(t *testing.T) {
+	detectors := []detect.Result{{Name: "openresty", Installed: true, Healthy: true}}
+	if got := openRestyDashboardDetail(detectors, "/nonexistent/events.jsonl"); strings.Contains(got, "WAF events") {
+		t.Errorf("must not claim WAF events when file does not exist, got %q", got)
 	}
 }
 
