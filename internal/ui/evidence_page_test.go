@@ -149,6 +149,27 @@ func TestEvidencePage_ReportedFilter(t *testing.T) {
 	}
 }
 
+func TestEvidencePage_IPColumnLinksToForensic(t *testing.T) {
+	store := &fakeEvidenceStore{
+		records: []reporting.DecisionEvidence{
+			{EvidenceID: "ev1", IP: "1.2.3.4", Source: "cloudflare_waf", AbuseType: "scanner", Decision: "local_block", Timestamp: time.Now()},
+		},
+	}
+	srv, _, _ := newTestServer(t, nil)
+	srv.evidence = store
+	cookie := loginCookie(t, srv, "test-password-123!@#")
+
+	req := httptest.NewRequest(http.MethodGet, "/evidence", nil)
+	req.AddCookie(cookie)
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+
+	body := rr.Body.String()
+	if !strings.Contains(body, `/forensic?ip=1.2.3.4`) {
+		t.Errorf("expected forensic deep-link for IP in evidence table, body: %s", body)
+	}
+}
+
 func TestForensicPage_ShowsLocalEvidenceForIP(t *testing.T) {
 	store := &fakeEvidenceStore{
 		records: []reporting.DecisionEvidence{

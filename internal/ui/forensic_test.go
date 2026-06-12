@@ -210,6 +210,64 @@ func TestForensic_SecretNotInBody(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// P13: GET /forensic?ip=X deep-link and Explain This IP quick-links
+// ---------------------------------------------------------------------------
+
+func TestForensic_GETWithIPQueryParam_PerformsLookup(t *testing.T) {
+	svc := enrichment.NewService(forensicCfg(), nil, nil, nil, nil)
+	srv := newTestServerWithEnrichment(t, svc)
+	cookie := loginCookie(t, srv, "test-password-123!@#")
+
+	req := httptest.NewRequest(http.MethodGet, "/forensic?ip=203.0.113.10", nil)
+	req.AddCookie(cookie)
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	body := rr.Body.String()
+	if !strings.Contains(body, "203.0.113.10") {
+		t.Errorf("expected IP in body from GET deep-link: %s", body)
+	}
+}
+
+func TestForensic_GETWithInvalidIP_ShowsError(t *testing.T) {
+	srv, _, _ := newTestServer(t, nil)
+	cookie := loginCookie(t, srv, "test-password-123!@#")
+
+	req := httptest.NewRequest(http.MethodGet, "/forensic?ip=not-an-ip", nil)
+	req.AddCookie(cookie)
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rr.Code)
+	}
+	if !strings.Contains(rr.Body.String(), "invalid IP address") {
+		t.Errorf("expected error for invalid IP in deep-link: %s", rr.Body.String())
+	}
+}
+
+func TestForensic_GETWithoutIP_ShowsBlankForm(t *testing.T) {
+	srv, _, _ := newTestServer(t, nil)
+	cookie := loginCookie(t, srv, "test-password-123!@#")
+
+	req := httptest.NewRequest(http.MethodGet, "/forensic", nil)
+	req.AddCookie(cookie)
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rr.Code)
+	}
+	body := rr.Body.String()
+	if !strings.Contains(body, "Forensic") {
+		t.Errorf("expected forensic page title: %s", body)
+	}
+}
+
 func TestForensic_NoCscliSpawn(t *testing.T) {
 	// This is a static guard test: the forensic handler must never import or call
 	// anything that spawns cscli. Since Go test coverage runs in-process, we

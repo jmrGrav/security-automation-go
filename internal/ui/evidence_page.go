@@ -191,10 +191,12 @@ func EvidencePage(view EvidenceView) templ.Component {
 				case ev.Decision == "report_pending":
 					statusBadge = `<span class="badge live">pending</span>`
 				}
+				ipCell := fmt.Sprintf(`<a href="/forensic?ip=%s" title="Explain this IP">%s</a>`,
+					html.EscapeString(ev.IP), html.EscapeString(ev.IP))
 				if _, err := fmt.Fprintf(w, `<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%d</td><td>%.2f</td><td>%s</td><td>%s</td></tr>`,
 					html.EscapeString(ev.Timestamp.Format("2006-01-02 15:04:05")),
 					html.EscapeString(ev.Source),
-					html.EscapeString(ev.IP),
+					ipCell,
 					html.EscapeString(ev.AbuseType),
 					ev.RiskScore,
 					ev.Confidence,
