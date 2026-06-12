@@ -9,16 +9,20 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/a-h/templ"
 	"github.com/jm/security-automation-go/internal/security/audit"
+	"github.com/jm/security-automation-go/internal/services/reporting"
 )
 
 type TimelineView struct {
 	Query     string
 	Action    string
+	Source    string // filter: "audit", "waf", or "" (all)
 	Page      int
 	PageSize  int
 	Total     int
@@ -29,14 +33,21 @@ type TimelineView struct {
 	Badges    []StatusItem
 }
 
+// timedEvent pairs a parsed wall-clock time with its event for a stable merged sort.
+type timedEvent struct {
+	t     time.Time
+	event audit.TimelineEvent
+}
+
 func (s *Server) timelineView(r *http.Request) TimelineView {
 	query := strings.TrimSpace(r.URL.Query().Get("q"))
 	action := strings.TrimSpace(r.URL.Query().Get("action"))
+	source := strings.TrimSpace(r.URL.Query().Get("source"))
 	page := parsePositiveInt(r.URL.Query().Get("page"), 1)
 	pageSize := clampInt(parsePositiveInt(r.URL.Query().Get("limit"), 20), 5, 100)
 
-	events := s.timelineEvents()
-	events = filterTimelineEvents(events, query, action)
+	events := s.allTimelineEvents(r.Context())
+	events = filterTimelineEvents(events, query, action, source)
 	total := len(events)
 	paged, hasPrev, hasNext := paginateTimelineEvents(events, page, pageSize)
 
@@ -50,15 +61,19 @@ func (s *Server) timelineView(r *http.Request) TimelineView {
 	if action != "" {
 		badges = append(badges, StatusItem{Label: "Action filter", Level: "warning", Detail: action})
 	}
+	if source != "" {
+		badges = append(badges, StatusItem{Label: "Source", Level: "warning", Detail: source})
+	}
 
-	emptyText := "No timeline events yet. Audit entries and operator lookups will appear here when they are recorded."
-	if query != "" || action != "" {
+	emptyText := "No timeline events yet. Audit entries and WAF events will appear here when the daemon processes security events."
+	if query != "" || action != "" || source != "" {
 		emptyText = "No matching timeline events."
 	}
 
 	return TimelineView{
 		Query:     query,
 		Action:    action,
+		Source:    source,
 		Page:      page,
 		PageSize:  pageSize,
 		Total:     total,
@@ -70,41 +85,140 @@ func (s *Server) timelineView(r *http.Request) TimelineView {
 	}
 }
 
-func (s *Server) timelineEvents() []audit.TimelineEvent {
-	reader, ok := s.audit.(AuditReader)
-	if !ok || reader == nil {
-		return nil
+// allTimelineEvents merges audit entries and WAF evidence records into a single
+// reverse-chronological stream, sorted by parsed wall-clock time.
+//
+// Evidence is capped at 10000 rows (matches evidence_page.go). Runtime daemon
+// lifecycle events (startup, config reloads) require a dedicated capture
+// mechanism not yet wired — deferred to a follow-up.
+func (s *Server) allTimelineEvents(ctx context.Context) []audit.TimelineEvent {
+	var timed []timedEvent
+
+	if reader, ok := s.audit.(AuditReader); ok && reader != nil {
+		for _, entry := range reader.Entries() {
+			// Parse the timestamp for correct sort ordering. RFC3339Nano strings
+			// cannot be compared lexicographically when fractional-second width varies.
+			t, _ := time.Parse(time.RFC3339Nano, entry.Timestamp)
+			timed = append(timed, timedEvent{t: t, event: auditEntryToTimelineEvent(entry)})
+		}
 	}
-	entries := reader.Entries()
-	events := make([]audit.TimelineEvent, 0, len(entries))
-	for i := len(entries) - 1; i >= 0; i-- {
-		entry := entries[i]
-		events = append(events, audit.TimelineEvent{
-			Timestamp:      valueOrUnknown(entry.Timestamp),
-			Scope:          timelineScope(entry),
-			EventType:      valueOrUnknown(entry.Action),
-			Severity:       timelineSeverity(entry),
-			CorrelationID:  auditDisplayValue(entry.Correlation),
-			EvidenceID:     auditDisplayValue(entry.EventID),
-			ReplaySequence: "unavailable",
-			ActorSource:    auditDisplayValue(timelineActorSource(entry)),
-			Action:         valueOrUnknown(entry.Action),
-			Target:         auditDisplayValue(entry.Target),
-			Result:         auditDisplayValue(entry.Result),
-			Summary:        timelineSummary(entry),
-		})
+
+	if s.evidence != nil {
+		evs, err := s.evidence.Search(ctx, reporting.EvidenceSearchOptions{Limit: 10000})
+		if err == nil {
+			for _, ev := range evs {
+				timed = append(timed, timedEvent{t: ev.Timestamp, event: evidenceToTimelineEvent(ev)})
+			}
+		}
+	}
+
+	sort.Slice(timed, func(i, j int) bool {
+		return timed[i].t.After(timed[j].t)
+	})
+
+	events := make([]audit.TimelineEvent, 0, len(timed))
+	for _, te := range timed {
+		events = append(events, te.event)
 	}
 	return events
 }
 
-func filterTimelineEvents(events []audit.TimelineEvent, query, action string) []audit.TimelineEvent {
+func auditEntryToTimelineEvent(entry audit.AuditEntry) audit.TimelineEvent {
+	return audit.TimelineEvent{
+		Timestamp:      valueOrUnknown(entry.Timestamp),
+		Scope:          timelineScope(entry),
+		EventType:      valueOrUnknown(entry.Action),
+		Severity:       timelineSeverity(entry),
+		CorrelationID:  auditDisplayValue(entry.Correlation),
+		EvidenceID:     auditDisplayValue(entry.EventID),
+		ReplaySequence: "unavailable",
+		ActorSource:    auditDisplayValue(timelineActorSource(entry)),
+		Action:         valueOrUnknown(entry.Action),
+		Target:         auditDisplayValue(entry.Target),
+		Result:         auditDisplayValue(entry.Result),
+		Summary:        timelineSummary(entry),
+	}
+}
+
+func evidenceToTimelineEvent(ev reporting.DecisionEvidence) audit.TimelineEvent {
+	eventType := "waf_classified"
+	severity := "badge"
+	action := ev.Decision
+	result := ev.Decision
+
+	switch {
+	case ev.AbuseIPDBReported:
+		eventType = "abuseipdb_reported"
+		severity = "error"
+		action = "abuseipdb_reported"
+		result = "reported"
+	case ev.Suppressed:
+		eventType = "waf_suppressed"
+		severity = "warning"
+		action = "waf_suppressed"
+		result = "suppressed"
+		if ev.SuppressionReason != "" {
+			result += ":" + ev.SuppressionReason
+		}
+	case ev.Decision == "report_pending":
+		severity = "live"
+	}
+
+	summary := ev.Source
+	if ev.IP != "" {
+		summary += " · " + ev.IP
+	}
+	if ev.AbuseType != "" {
+		summary += " · " + ev.AbuseType
+	}
+
+	ts := ""
+	if !ev.Timestamp.IsZero() {
+		ts = ev.Timestamp.UTC().Format(time.RFC3339Nano)
+	}
+
+	return audit.TimelineEvent{
+		Timestamp:   ts,
+		Scope:       ev.Source,
+		EventType:   eventType,
+		Severity:    severity,
+		EvidenceID:  ev.EvidenceID,
+		ActorSource: ev.Source,
+		Action:      action,
+		Target:      ev.IP,
+		Result:      result,
+		Summary:     summary,
+	}
+}
+
+// wafScopes is the set of evidence source values that identify WAF pipeline events.
+var wafScopes = map[string]bool{
+	"cloudflare_waf": true,
+	"crowdsec_waf":   true,
+	"openresty_waf":  true,
+}
+
+func isWAFScope(scope string) bool { return wafScopes[scope] }
+
+func filterTimelineEvents(events []audit.TimelineEvent, query, action, source string) []audit.TimelineEvent {
 	query = strings.ToLower(strings.TrimSpace(query))
 	action = strings.ToLower(strings.TrimSpace(action))
-	if query == "" && action == "" {
+	source = strings.ToLower(strings.TrimSpace(source))
+	if query == "" && action == "" && source == "" {
 		return events
 	}
 	filtered := make([]audit.TimelineEvent, 0, len(events))
 	for _, event := range events {
+		switch source {
+		case "waf":
+			if !isWAFScope(event.Scope) {
+				continue
+			}
+		case "audit":
+			if isWAFScope(event.Scope) {
+				continue
+			}
+		}
 		if action != "" && !strings.Contains(strings.ToLower(event.EventType), action) && !strings.Contains(strings.ToLower(event.Action), action) {
 			continue
 		}
@@ -218,26 +332,66 @@ func TimelinePage(view TimelineView, csrfToken string) templ.Component {
 	return ConsoleLayout(shellView{
 		Title:       "Timeline",
 		Headline:    "Security Timeline",
-		Subtitle:    "Unified read-only chronology over audit and operator events with filtering and export.",
+		Subtitle:    "Unified read-only chronology over audit and WAF events with filtering and export.",
 		Active:      "/timeline",
 		BadgeLabels: view.Badges,
 		Body: templ.ComponentFunc(func(ctx context.Context, w io.Writer) error {
 			if _, err := fmt.Fprint(w, `<div class="panel"><p class="muted">This page is read-only. Filters update the projection only; JSON and CSV exports are derived from the same server-side event stream.</p></div>`); err != nil {
 				return err
 			}
-			if _, err := fmt.Fprint(w, `<div class="panel"><form method="get" action="/timeline" class="stack"><div class="row" style="grid-template-columns: minmax(8rem, 9rem) minmax(0, 1fr)"><span>Search</span><span><input name="q" type="search" value="`); err != nil {
+			if _, err := fmt.Fprint(w, `<div class="panel"><form method="get" action="/timeline" class="stack">`); err != nil {
+				return err
+			}
+			// Source filter row
+			if _, err := fmt.Fprint(w, `<div class="row" style="grid-template-columns: minmax(8rem, 9rem) minmax(0, 1fr)"><span>Source</span><span><select name="source"><option value=""`); err != nil {
+				return err
+			}
+			if view.Source == "" {
+				if _, err := fmt.Fprint(w, ` selected`); err != nil {
+					return err
+				}
+			}
+			if _, err := fmt.Fprint(w, `>All events</option><option value="waf"`); err != nil {
+				return err
+			}
+			if view.Source == "waf" {
+				if _, err := fmt.Fprint(w, ` selected`); err != nil {
+					return err
+				}
+			}
+			if _, err := fmt.Fprint(w, `>WAF Events</option><option value="audit"`); err != nil {
+				return err
+			}
+			if view.Source == "audit" {
+				if _, err := fmt.Fprint(w, ` selected`); err != nil {
+					return err
+				}
+			}
+			if _, err := fmt.Fprint(w, `>Audit Trail</option></select></span></div>`); err != nil {
+				return err
+			}
+			// Search row
+			if _, err := fmt.Fprint(w, `<div class="row" style="grid-template-columns: minmax(8rem, 9rem) minmax(0, 1fr)"><span>Search</span><span><input name="q" type="search" value="`); err != nil {
 				return err
 			}
 			if _, err := io.WriteString(w, html.EscapeString(view.Query)); err != nil {
 				return err
 			}
-			if _, err := fmt.Fprint(w, `" placeholder="action, target, correlation id, result"/></span></div><div class="row" style="grid-template-columns: minmax(8rem, 9rem) minmax(0, 1fr)"><span>Action</span><span><input name="action" type="text" value="`); err != nil {
+			if _, err := fmt.Fprint(w, `" placeholder="action, target, correlation id, result"/></span></div>`); err != nil {
+				return err
+			}
+			// Action row
+			if _, err := fmt.Fprint(w, `<div class="row" style="grid-template-columns: minmax(8rem, 9rem) minmax(0, 1fr)"><span>Action</span><span><input name="action" type="text" value="`); err != nil {
 				return err
 			}
 			if _, err := io.WriteString(w, html.EscapeString(view.Action)); err != nil {
 				return err
 			}
-			if _, err := fmt.Fprint(w, `" placeholder="security_intelligence_lookup"/></span></div><div class="row" style="grid-template-columns: minmax(8rem, 9rem) minmax(0, 1fr)"><span>Limit</span><span><input name="limit" type="number" min="5" max="100" value="`); err != nil {
+			if _, err := fmt.Fprint(w, `" placeholder="security_intelligence_lookup"/></span></div>`); err != nil {
+				return err
+			}
+			// Limit row
+			if _, err := fmt.Fprint(w, `<div class="row" style="grid-template-columns: minmax(8rem, 9rem) minmax(0, 1fr)"><span>Limit</span><span><input name="limit" type="number" min="5" max="100" value="`); err != nil {
 				return err
 			}
 			if _, err := io.WriteString(w, strconv.Itoa(view.PageSize)); err != nil {
@@ -258,6 +412,7 @@ func TimelinePage(view TimelineView, csrfToken string) templ.Component {
 			if _, err := fmt.Fprint(w, `">Export CSV</a></div></form></div>`); err != nil {
 				return err
 			}
+
 			if len(view.Entries) == 0 {
 				return writeEmptyState(w, view.EmptyText)
 			}
@@ -312,6 +467,9 @@ func timelineExportURL(view TimelineView, format string) string {
 	if strings.TrimSpace(view.Action) != "" {
 		params.Set("action", view.Action)
 	}
+	if strings.TrimSpace(view.Source) != "" {
+		params.Set("source", view.Source)
+	}
 	params.Set("limit", strconv.Itoa(maxInt(1, view.PageSize)))
 	params.Set("page", strconv.Itoa(maxInt(1, view.Page)))
 	params.Set("format", format)
@@ -326,6 +484,7 @@ func renderTimelineJSON(w http.ResponseWriter, view TimelineView) {
 	_ = enc.Encode(map[string]any{
 		"query":   view.Query,
 		"action":  view.Action,
+		"source":  view.Source,
 		"page":    view.Page,
 		"limit":   view.PageSize,
 		"total":   view.Total,
