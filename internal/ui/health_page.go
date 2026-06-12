@@ -192,8 +192,20 @@ func renderHealthBody(w io.Writer, view healthPageView, csrfToken string) error 
 			return err
 		}
 	}
-	_, err := fmt.Fprint(w, `</section></div>`)
-	return err
+	if _, err := fmt.Fprint(w, `</section></div>`); err != nil {
+		return err
+	}
+
+	// OpenResty runbook panel — only shown when configured but not collecting events.
+	for _, d := range view.Detectors {
+		if d.Name == "openresty" && d.Configured {
+			if err := renderOpenRestyRunbook(w, d); err != nil {
+				return err
+			}
+			break
+		}
+	}
+	return nil
 }
 
 func healthLevelClass(lvl health.Level) string {
@@ -207,6 +219,86 @@ func healthLevelClass(lvl health.Level) string {
 	default:
 		return "badge"
 	}
+}
+
+func renderOpenRestyRunbook(w io.Writer, d detect.Result) error {
+	eventsExist := d.Details["events_exist"] == "present"
+	stuckProcessing := d.Details["stuck_processing"] != ""
+	eventsAge := d.Details["events_age"]
+	eventsFile := d.Details["events_file"]
+
+	staleThreshold := 30 * time.Minute
+	isStale := false
+	if eventsExist && eventsAge != "" {
+		// Parse "Xh Ym Zs ago" by stripping " ago" suffix and using time.ParseDuration.
+		ageStr := strings.TrimSuffix(eventsAge, " ago")
+		if dur, err := time.ParseDuration(ageStr); err == nil {
+			isStale = dur > staleThreshold
+		}
+	}
+
+	if eventsExist && !stuckProcessing && !isStale {
+		return nil // everything looks fine — skip runbook
+	}
+
+	if _, err := fmt.Fprint(w, `<div class="panel"><h2>OpenResty Runbook</h2>`); err != nil {
+		return err
+	}
+
+	if stuckProcessing {
+		if _, err := fmt.Fprintf(w,
+			`<div class="badge error" style="margin-bottom:.75rem">Stuck processing file detected</div>`+
+				`<p>A <code>%s.processing</code> file exists. This means a prior ingestion cycle was interrupted before it could finish. `+
+				`Events in that file were not processed. Delete the file to unblock the pipeline:</p>`+
+				`<pre>rm %s.processing</pre>`,
+			html.EscapeString(strings.TrimSuffix(eventsFile, ".jsonl")),
+			html.EscapeString(strings.TrimSuffix(eventsFile, ".jsonl")),
+		); err != nil {
+			return err
+		}
+	}
+
+	if !eventsExist {
+		if _, err := fmt.Fprintf(w,
+			`<div class="badge warning" style="margin-bottom:.75rem">Events file missing</div>`+
+				`<p>The configured events file <code>%s</code> does not exist. Possible causes:</p>`+
+				`<ul>`+
+				`<li>The Lua WAF hook in OpenResty is not writing events (check nginx error log: <code>journalctl -u openresty -n 50</code>)</li>`+
+				`<li>The directory does not exist or has wrong permissions</li>`+
+				`<li>No WAF events have been triggered yet (file is created on first hit)</li>`+
+				`</ul>`,
+			html.EscapeString(eventsFile),
+		); err != nil {
+			return err
+		}
+	} else if isStale {
+		if _, err := fmt.Fprintf(w,
+			`<div class="badge warning" style="margin-bottom:.75rem">Events file is stale (%s)</div>`+
+				`<p>The events file has not been updated in over 30 minutes. Possible causes:</p>`+
+				`<ul>`+
+				`<li>No WAF traffic in this period (normal during quiet periods)</li>`+
+				`<li>The Lua hook is writing events but all are being dropped — check that each event has a non-empty <code>ip</code> and <code>detail</code> field</li>`+
+				`<li>OpenResty was restarted and the hook is no longer loaded (check <code>nginx -t</code>)</li>`+
+				`</ul>`,
+			html.EscapeString(eventsAge),
+		); err != nil {
+			return err
+		}
+	}
+
+	if _, err := fmt.Fprint(w,
+		`<details style="margin-top:1rem"><summary>Event format requirements</summary>`+
+			`<p>Each line in the events file must be valid JSON with these fields:</p>`+
+			`<pre>{"ts": 1700000000.0, "type": "block", "ip": "1.2.3.4", "score": 10, "detail": "/login"}</pre>`+
+			`<p><strong>Silent drop conditions:</strong> events where <code>ip</code> or <code>detail</code> is empty are silently discarded by the ingestion pipeline. `+
+			`Verify your Lua script always sets both fields before writing.</p>`+
+			`</details>`,
+	); err != nil {
+		return err
+	}
+
+	_, err := fmt.Fprint(w, `</div>`)
+	return err
 }
 
 func renderDetectCard(w io.Writer, r detect.Result) error {

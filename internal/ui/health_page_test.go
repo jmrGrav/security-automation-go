@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jm/security-automation-go/internal/detect"
 	"github.com/jm/security-automation-go/internal/health"
 )
 
@@ -85,6 +86,150 @@ func TestHealthPage_ContainsSummaryAndButton(t *testing.T) {
 		if !strings.Contains(body, want) {
 			t.Errorf("expected %q in page", want)
 		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// OpenResty runbook panel
+// ---------------------------------------------------------------------------
+
+func TestOpenRestyRunbook_ShownWhenEventsFileMissing(t *testing.T) {
+	view := healthPageView{
+		Detectors: []detect.Result{
+			{
+				Name:       "openresty",
+				Installed:  true,
+				Configured: true,
+				Healthy:    true,
+				Details: map[string]string{
+					"events_file":  "/var/lib/security-automation-go/events.jsonl",
+					"events_exist": "missing",
+				},
+			},
+		},
+		ReportTime: "2026-06-12T00:00:00Z",
+	}
+	comp := HealthPage(view, "csrf")
+	w := httptest.NewRecorder()
+	_ = comp.Render(nil, w)
+	body := w.Body.String()
+
+	if !strings.Contains(body, "OpenResty Runbook") {
+		t.Error("expected OpenResty Runbook panel when events file is missing")
+	}
+	if !strings.Contains(body, "Events file missing") {
+		t.Error("expected 'Events file missing' badge")
+	}
+}
+
+func TestOpenRestyRunbook_ShownWhenStuckProcessing(t *testing.T) {
+	view := healthPageView{
+		Detectors: []detect.Result{
+			{
+				Name:       "openresty",
+				Installed:  true,
+				Configured: true,
+				Healthy:    true,
+				Details: map[string]string{
+					"events_file":      "/var/lib/security-automation-go/events.jsonl",
+					"events_exist":     "present",
+					"events_age":       "2m0s ago",
+					"stuck_processing": "present (prior ingestion may be lost)",
+				},
+			},
+		},
+		ReportTime: "2026-06-12T00:00:00Z",
+	}
+	comp := HealthPage(view, "csrf")
+	w := httptest.NewRecorder()
+	_ = comp.Render(nil, w)
+	body := w.Body.String()
+
+	if !strings.Contains(body, "OpenResty Runbook") {
+		t.Error("expected OpenResty Runbook panel when stuck processing file exists")
+	}
+	if !strings.Contains(body, "Stuck processing file") {
+		t.Error("expected stuck processing detail in runbook")
+	}
+}
+
+func TestOpenRestyRunbook_HiddenWhenHealthy(t *testing.T) {
+	view := healthPageView{
+		Detectors: []detect.Result{
+			{
+				Name:       "openresty",
+				Installed:  true,
+				Configured: true,
+				Healthy:    true,
+				Details: map[string]string{
+					"events_file":  "/var/lib/security-automation-go/events.jsonl",
+					"events_exist": "present",
+					"events_age":   "5s ago",
+				},
+			},
+		},
+		ReportTime: "2026-06-12T00:00:00Z",
+	}
+	comp := HealthPage(view, "csrf")
+	w := httptest.NewRecorder()
+	_ = comp.Render(nil, w)
+	body := w.Body.String()
+
+	if strings.Contains(body, "OpenResty Runbook") {
+		t.Error("runbook panel should not appear when events file is fresh and no issues")
+	}
+}
+
+func TestOpenRestyRunbook_ShownWhenStale(t *testing.T) {
+	view := healthPageView{
+		Detectors: []detect.Result{
+			{
+				Name:       "openresty",
+				Installed:  true,
+				Configured: true,
+				Healthy:    true,
+				Details: map[string]string{
+					"events_file":  "/var/lib/security-automation-go/events.jsonl",
+					"events_exist": "present",
+					"events_age":   "2h0m0s ago",
+				},
+			},
+		},
+		ReportTime: "2026-06-12T00:00:00Z",
+	}
+	comp := HealthPage(view, "csrf")
+	w := httptest.NewRecorder()
+	_ = comp.Render(nil, w)
+	body := w.Body.String()
+
+	if !strings.Contains(body, "OpenResty Runbook") {
+		t.Error("expected OpenResty Runbook panel when events file is stale (>30min)")
+	}
+	if !strings.Contains(body, "stale") {
+		t.Error("expected 'stale' text in runbook for old events file")
+	}
+}
+
+func TestOpenRestyRunbook_NotShownWhenNotConfigured(t *testing.T) {
+	view := healthPageView{
+		Detectors: []detect.Result{
+			{
+				Name:       "openresty",
+				Installed:  false,
+				Configured: false,
+				Healthy:    false,
+				Details:    map[string]string{},
+			},
+		},
+		ReportTime: "2026-06-12T00:00:00Z",
+	}
+	comp := HealthPage(view, "csrf")
+	w := httptest.NewRecorder()
+	_ = comp.Render(nil, w)
+	body := w.Body.String()
+
+	if strings.Contains(body, "OpenResty Runbook") {
+		t.Error("runbook panel should not appear when openresty not configured")
 	}
 }
 

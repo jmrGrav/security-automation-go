@@ -89,7 +89,20 @@ func DetectOpenResty(cfg Config) Result {
 	r.Configured = strings.TrimSpace(cfg.OpenRestyEventsFile) != ""
 	r.Details["events_file"] = valueOrMissing(cfg.OpenRestyEventsFile)
 	if r.Configured {
-		r.Details["events_exist"] = presentOrMissing(fileExists(cfg.OpenRestyEventsFile))
+		eventsFile := cfg.OpenRestyEventsFile
+		if fi, err := os.Stat(eventsFile); err == nil {
+			r.Details["events_exist"] = "present"
+			age := time.Since(fi.ModTime()).Truncate(time.Second)
+			r.Details["events_age"] = age.String() + " ago"
+			r.Details["events_size_bytes"] = fmt.Sprintf("%d", fi.Size())
+		} else {
+			r.Details["events_exist"] = "missing"
+		}
+		// Flag a stuck .processing file — means a prior ingestion was interrupted.
+		procFile := strings.TrimSuffix(eventsFile, ".jsonl") + ".processing"
+		if fileExists(procFile) {
+			r.Details["stuck_processing"] = "present (prior ingestion may be lost)"
+		}
 	}
 	// Healthy = binary installed and service running; events pipeline config is optional.
 	r.Healthy = r.Installed && serviceActive

@@ -1,6 +1,7 @@
 package detect
 
 import (
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -255,6 +256,102 @@ func TestDetectOpenResty_NotConfigured(t *testing.T) {
 	}
 	if r.Healthy {
 		t.Error("expected not healthy when not configured")
+	}
+}
+
+func TestDetectOpenResty_EventsFilePresent_ReportsAgeAndSize(t *testing.T) {
+	origBin := binaryInstalled
+	origSvc := systemdServiceActive
+	binaryInstalled = func(string) bool { return true }
+	systemdServiceActive = func(string) bool { return true }
+	defer func() {
+		binaryInstalled = origBin
+		systemdServiceActive = origSvc
+	}()
+
+	dir := t.TempDir()
+	eventsFile := dir + "/events.jsonl"
+	if err := os.WriteFile(eventsFile, []byte(`{"ts":1,"ip":"1.2.3.4","detail":"/foo"}`+"\n"), 0644); err != nil {
+		t.Fatalf("write events file: %v", err)
+	}
+
+	r := DetectOpenResty(Config{OpenRestyEventsFile: eventsFile})
+	if r.Details["events_exist"] != "present" {
+		t.Errorf("expected events_exist=present, got %q", r.Details["events_exist"])
+	}
+	if r.Details["events_age"] == "" {
+		t.Error("expected events_age to be set when file exists")
+	}
+	if r.Details["events_size_bytes"] == "" || r.Details["events_size_bytes"] == "0" {
+		t.Errorf("expected non-zero events_size_bytes, got %q", r.Details["events_size_bytes"])
+	}
+}
+
+func TestDetectOpenResty_EventsFileMissing_ShowsMissing(t *testing.T) {
+	origBin := binaryInstalled
+	origSvc := systemdServiceActive
+	origFile := fileExists
+	binaryInstalled = func(string) bool { return true }
+	systemdServiceActive = func(string) bool { return true }
+	fileExists = func(string) bool { return false }
+	defer func() {
+		binaryInstalled = origBin
+		systemdServiceActive = origSvc
+		fileExists = origFile
+	}()
+
+	r := DetectOpenResty(Config{OpenRestyEventsFile: "/nonexistent/events.jsonl"})
+	if r.Details["events_exist"] != "missing" {
+		t.Errorf("expected events_exist=missing, got %q", r.Details["events_exist"])
+	}
+	if r.Details["events_age"] != "" {
+		t.Errorf("expected no events_age when file missing, got %q", r.Details["events_age"])
+	}
+}
+
+func TestDetectOpenResty_StuckProcessingFile_ReportsDetail(t *testing.T) {
+	origBin := binaryInstalled
+	origSvc := systemdServiceActive
+	binaryInstalled = func(string) bool { return true }
+	systemdServiceActive = func(string) bool { return true }
+	defer func() {
+		binaryInstalled = origBin
+		systemdServiceActive = origSvc
+	}()
+
+	dir := t.TempDir()
+	eventsFile := dir + "/events.jsonl"
+	procFile := dir + "/events.processing"
+	// Create the .processing file to simulate a stuck state.
+	if err := os.WriteFile(procFile, []byte("stuck"), 0644); err != nil {
+		t.Fatalf("write processing file: %v", err)
+	}
+
+	r := DetectOpenResty(Config{OpenRestyEventsFile: eventsFile})
+	if r.Details["stuck_processing"] == "" {
+		t.Error("expected stuck_processing detail when .processing file exists")
+	}
+}
+
+func TestDetectOpenResty_NoStuckProcessing_NoDetail(t *testing.T) {
+	origBin := binaryInstalled
+	origSvc := systemdServiceActive
+	binaryInstalled = func(string) bool { return true }
+	systemdServiceActive = func(string) bool { return true }
+	defer func() {
+		binaryInstalled = origBin
+		systemdServiceActive = origSvc
+	}()
+
+	dir := t.TempDir()
+	eventsFile := dir + "/events.jsonl"
+	if err := os.WriteFile(eventsFile, []byte(""), 0644); err != nil {
+		t.Fatalf("write events file: %v", err)
+	}
+
+	r := DetectOpenResty(Config{OpenRestyEventsFile: eventsFile})
+	if r.Details["stuck_processing"] != "" {
+		t.Errorf("expected no stuck_processing when no .processing file, got %q", r.Details["stuck_processing"])
 	}
 }
 
