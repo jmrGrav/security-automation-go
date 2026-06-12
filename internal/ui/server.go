@@ -574,6 +574,34 @@ func (s *Server) handleAIExplainScript(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleForensicPage(w http.ResponseWriter, r *http.Request) {
+	if ipStr := strings.TrimSpace(r.URL.Query().Get("ip")); ipStr != "" {
+		// Deep-link: /forensic?ip=X performs the lookup inline.
+		ip, err := netip.ParseAddr(ipStr)
+		if err != nil || !ip.IsValid() {
+			renderForensicPage(r.Context(), w, ForensicView{IP: ipStr, Error: "invalid IP address"})
+			return
+		}
+		view := ForensicView{IP: ipStr}
+		if s.enrichment != nil {
+			summary, err := s.enrichment.Enrich(r.Context(), ip, enrichment.LookupOptions{ManualForensics: true})
+			if err == nil {
+				view.Summary = summary
+				view.Assess = s.enrichment.Assess(summary)
+				view.HasEnrichment = true
+			} else {
+				view.EnrichmentError = fmt.Sprintf("enrichment failed: %v", err)
+			}
+		}
+		if s.evidence != nil {
+			local, err := s.evidence.Search(r.Context(), reporting.EvidenceSearchOptions{IP: ipStr, Limit: 20})
+			if err == nil {
+				view.LocalEvidence = local
+			}
+		}
+		view.HasData = view.HasEnrichment || len(view.LocalEvidence) > 0
+		renderForensicPage(r.Context(), w, view)
+		return
+	}
 	renderForensicPage(r.Context(), w, ForensicView{})
 }
 

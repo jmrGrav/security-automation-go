@@ -164,6 +164,53 @@ func TestTimelineMergeOrder(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// P13: timelineTargetCell links IP addresses to /forensic?ip=X
+// ---------------------------------------------------------------------------
+
+func TestTimelineTargetCell_IPBecomesLink(t *testing.T) {
+	got := timelineTargetCell("1.2.3.4")
+	if !strings.Contains(got, `/forensic?ip=1.2.3.4`) {
+		t.Errorf("expected forensic deep-link for IP, got %q", got)
+	}
+}
+
+func TestTimelineTargetCell_NonIPRemainsPlainText(t *testing.T) {
+	got := timelineTargetCell("trusted-networks")
+	if strings.Contains(got, `/forensic`) {
+		t.Errorf("non-IP target must not link to forensic, got %q", got)
+	}
+	if !strings.Contains(got, "trusted-networks") {
+		t.Errorf("expected plain text for non-IP target, got %q", got)
+	}
+}
+
+func TestTimelineTargetCell_EmptyRemainsPlainText(t *testing.T) {
+	got := timelineTargetCell("")
+	if strings.Contains(got, `/forensic`) {
+		t.Errorf("empty target must not link to forensic, got %q", got)
+	}
+}
+
+func TestTimelinePage_IPTargetLinksToForensic(t *testing.T) {
+	srv, _, _ := newTestServer(t, nil)
+	srv.evidence = &stubEvidenceStore{
+		items: []reporting.DecisionEvidence{
+			{EvidenceID: "ev1", IP: "5.6.7.8", Source: "cloudflare_waf", Decision: "local_block", Timestamp: time.Now()},
+		},
+	}
+	cookie := loginCookie(t, srv, "test-password-123!@#")
+	req := httptest.NewRequest(http.MethodGet, "/timeline", nil)
+	req.AddCookie(cookie)
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+
+	body := rr.Body.String()
+	if !strings.Contains(body, `/forensic?ip=5.6.7.8`) {
+		t.Errorf("expected forensic deep-link in timeline for WAF event IP, body: %s", body)
+	}
+}
+
 func TestTimelineFiltersAndExportsReadOnlyEvents(t *testing.T) {
 	srv, audit, _ := newTestServer(t, nil)
 	audit.Record("security_intelligence_lookup", map[string]string{

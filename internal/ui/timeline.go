@@ -8,6 +8,7 @@ import (
 	"html"
 	"io"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"sort"
 	"strconv"
@@ -431,7 +432,7 @@ func TimelinePage(view TimelineView, csrfToken string) templ.Component {
 					html.EscapeString(auditDisplayValue(entry.ReplaySequence)),
 					html.EscapeString(auditDisplayValue(entry.ActorSource)),
 					html.EscapeString(valueOrUnknown(entry.Action)),
-					html.EscapeString(auditDisplayValue(entry.Target)),
+					timelineTargetCell(entry.Target),
 					html.EscapeString(auditDisplayValue(entry.Result)),
 					timelineAIButtonHTML("timeline_event", timelineExplainSubjectID(entry), csrfToken),
 				); err != nil {
@@ -442,6 +443,17 @@ func TimelinePage(view TimelineView, csrfToken string) templ.Component {
 			return err
 		}),
 	})
+}
+
+// timelineTargetCell returns HTML for the target column: an IP becomes a link
+// to /forensic?ip=X; other values are rendered as plain escaped text.
+func timelineTargetCell(target string) string {
+	v := auditDisplayValue(target)
+	if addr, err := netip.ParseAddr(strings.TrimSpace(target)); err == nil && addr.IsValid() {
+		return fmt.Sprintf(`<a href="/forensic?ip=%s" title="Explain this IP">%s</a>`,
+			html.EscapeString(addr.String()), html.EscapeString(addr.String()))
+	}
+	return html.EscapeString(v)
 }
 
 func timelineExplainSubjectID(entry audit.TimelineEvent) string {
