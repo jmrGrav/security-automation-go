@@ -644,6 +644,54 @@ func TestLogout_ValidCSRF(t *testing.T) {
 	}
 }
 
+func TestLogoutGET_ClearsSessionAndRedirects(t *testing.T) {
+	srv, _, _ := newTestServer(t, nil)
+	cookie := loginCookie(t, srv, "test-password-123!@#")
+
+	req := httptest.NewRequest(http.MethodGet, "/logout", nil)
+	req.AddCookie(cookie)
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusFound {
+		t.Fatalf("expected redirect after GET logout, got %d", rr.Code)
+	}
+	// Session must be invalidated — authenticated page must now return redirect
+	req2 := httptest.NewRequest(http.MethodGet, "/", nil)
+	req2.AddCookie(cookie)
+	rr2 := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr2, req2)
+	if rr2.Code != http.StatusFound {
+		t.Fatalf("expected redirect to login after session destroyed, got %d", rr2.Code)
+	}
+}
+
+func TestLogoutGET_RequiresAuth(t *testing.T) {
+	srv, _, _ := newTestServer(t, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/logout", nil)
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusFound {
+		t.Fatalf("expected redirect to login for unauthenticated logout, got %d", rr.Code)
+	}
+}
+
+func TestSidebarContainsLogoutLink(t *testing.T) {
+	srv, _, _ := newTestServer(t, nil)
+	cookie := loginCookie(t, srv, "test-password-123!@#")
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.AddCookie(cookie)
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+
+	if !strings.Contains(rr.Body.String(), `href="/logout"`) {
+		t.Fatalf("sidebar must contain a logout link, got: %s", rr.Body.String()[:min(500, rr.Body.Len())])
+	}
+}
+
 func TestForensicLookup_RequiresCSRF(t *testing.T) {
 	srv, _, _ := newTestServer(t, nil)
 	cookie := loginCookie(t, srv, "test-password-123!@#")

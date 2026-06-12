@@ -96,6 +96,8 @@ func ConsoleLayout(view shellView) templ.Component {
 				top: 0;
 				height: 100vh;
 				overflow: auto;
+				display: flex;
+				flex-direction: column;
 			}
 			.brand {
 				display: flex;
@@ -110,6 +112,26 @@ func ConsoleLayout(view shellView) templ.Component {
 			.nav {
 				display: grid;
 				gap: .25rem;
+			}
+			.sidebar-footer {
+				margin-top: auto;
+				padding-top: .9rem;
+				border-top: 1px solid var(--sidebar-border);
+			}
+			.logout-link {
+				display: flex;
+				align-items: center;
+				gap: .5rem;
+				text-decoration: none;
+				padding: .65rem .8rem;
+				border-radius: 8px;
+				color: rgba(220,232,255,.72);
+				font-size: .88rem;
+				transition: background .12s, color .12s;
+			}
+			.logout-link:hover {
+				background: rgba(255,80,80,.15);
+				color: #ffb3b3;
 			}
 			.nav a {
 				display: flex;
@@ -289,7 +311,7 @@ func ConsoleLayout(view shellView) templ.Component {
 				return err
 			}
 		}
-		if _, err := fmt.Fprint(w, `</nav></aside><main class="main"><div class="`); err != nil {
+		if _, err := fmt.Fprint(w, `</nav><div class="sidebar-footer"><a href="/logout" class="logout-link">⏻ Sign out</a></div></aside><main class="main"><div class="`); err != nil {
 			return err
 		}
 		if _, err := io.WriteString(w, html.EscapeString(view.BodyClass)); err != nil {

@@ -210,6 +210,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /login", s.handleLogin)
 	s.mux.Handle("POST /ui/settings/password/change", s.forcePasswordChangeMiddleware(http.HandlerFunc(s.handleChangePassword)))
 	s.mux.Handle("POST /logout", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleLogout)))))
+	s.mux.Handle("GET /logout", s.setupGuardMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleLogoutGET))))
 	s.mux.Handle("GET /", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleDashboard)))))
 	s.mux.Handle("GET /providers", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleProviders)))))
 	s.mux.Handle("POST /admin/providers/{name}/key", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleProviderReplaceKey)))))
@@ -256,6 +257,18 @@ func (s *Server) handleLoginPage(w http.ResponseWriter, r *http.Request) {
 	_ = LoginPage("").Render(r.Context(), w)
 }
 
+func (s *Server) handleLogoutGET(w http.ResponseWriter, r *http.Request) {
+	if cookie, err := r.Cookie(sessionCookieName); err == nil {
+		s.mu.Lock()
+		delete(s.sessions, cookie.Value)
+		s.pruneSessionsLocked(time.Now().UTC())
+		s.mu.Unlock()
+	}
+	s.clearSessionCookie(w)
+	s.audit.Record("logout", map[string]string{"actor": "local", "method": "get"})
+	http.Redirect(w, r, "/login", http.StatusFound)
+}
+
 func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	if !s.validCSRF(r) {
 		s.audit.Record("logout", map[string]string{
@@ -281,11 +294,8 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleProviders(w http.ResponseWriter, r *http.Request) {
-	view, err := s.providerManagementView()
-	if err != nil {
-		view.Error = err.Error()
-	}
-	_ = ProviderManagementPage(view, s.csrfTokenFromRequest(r)).Render(r.Context(), w)
+	view, _ := s.unifiedProvidersView()
+	_ = UnifiedProvidersPage(view, s.csrfTokenFromRequest(r)).Render(r.Context(), w)
 }
 
 func (s *Server) handleAboutPage(w http.ResponseWriter, r *http.Request) {

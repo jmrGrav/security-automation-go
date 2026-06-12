@@ -90,6 +90,27 @@ type AIProviderManagementEntry struct {
 	ValidationMessage string
 }
 
+// NonAIProviderEntry represents a single non-AI provider (AbuseIPDB, Spamhaus, VirusTotal,
+// Cloudflare, CrowdSec, BetterStack) on the unified providers page.
+type NonAIProviderEntry struct {
+	Name             string
+	Category         string // "reporting", "enrichment", "logging", "detection"
+	Configured       bool
+	Enabled          bool
+	MaskedKey        string
+	HasKeyManagement bool // true when a credential-store key exists for this provider
+	CredentialKey    string
+	Status           string
+	Notes            string
+}
+
+// UnifiedProvidersView is the view model for the unified /providers page.
+type UnifiedProvidersView struct {
+	AI    AIProviderManagementView
+	NonAI []NonAIProviderEntry
+	Error string
+}
+
 type ComingSoonView struct {
 	Title       string
 	Description string

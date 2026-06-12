@@ -28,7 +28,7 @@ func TestProviderHealthCenter_RendersConfiguredMissingAndMasksSecrets(t *testing
 
 	body := rr.Body.String()
 	for _, want := range []string{
-		"Provider Management",
+		"AI Providers",
 		"OpenAI",
 		"Anthropic",
 		"Gemini",
@@ -118,7 +118,7 @@ func TestProviderHealthCenter_RendersQuotaOverviewAndQuotaDetails(t *testing.T) 
 
 	body := strings.ToLower(rr.Body.String())
 	for _, want := range []string{
-		"provider management",
+		"ai providers",
 		"replace key",
 		"test provider",
 		"enable provider",
