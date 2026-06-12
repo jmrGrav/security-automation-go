@@ -2,11 +2,27 @@
 
 All notable changes to this project will be documented in this file.
 
-## [v1.6.0] — Unreleased
+## [v1.6.0] — 2026-06-12
 
 ### Summary
 
-Operator console cleanup sprint, Admin Recovery System, and env-elimination. UI source-of-truth unified across Health, Wizard step 8, and Dashboard. Trusted Networks page converted to a responsive table. Cloudflare Diff gains a clear Operator Summary panel. Wizard step 8 now reads actual dry-run/mutations state from the store instead of showing defaults. Flaky integration test eliminated (bcrypt cost override). Data race fix (cfg snapshot). Dead code removed. Wizard-restart guidance added to RUNBOOK. New: admin password reset and recovery key CLI, cross-process session invalidation via auth_epoch. CWE-614 eliminated structurally (single-emitter Secure cookies). **SQLite is now the single source of truth for runtime feature flags**; `CLOUDFLARE_MUTATIONS_ENABLED`, `CS_POLLER_ENABLED`, `ABUSEIPDB_ENABLED` env vars removed. Admin API token (`CF_SYNC_API_TOKEN`) absence is non-fatal (WARN).
+Major operator console sprint (P1–P13). SQLite as sole source of truth for runtime feature flags. Full WAF evidence pipeline wired into the UI: evidence store, `/evidence` page, Pipeline Health Matrix, Timeline enrichment, and CF ban sync view. Confidence scorer fixed for scanner user-agents. CrowdSec no-URI events preserved. OpenResty dashboard accuracy + diagnostics runbook. AI provider state persisted to SQLite (enable, model, test). `GET /forensic?ip=X` deep-links from evidence and timeline rows. Plus admin recovery system, CWE-614 elimination, env-elimination, and operator console UX cleanup from earlier milestone work.
+
+### Features (fiabilisation sprint P1–P13)
+
+- **P1 — Confidence scoring** — Scanner user-agents (`sqlmap`, `nikto`, Shodan, Censys, etc.) now contribute positive confidence. Previously scored 0; now bumps to `Low` threshold correctly.
+- **P2 — Evidence store UI** — `/evidence` page with pagination, reported/suppressed filters. `EvidenceStore` wired from daemon into UI server via `Options.EvidenceStore`.
+- **P3 — CrowdSec no-URI events** — Events where `URI` is empty are no longer silently dropped; they are preserved with an empty URI.
+- **P4 — OpenResty dashboard WAF badge** — Dashboard badge now uses `os.Stat` for accurate file-existence detection instead of the old string-check path.
+- **P5 — Logout button** — Logout button always visible in the sidebar of the operator console.
+- **P6 — Unified Providers page** — `/providers` page consolidates all AI and non-AI providers (add, edit, test, enable/disable).
+- **P7 — AI provider state in SQLite** — AI provider enabled/model settings persisted to `ui_settings` (SQLite) via the `/providers` UI. State survives daemon restarts.
+- **P8 — Pipeline Health Matrix** — `/pipeline` page: per-source rows (cloudflare_waf, crowdsec_waf, openresty_waf) × columns (Classified, Reported, Suppressed, Pending) from evidence store (100k cap).
+- **P9 — Timeline enriched** — `/timeline` merges audit events and WAF evidence events (sorted by wall time). Source filter (All / WAF Events / Audit Trail). Evidence events include severity and decision classification.
+- **P10 — Dashboard reported total** — Dashboard shows historical AbuseIPDB-reported count from evidence store (persists across daemon restarts), not a Prometheus counter that resets.
+- **P11 — OpenResty diagnostics + runbook** — `DetectOpenResty()` reports `events_age`, `events_size_bytes`, `stuck_processing`. Health page `/health` shows an OpenResty Runbook panel explaining missing-file, stale-file, and stuck-processing conditions including the silent-drop root cause (empty `ip`/`detail` fields).
+- **P12 — CF Ban Sync view** — `/sync` page reads `shadow-cycles.jsonl` and displays the latest sync plan: ToAdd/ToDelete IP lists, agreement %, in-sync/drift status, active ban and CF rule counts.
+- **P13 — Explain This IP** — `GET /forensic?ip=X` performs inline lookup (no POST form required). IP cells in `/evidence` and IP targets in `/timeline` link to `/forensic?ip=X` for one-click enrichment context.
 
 ### Features
 

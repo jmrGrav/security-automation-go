@@ -3,7 +3,7 @@ GOFLAGS ?=
 LDFLAGS ?= -s -w
 BUILD_FLAGS ?= -trimpath -buildvcs=false -ldflags "$(LDFLAGS)"
 STATIC_ENV = CGO_ENABLED=0
-VERSION ?= 1.5.5
+VERSION ?= 1.6.0
 GOPATH_BIN := $(shell $(GO) env GOPATH)/bin
 
 GOFMT_FILES := $(shell find . -type f -name '*.go' -not -path './vendor/*')
