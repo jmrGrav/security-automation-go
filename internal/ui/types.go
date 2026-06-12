@@ -180,3 +180,18 @@ type DashboardView struct {
 	Runtime   RuntimeStatusView
 	Providers []ProviderView
 }
+
+type PipelineHealthRow struct {
+	Source     string
+	Classified int
+	Reported   int
+	Suppressed int
+	Pending    int // Decision == "report_pending", awaiting outbox
+}
+
+type PipelineHealthView struct {
+	Rows      []PipelineHealthRow
+	Total     PipelineHealthRow
+	Truncated bool // hit the 100k search cap — counts may be incomplete
+	Error     string
+}
