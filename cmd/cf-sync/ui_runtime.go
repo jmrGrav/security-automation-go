@@ -22,6 +22,7 @@ import (
 	aiopenai "github.com/jm/security-automation-go/internal/ai/providers/openai"
 	"github.com/jm/security-automation-go/internal/config"
 	"github.com/jm/security-automation-go/internal/runtime/lock"
+	"github.com/jm/security-automation-go/internal/services/reporting"
 	"github.com/jm/security-automation-go/internal/startupcheck"
 	"github.com/jm/security-automation-go/internal/storage/sqlite"
 	"github.com/jm/security-automation-go/internal/ui"
@@ -140,13 +141,17 @@ func runUIWithLocker(ctx context.Context, logger *slog.Logger, cfg *config.Confi
 	if v, ok, _ := credentialStore.Lookup(ctx, "ai.gemini.api_key"); ok {
 		aiCfg.Gemini.APIKey = v
 	}
+	var evidenceStore reporting.EvidenceStore
+	if evidenceHolder != nil {
+		evidenceStore = evidenceHolder
+	}
 	server, err := ui.NewServer(cfg, ui.Options{
 		SetupStore:      setupStore,
 		CredentialStore: credentialStore,
 		SecretProvider:  ui.NewFileSecretProvider(cfg.UI.SecretFile),
 		AuditSink:       auditSink,
 		Logger:          logger,
-		EvidenceStore:   evidenceHolder,
+		EvidenceStore:   evidenceStore,
 		AIExplainBuilder: func(effective ai.Config) aigateway.Gateway {
 			return aigateway.NewService(effective, buildAIProviders(effective, logger), nil, auditSink)
 		},
