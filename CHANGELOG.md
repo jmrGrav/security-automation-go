@@ -2,6 +2,24 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v1.6.1] — 2026-06-12
+
+### Summary
+
+Post-release hardening sprint. Seven reliability and security fixes identified by post-v1.6.0 audit: DB split-brain elimination, SQL-level pagination replacing in-memory capping, OpenResty crash-safe event recovery, health check false-positive fix, scanner buffer increase, explicit Cloudflare 429 error propagation, and json_extract filters for evidence queries.
+
+### Fixes
+
+- **FIX-1 — DB split-brain** — Share `sqlite.DB` handle between daemon and UI goroutine in `-mode ui` to eliminate concurrent schema migrations against `runtime.db`.
+- **FIX-2 — Evidence pagination** — Replace 10k/100k in-memory evidence fetches with SQL `COUNT(*)` + `LIMIT`/`OFFSET` pagination. Add `AbuseIPDBReported` and `Suppressed` filter fields to `EvidenceSearchOptions`. Add `Count()` method to `EvidenceStore` interface; implemented via `json_extract()` in SQLite.
+- **FIX-3 — OpenResty crash recovery** — `LiveSource.Read()` recovers stale `.processing` files left by a prior crash before checking for new events. Prevents silent event loss when `os.Rename` would overwrite an unconsumed batch.
+- **FIX-4 — Health check false Yellow** — `CheckOpenResty` checks directory existence (not file) — the events file is legitimately absent between pipeline cycles after `Read()` consumes it.
+- **FIX-5 — Shadow store buffer** — Increase `bufio.Scanner` buffer from 64 KB to 1 MB in `shadow.Store` to prevent `/sync` page breakage on large sync cycles.
+- **FIX-6 — Cloudflare 429 propagation** — Transport layer now returns an explicit `HTTP 429 rate-limited` error (with `Retry-After` value when present) instead of passing the 429 body to callers as a successful response.
+- **FIX-7 — Evidence json_extract filters** — `Search()` and `Count()` apply `json_extract(data, '$.abuseipdb_reported') = 1` / `json_extract(data, '$.suppressed') = 1` directly in SQLite rather than relying on in-memory post-filtering.
+
+---
+
 ## [v1.6.0] — 2026-06-12
 
 ### Summary
