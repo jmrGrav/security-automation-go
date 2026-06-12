@@ -134,10 +134,11 @@ func runCFSync(configPath, mode string, dryRun bool, format string, metricsAddr 
 	}
 
 	// Always start UI server in background if enabled.
+	evidenceHolder := &lazyEvidenceStore{}
 	if cfg.UI.Enabled {
 		uiCfg := *cfg // snapshot: runUIWithLocker writes its own credential fields; avoid race with writes below
 		go func() {
-			if err := runUIWithLocker(ctx, logger, &uiCfg, false); err != nil {
+			if err := runUIWithLocker(ctx, logger, &uiCfg, false, evidenceHolder); err != nil {
 				logger.Error("UI server failed", "error", err)
 			}
 		}()
@@ -215,6 +216,7 @@ func runCFSync(configPath, mode string, dryRun bool, format string, metricsAddr 
 		os.Exit(1)
 	}
 	defer sqliteDB.Close()
+	evidenceHolder.set(reportingStores.Evidence)
 
 	outboxLeaseGuard := reporting.NewLeaseStoreOutboxGuard(currentScope.ID(), "reconcile", leaseRepo)
 	newBus := events.NewBus(eventStore, logger)

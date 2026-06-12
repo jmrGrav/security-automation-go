@@ -3,6 +3,7 @@ package ui
 import (
 	"github.com/jm/security-automation-go/internal/security/audit"
 	"github.com/jm/security-automation-go/internal/security/enrichment"
+	"github.com/jm/security-automation-go/internal/services/reporting"
 )
 
 type ProviderView struct {
@@ -116,11 +117,14 @@ type BuildInfoView struct {
 
 // ForensicView holds the result of a forensic IP enrichment lookup.
 type ForensicView struct {
-	IP      string
-	Summary enrichment.EnrichmentSummary
-	Assess  enrichment.Assessment
-	HasData bool
-	Error   string
+	IP              string
+	Summary         enrichment.EnrichmentSummary
+	Assess          enrichment.Assessment
+	LocalEvidence   []reporting.DecisionEvidence
+	HasData         bool
+	HasEnrichment   bool
+	Error           string
+	EnrichmentError string
 }
 
 type TrustedNetworkEntryView struct {

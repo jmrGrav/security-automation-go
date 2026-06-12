@@ -41,6 +41,18 @@ func ForensicPage(view ForensicView) templ.Component {
 			}
 		}
 
+		if view.EnrichmentError != "" {
+			if _, err := fmt.Fprint(w, `<div class="panel"><p class="error">`); err != nil {
+				return err
+			}
+			if _, err := io.WriteString(w, html.EscapeString(view.EnrichmentError)); err != nil {
+				return err
+			}
+			if _, err := fmt.Fprint(w, `</p></div>`); err != nil {
+				return err
+			}
+		}
+
 		if !view.HasData {
 			if _, err := fmt.Fprint(w, `</section>`); err != nil {
 				return err
@@ -48,84 +60,120 @@ func ForensicPage(view ForensicView) templ.Component {
 			return nil
 		}
 
-		s := view.Summary
-		a := view.Assess
+		if view.HasEnrichment {
+			s := view.Summary
+			a := view.Assess
 
-		cacheBadge := `<span class="badge">fresh</span>`
-		if s.CacheHit {
-			cacheBadge = `<span class="badge warning">cache hit</span>`
-		}
-		protectedBadge := ""
-		if a.NoHardBan {
-			protectedBadge = ` <span class="badge healthy">protected network</span>`
-		}
+			cacheBadge := `<span class="badge">fresh</span>`
+			if s.CacheHit {
+				cacheBadge = `<span class="badge warning">cache hit</span>`
+			}
+			protectedBadge := ""
+			if a.NoHardBan {
+				protectedBadge = ` <span class="badge healthy">protected network</span>`
+			}
 
-		if _, err := fmt.Fprintf(w, `<div class="panel"><h2>%s %s%s</h2>`, html.EscapeString(s.IP.String()), cacheBadge, protectedBadge); err != nil {
-			return err
-		}
-		if _, err := fmt.Fprintf(w, `<p class="muted">Score delta: %+d &nbsp; HardBan allowed: %s</p>`, a.Score, boolBadge(a.HardBanAllowed)); err != nil {
-			return err
-		}
-		if len(a.Reasons) > 0 {
-			if _, err := fmt.Fprintf(w, `<p class="muted">Signals: %s</p>`, html.EscapeString(strings.Join(a.Reasons, ", "))); err != nil {
+			if _, err := fmt.Fprintf(w, `<div class="panel"><h2>%s %s%s</h2>`, html.EscapeString(s.IP.String()), cacheBadge, protectedBadge); err != nil {
+				return err
+			}
+			if _, err := fmt.Fprintf(w, `<p class="muted">Score delta: %+d &nbsp; HardBan allowed: %s</p>`, a.Score, boolBadge(a.HardBanAllowed)); err != nil {
+				return err
+			}
+			if len(a.Reasons) > 0 {
+				if _, err := fmt.Fprintf(w, `<p class="muted">Signals: %s</p>`, html.EscapeString(strings.Join(a.Reasons, ", "))); err != nil {
+					return err
+				}
+			}
+
+			if _, err := fmt.Fprint(w, `<div class="kv">`); err != nil {
+				return err
+			}
+
+			dnsStatus := "no PTR"
+			if s.DNS.Hostname != "" {
+				dnsStatus = html.EscapeString(s.DNS.Hostname)
+				if s.DNS.Confirmed {
+					dnsStatus += ` <span class="badge healthy">forward confirmed</span>`
+				} else {
+					dnsStatus += ` <span class="badge warning">rDNS unconfirmed</span>`
+				}
+				if s.DNS.TrustedBot {
+					dnsStatus += ` <span class="badge healthy">trusted bot</span>`
+				}
+			}
+			if _, err := fmt.Fprintf(w, `<div class="row"><span>DNS/rDNS</span><span>%s</span></div>`, dnsStatus); err != nil {
+				return err
+			}
+
+			asnText := "unknown"
+			if s.ASN.Org != "" {
+				asnText = html.EscapeString(s.ASN.Org)
+			}
+			if s.ASN.Network != "" {
+				asnText += " (" + html.EscapeString(s.ASN.Network) + ")"
+			}
+			asnKindBadge := ""
+			switch {
+			case s.ASN.Protected:
+				asnKindBadge = ` <span class="badge healthy">protected</span>`
+			case string(s.ASN.Kind) == "datacenter":
+				asnKindBadge = ` <span class="badge warning">datacenter</span>`
+			}
+			if _, err := fmt.Fprintf(w, `<div class="row"><span>ASN/Network</span><span>%s%s</span></div>`, asnText, asnKindBadge); err != nil {
+				return err
+			}
+
+			for _, v := range s.Providers {
+				scoreBadge := badgeForScore(v.Score)
+				label := html.EscapeString(v.Provider)
+				if v.Manual {
+					label += " (manual)"
+				}
+				note := ""
+				if v.Note != "" {
+					note = " — " + html.EscapeString(v.Note)
+				}
+				if _, err := fmt.Fprintf(w, `<div class="row"><span>%s</span><span>score %d %s%s</span></div>`, label, v.Score, scoreBadge, note); err != nil {
+					return err
+				}
+			}
+
+			if _, err := fmt.Fprint(w, `</div></div>`); err != nil {
 				return err
 			}
 		}
 
-		if _, err := fmt.Fprint(w, `<div class="kv">`); err != nil {
-			return err
-		}
-
-		dnsStatus := "no PTR"
-		if s.DNS.Hostname != "" {
-			dnsStatus = html.EscapeString(s.DNS.Hostname)
-			if s.DNS.Confirmed {
-				dnsStatus += ` <span class="badge healthy">forward confirmed</span>`
-			} else {
-				dnsStatus += ` <span class="badge warning">rDNS unconfirmed</span>`
+		if len(view.LocalEvidence) > 0 {
+			if _, err := fmt.Fprint(w, `<div class="panel"><h2>Local Evidence History</h2><table><thead><tr><th>timestamp</th><th>source</th><th>type</th><th>score</th><th>decision</th><th>status</th></tr></thead><tbody>`); err != nil {
+				return err
 			}
-			if s.DNS.TrustedBot {
-				dnsStatus += ` <span class="badge healthy">trusted bot</span>`
+			for _, ev := range view.LocalEvidence {
+				statusBadge := `<span class="badge">pending</span>`
+				switch {
+				case ev.AbuseIPDBReported:
+					statusBadge = `<span class="badge bad">reported to AbuseIPDB</span>`
+				case ev.Suppressed:
+					statusBadge = `<span class="badge warning">suppressed: ` + html.EscapeString(ev.SuppressionReason) + `</span>`
+				case ev.Decision == "report_pending":
+					statusBadge = `<span class="badge live">report pending</span>`
+				}
+				if _, err := fmt.Fprintf(w, `<tr><td>%s</td><td>%s</td><td>%s</td><td>%d</td><td>%s</td><td>%s</td></tr>`,
+					html.EscapeString(ev.Timestamp.Format("2006-01-02 15:04:05")),
+					html.EscapeString(ev.Source),
+					html.EscapeString(ev.AbuseType),
+					ev.RiskScore,
+					html.EscapeString(ev.Decision),
+					statusBadge,
+				); err != nil {
+					return err
+				}
 			}
-		}
-		if _, err := fmt.Fprintf(w, `<div class="row"><span>DNS/rDNS</span><span>%s</span></div>`, dnsStatus); err != nil {
-			return err
-		}
-
-		asnText := "unknown"
-		if s.ASN.Org != "" {
-			asnText = html.EscapeString(s.ASN.Org)
-		}
-		if s.ASN.Network != "" {
-			asnText += " (" + html.EscapeString(s.ASN.Network) + ")"
-		}
-		asnKindBadge := ""
-		switch {
-		case s.ASN.Protected:
-			asnKindBadge = ` <span class="badge healthy">protected</span>`
-		case string(s.ASN.Kind) == "datacenter":
-			asnKindBadge = ` <span class="badge warning">datacenter</span>`
-		}
-		if _, err := fmt.Fprintf(w, `<div class="row"><span>ASN/Network</span><span>%s%s</span></div>`, asnText, asnKindBadge); err != nil {
-			return err
-		}
-
-		for _, v := range s.Providers {
-			scoreBadge := badgeForScore(v.Score)
-			label := html.EscapeString(v.Provider)
-			if v.Manual {
-				label += " (manual)"
-			}
-			note := ""
-			if v.Note != "" {
-				note = " — " + html.EscapeString(v.Note)
-			}
-			if _, err := fmt.Fprintf(w, `<div class="row"><span>%s</span><span>score %d %s%s</span></div>`, label, v.Score, scoreBadge, note); err != nil {
+			if _, err := fmt.Fprint(w, `</tbody></table></div>`); err != nil {
 				return err
 			}
 		}
 
-		if _, err := fmt.Fprint(w, `</div></div></section>`); err != nil {
+		if _, err := fmt.Fprint(w, `</section>`); err != nil {
 			return err
 		}
 		return nil
