@@ -10,6 +10,17 @@ import (
 	ai "github.com/jm/security-automation-go/internal/ai"
 )
 
+func (s *Server) loadAIState(ctx context.Context) (AIProviderState, bool, error) {
+	return loadAIStateFromStoreOrFile(ctx, s.setupStore, s.cfg.UI.ProviderStateFile)
+}
+
+func (s *Server) saveAIState(ctx context.Context, state AIProviderState) error {
+	if s.setupStore != nil {
+		return saveAIProviderStateToStore(ctx, s.setupStore, state)
+	}
+	return saveAIProviderState(s.cfg.UI.ProviderStateFile, state)
+}
+
 func normalizeAIConfig(cfg ai.Config) ai.Config {
 	if cfg.MaxContextBytes <= 0 {
 		cfg.MaxContextBytes = 12_000
@@ -104,7 +115,7 @@ func (s *Server) unifiedProvidersView() (UnifiedProvidersView, error) {
 }
 
 func (s *Server) providerManagementView() (AIProviderManagementView, error) {
-	state, loaded, err := loadAIProviderState(s.cfg.UI.ProviderStateFile)
+	state, loaded, err := s.loadAIState(context.Background())
 	if err != nil {
 		return AIProviderManagementView{}, err
 	}
@@ -114,7 +125,7 @@ func (s *Server) providerManagementView() (AIProviderManagementView, error) {
 }
 
 func (s *Server) providerDashboardViews() []AIProviderDashboardView {
-	state, loaded, err := loadAIProviderState(s.cfg.UI.ProviderStateFile)
+	state, loaded, err := s.loadAIState(context.Background())
 	if err != nil {
 		return nil
 	}
@@ -123,7 +134,7 @@ func (s *Server) providerDashboardViews() []AIProviderDashboardView {
 }
 
 func (s *Server) rebuildAIExplainFromState() error {
-	state, loaded, err := loadAIProviderState(s.cfg.UI.ProviderStateFile)
+	state, loaded, err := s.loadAIState(context.Background())
 	if err != nil {
 		return err
 	}
@@ -307,7 +318,7 @@ func (s *Server) handleProviderToggle(w http.ResponseWriter, r *http.Request, en
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
-	state, _, err := loadAIProviderState(s.cfg.UI.ProviderStateFile)
+	state, _, err := s.loadAIState(r.Context())
 	if err != nil {
 		s.renderUnifiedProvidersError(w, r, http.StatusInternalServerError, err.Error())
 		return
@@ -319,7 +330,7 @@ func (s *Server) handleProviderToggle(w http.ResponseWriter, r *http.Request, en
 		if !configured {
 			record.LastErrorCode = providerStatusMissingSecret
 			setProviderStateRecord(&state, name, record)
-			if err := saveAIProviderState(s.cfg.UI.ProviderStateFile, state); err != nil {
+			if err := s.saveAIState(r.Context(), state); err != nil {
 				s.renderUnifiedProvidersError(w, r, http.StatusForbidden, err.Error())
 				return
 			}
@@ -348,7 +359,7 @@ func (s *Server) handleProviderToggle(w http.ResponseWriter, r *http.Request, en
 		})
 	}
 	setProviderStateRecord(&state, name, record)
-	if err := saveAIProviderState(s.cfg.UI.ProviderStateFile, state); err != nil {
+	if err := s.saveAIState(r.Context(), state); err != nil {
 		s.renderUnifiedProvidersError(w, r, http.StatusForbidden, err.Error())
 		return
 	}
@@ -373,7 +384,7 @@ func (s *Server) handleProviderTest(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
-	state, loaded, err := loadAIProviderState(s.cfg.UI.ProviderStateFile)
+	state, loaded, err := s.loadAIState(r.Context())
 	if err != nil {
 		s.renderUnifiedProvidersError(w, r, http.StatusInternalServerError, err.Error())
 		return
@@ -426,8 +437,8 @@ func (s *Server) handleProviderTest(w http.ResponseWriter, r *http.Request) {
 	record.LastTestLatencyMS = int(latency / time.Millisecond)
 	record.LastErrorCode = errorCode
 	setProviderStateRecord(&state, name, record)
-	if err := saveAIProviderState(s.cfg.UI.ProviderStateFile, state); err != nil {
-		s.renderUnifiedProvidersError(w, r, http.StatusForbidden, fmt.Sprintf("%s\n%s", err.Error(), providerStatePathHint(s.cfg.UI.ProviderStateFile)))
+	if err := s.saveAIState(r.Context(), state); err != nil {
+		s.renderUnifiedProvidersError(w, r, http.StatusForbidden, err.Error())
 		return
 	}
 	if outcome == providerTestReady {
