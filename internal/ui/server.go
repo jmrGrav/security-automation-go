@@ -291,7 +291,7 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
-	_ = DashboardConsolePage(s.dashboardConsoleView()).Render(r.Context(), w)
+	_ = DashboardConsolePage(s.dashboardConsoleView(r.Context())).Render(r.Context(), w)
 }
 
 func (s *Server) handleProviders(w http.ResponseWriter, r *http.Request) {
@@ -872,7 +872,7 @@ func (s *Server) providerHealthViews() []ProviderHealth {
 	return views
 }
 
-func (s *Server) dashboardConsoleView() DashboardConsoleView {
+func (s *Server) dashboardConsoleView(ctx context.Context) DashboardConsoleView {
 	checks := health.RunAll(s.buildHealthConfig())
 	detectors := detect.RunAll(s.buildDetectConfig())
 	env := EnvironmentWidget{Total: len(detectors)}
@@ -891,11 +891,23 @@ func (s *Server) dashboardConsoleView() DashboardConsoleView {
 			env.Healthy++
 		}
 	}
+
+	reportedTotal := 0
+	if s.evidence != nil {
+		if evs, err := s.evidence.Search(ctx, reporting.EvidenceSearchOptions{Limit: 100_000}); err == nil {
+			for _, ev := range evs {
+				if ev.AbuseIPDBReported {
+					reportedTotal++
+				}
+			}
+		}
+	}
+
 	return DashboardConsoleView{
 		Statuses: []StatusItem{
 			{Label: "Runtime", Level: "healthy", Detail: "UI mode active"},
 			{Label: "CrowdSec", Level: statusLevelFromText(crowdSecHealthStatus(s.cfg.CrowdSec.DecisionsLog)), Detail: crowdSecHealthStatus(s.cfg.CrowdSec.DecisionsLog)},
-			{Label: "Cloudflare", Level: statusLevelFromText(cloudflareHealthStatus(s.cfSentinelToken(), s.cfZoneIDFromSetup(context.Background()), s.cfg.Cloudflare.MutationsEnabled)), Detail: cloudflareHealthStatus(s.cfSentinelToken(), s.cfZoneIDFromSetup(context.Background()), s.cfg.Cloudflare.MutationsEnabled)},
+			{Label: "Cloudflare", Level: statusLevelFromText(cloudflareHealthStatus(s.cfSentinelToken(), s.cfZoneIDFromSetup(ctx), s.cfg.Cloudflare.MutationsEnabled)), Detail: cloudflareHealthStatus(s.cfSentinelToken(), s.cfZoneIDFromSetup(ctx), s.cfg.Cloudflare.MutationsEnabled)},
 			{Label: "OpenResty", Level: openRestyDashboardLevel(detectors), Detail: openRestyDashboardDetail(detectors, s.cfg.OpenResty.EventsFile)},
 			{Label: "Nginx", Level: statusLevelFromText(nginxStatus(s.cfg.CrowdSec.NginxLogDir)), Detail: nginxStatus(s.cfg.CrowdSec.NginxLogDir)},
 			{Label: "SQLite WAL", Level: statusLevelFromText(sqliteWALStatus(s.cfg.StateDir)), Detail: sqliteWALStatus(s.cfg.StateDir)},
@@ -905,11 +917,13 @@ func (s *Server) dashboardConsoleView() DashboardConsoleView {
 			{Label: "Recovery", Level: "disabled", Detail: "not wired"},
 			{Label: "Ownership", Level: "healthy", Detail: "lineage preserved in runtime"},
 			{Label: "UI mutations", Level: boolStatus(s.cfg.UI.MutationsEnabled), Detail: boolDetail(s.cfg.UI.MutationsEnabled, "enabled", "disabled")},
-			{Label: "Cloudflare mutations", Level: cloudflareLevel(s.cfSentinelToken(), s.cfZoneIDFromSetup(context.Background()), s.cfg.Cloudflare.MutationsEnabled), Detail: cloudflareHealthStatus(s.cfSentinelToken(), s.cfZoneIDFromSetup(context.Background()), s.cfg.Cloudflare.MutationsEnabled)},
+			{Label: "Cloudflare mutations", Level: cloudflareLevel(s.cfSentinelToken(), s.cfZoneIDFromSetup(ctx), s.cfg.Cloudflare.MutationsEnabled), Detail: cloudflareHealthStatus(s.cfSentinelToken(), s.cfZoneIDFromSetup(ctx), s.cfg.Cloudflare.MutationsEnabled)},
 			{Label: "Shadow / cutover", Level: "disabled", Detail: "not wired in UI shell"},
 		},
-		AIProviders: s.providerDashboardEntries(),
-		Environment: env,
+		AIProviders:   s.providerDashboardEntries(),
+		Environment:   env,
+		ReportedTotal: reportedTotal,
+		EvidenceWired: s.evidence != nil,
 	}
 }
 

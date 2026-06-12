@@ -55,9 +55,11 @@ type EnvironmentWidget struct {
 }
 
 type DashboardConsoleView struct {
-	Statuses    []StatusItem
-	AIProviders []AIProviderDashboardView
-	Environment EnvironmentWidget // new
+	Statuses       []StatusItem
+	AIProviders    []AIProviderDashboardView
+	Environment    EnvironmentWidget
+	ReportedTotal  int  // historical AbuseIPDB-reported count from evidence store
+	EvidenceWired  bool // true when evidence store is available
 }
 
 type AIProviderDashboardView struct {
