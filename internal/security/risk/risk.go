@@ -135,7 +135,8 @@ func Assess(event Event) Assessment {
 		score -= 2
 		evidence = append(evidence, "legit_crawler")
 	}
-	if isKnownScannerUA(ua) {
+	knownScanner := isKnownScannerUA(ua)
+	if knownScanner {
 		score += 5
 		if abuseType == CategoryBenignProbe || abuseType == CategorySuspiciousProbe {
 			abuseType = CategoryScanner
@@ -187,6 +188,9 @@ func Assess(event Event) Assessment {
 	}
 
 	confidence := confidenceFromScore(score)
+	if knownScanner && confidence < 0.75 {
+		confidence = 0.75
+	}
 	return Assessment{
 		Score:               score,
 		AbuseType:           abuseType,
