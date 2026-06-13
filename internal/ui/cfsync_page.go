@@ -13,13 +13,23 @@ import (
 )
 
 func (s *Server) buildCFSyncView() CFSyncView {
+	mutationsOn := s.cfg != nil && s.cfg.Cloudflare.MutationsEnabled
+	dryRun := !mutationsOn
 	store := shadow.NewStore(s.cfg.StateDir)
 	all, err := store.ReadAll()
 	if err != nil {
-		return CFSyncView{Error: err.Error()}
+		return CFSyncView{Error: err.Error(), MutationsOn: mutationsOn, DryRun: dryRun}
 	}
 	if len(all) == 0 {
-		return CFSyncView{CycleCount: 0}
+		reason := "No sync cycles recorded yet."
+		if dryRun {
+			reason = "Running in dry-run mode (Cloudflare mutations disabled). The daemon observes bans but does not write to Cloudflare. Enable cloudflare.mutations_enabled to activate enforcement."
+		} else if s.cfg != nil && s.cfg.CrowdSec.DecisionsLog == "" {
+			reason = "No CrowdSec decisions source configured. Set crowdsec.decisions_log to enable ban sync."
+		} else {
+			reason = "Waiting for first enforcement cycle. The daemon will record sync plans here once it processes active CrowdSec bans."
+		}
+		return CFSyncView{CycleCount: 0, NoCycleReason: reason, MutationsOn: mutationsOn, DryRun: dryRun}
 	}
 	latest := all[len(all)-1]
 	return CFSyncView{
@@ -32,6 +42,8 @@ func (s *Server) buildCFSyncView() CFSyncView {
 		ActiveBans:   latest.ActiveBanCount,
 		CFRules:      latest.CFRuleCount,
 		CycleCount:   len(all),
+		MutationsOn:  mutationsOn,
+		DryRun:       dryRun,
 	}
 }
 
@@ -63,8 +75,17 @@ func renderCFSyncBody(w io.Writer, view CFSyncView) error {
 	}
 
 	if !view.HasData {
-		_, err := fmt.Fprint(w,
-			`<div class="panel"><p class="muted">No sync cycles recorded yet. The daemon must run at least one enforcement cycle before data appears here.</p></div>`,
+		badge := ""
+		if view.DryRun {
+			badge = `<span class="badge warning" style="margin-bottom:.5rem">DRY-RUN</span> `
+		}
+		msg := html.EscapeString(view.NoCycleReason)
+		if msg == "" {
+			msg = "No sync cycles recorded yet."
+		}
+		_, err := fmt.Fprintf(w,
+			`<div class="panel">%s<p class="muted">%s</p></div>`,
+			badge, msg,
 		)
 		return err
 	}
@@ -73,11 +94,15 @@ func renderCFSyncBody(w io.Writer, view CFSyncView) error {
 	if !view.InSync {
 		syncBadge = `<span class="badge error">DRIFT DETECTED</span>`
 	}
+	modeBadge := `<span class="badge healthy">MUTATIONS ON</span>`
+	if view.DryRun {
+		modeBadge = `<span class="badge warning">DRY-RUN</span>`
+	}
 
 	age := time.Since(view.CycleAt).Truncate(time.Second)
 	if _, err := fmt.Fprintf(w,
 		`<div class="panel"><h2>Last Cycle Summary</h2>`+
-			`<div class="badges" style="margin-bottom:.75rem">%s</div>`+
+			`<div class="badges" style="margin-bottom:.75rem">%s %s</div>`+
 			`<div class="kv">`+
 			`<div class="row"><span>Last cycle</span><span>%s (%s ago)</span></div>`+
 			`<div class="row"><span>Agreement</span><span>%.2f%%</span></div>`+
@@ -86,6 +111,7 @@ func renderCFSyncBody(w io.Writer, view CFSyncView) error {
 			`<div class="row"><span>Total cycles recorded</span><span>%d</span></div>`+
 			`</div></div>`,
 		syncBadge,
+		modeBadge,
 		html.EscapeString(view.CycleAt.UTC().Format(time.RFC3339)),
 		html.EscapeString(age.String()),
 		view.AgreementPct,
