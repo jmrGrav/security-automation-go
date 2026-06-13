@@ -6,6 +6,13 @@ import (
 	"time"
 )
 
+// Default safe model IDs applied when a provider is enabled but no model is configured.
+const (
+	DefaultOpenAIModel    = "gpt-4.1-mini"
+	DefaultAnthropicModel = "claude-sonnet-4-6"
+	DefaultGeminiModel    = "gemini-1.5-pro"
+)
+
 // ProviderConfig reserves future provider-specific settings without wiring calls.
 type ProviderConfig struct {
 	Enabled bool
