@@ -5,7 +5,7 @@ BUILD_DATE := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 LDFLAGS ?= -s -w -X main.version=$(VERSION) -X main.commit=$(GIT_COMMIT) -X main.buildDate=$(BUILD_DATE)
 BUILD_FLAGS ?= -trimpath -buildvcs=false -ldflags "$(LDFLAGS)"
 STATIC_ENV = CGO_ENABLED=0
-VERSION ?= 1.6.1
+VERSION ?= 1.6.2
 GOPATH_BIN := $(shell $(GO) env GOPATH)/bin
 
 GOFMT_FILES := $(shell find . -type f -name '*.go' -not -path './vendor/*')

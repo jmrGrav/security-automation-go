@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v1.6.2] — 2026-06-13
+
+### Summary
+
+Runtime wiring repair: CrowdSec and OpenResty events were never processed by the `cf-sync` daemon. Two root causes fixed: (1) `processCrowdSec`/`processOpenResty` were dead code in the running service; (2) `acceptDecision` silently dropped 94% of CrowdSec decisions (CAPI origin). Also fixes hardcoded `v1.0.0` version string in status/UI.
+
+### Fixes
+
+- **FIX-CS-WIRE — CrowdSec + OpenResty wired into cf-sync daemon** — `processCrowdSec` and `processOpenResty` were only called by `CrowdSecSyncApp` (the `crowdsec-sync` binary, not running as a service). The `cf-sync` daemon polled Cloudflare WAF only. Added `wafBundle` struct in `runtime_wiring.go` that holds CF WAF + CrowdSec + OpenResty services sharing a single `reporting.Service` (unified dedup store and evidence store). `startCrowdSecOpenRestyPoller` goroutine added to `daemon_runtime.go` and wired into `runDaemonWithLocker`.
+- **FIX-CAPI — Accept CAPI origin in CrowdSec decisions** — `acceptDecision` rejected `origin="CAPI"` (CrowdSec Community API blocklist), representing 94% of decisions.log entries (9406/9972 on host). Only 12 local-origin decisions were eligible, all older than 24h. Now accepts `"capi"` alongside `"crowdsec"` and `"cscli"`. CAPI bans are executed locally; downstream reporting policy (confidence threshold, dedup TTL) handles AbuseIPDB submission.
+- **FIX-VERSION — Fix hardcoded v1.0.0 version** — `status.NewCollector` had `"v1.0.0"` hardcoded. Added `version`/`commit`/`buildDate` ldflags vars in `main.go`; Makefile now injects them at build time (`-X main.version=$(VERSION) -X main.commit=$(GIT_COMMIT) -X main.buildDate=$(BUILD_DATE)`).
+
+---
+
 ## [v1.6.1] — 2026-06-12
 
 ### Summary
