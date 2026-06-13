@@ -360,3 +360,52 @@ cloudflare:
 		}
 	}
 }
+
+func TestProtectedHostsFromEnvVar(t *testing.T) {
+	t.Setenv("SECURITY_AUTOMATION_PROTECTED_HOSTS", "82.65.145.189, 10.0.0.1, ")
+	cfg := DefaultConfig()
+	applyEnvOverrides(cfg)
+
+	want := []string{"82.65.145.189", "10.0.0.1"}
+	if len(cfg.Global.ProtectedHosts) != len(want) {
+		t.Fatalf("expected %d protected hosts, got %d: %v", len(want), len(cfg.Global.ProtectedHosts), cfg.Global.ProtectedHosts)
+	}
+	for i, h := range want {
+		if cfg.Global.ProtectedHosts[i] != h {
+			t.Errorf("host[%d]: want %q, got %q", i, h, cfg.Global.ProtectedHosts[i])
+		}
+	}
+}
+
+func TestProtectedHostsFromYAML(t *testing.T) {
+	yamlContent := `
+version: v1
+global:
+  protected_hosts:
+    - 82.65.145.189
+    - 192.168.100.0/24
+`
+	f, err := os.CreateTemp("", "config-*.yaml")
+	if err != nil {
+		t.Fatalf("create temp file: %v", err)
+	}
+	defer os.Remove(f.Name())
+	if _, err := f.WriteString(yamlContent); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	f.Close()
+
+	cfg, err := Load(f.Name())
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if len(cfg.Global.ProtectedHosts) != 2 {
+		t.Fatalf("expected 2 protected hosts from YAML, got %d: %v", len(cfg.Global.ProtectedHosts), cfg.Global.ProtectedHosts)
+	}
+	if cfg.Global.ProtectedHosts[0] != "82.65.145.189" {
+		t.Errorf("host[0]: want 82.65.145.189, got %q", cfg.Global.ProtectedHosts[0])
+	}
+	if cfg.Global.ProtectedHosts[1] != "192.168.100.0/24" {
+		t.Errorf("host[1]: want 192.168.100.0/24, got %q", cfg.Global.ProtectedHosts[1])
+	}
+}

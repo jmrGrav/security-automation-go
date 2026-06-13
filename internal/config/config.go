@@ -44,6 +44,10 @@ type GlobalConfig struct {
 	Log            LogConfig     `yaml:"log"`
 	HTTP           HTTPConfig    `yaml:"http"`
 	Tracing        TracingConfig `yaml:"tracing"`
+	// ProtectedHosts lists operator-controlled IPs/CIDRs that must never be
+	// reported to AbuseIPDB or propagated to Cloudflare. Overridable via
+	// SECURITY_AUTOMATION_PROTECTED_HOSTS (comma-separated).
+	ProtectedHosts []string `yaml:"protected_hosts"`
 }
 
 const (
@@ -384,6 +388,13 @@ func applyEnvOverrides(cfg *Config) {
 	}
 	if v := os.Getenv("RUNTIME_PROFILE"); v != "" {
 		cfg.Runtime.Profile = v
+	}
+	if v := os.Getenv("SECURITY_AUTOMATION_PROTECTED_HOSTS"); v != "" {
+		for _, host := range strings.Split(v, ",") {
+			if h := strings.TrimSpace(host); h != "" {
+				cfg.Global.ProtectedHosts = append(cfg.Global.ProtectedHosts, h)
+			}
+		}
 	}
 }
 

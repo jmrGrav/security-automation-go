@@ -53,7 +53,6 @@ import (
 	"github.com/jm/security-automation-go/internal/runtime/simulation"
 	"github.com/jm/security-automation-go/internal/runtime/status"
 	"github.com/jm/security-automation-go/internal/runtime/timeline"
-	sectrust "github.com/jm/security-automation-go/internal/security/trust"
 	"github.com/jm/security-automation-go/internal/services/reporting"
 	"github.com/jm/security-automation-go/internal/startuplog"
 	"github.com/jm/security-automation-go/internal/storage/sqlite"
@@ -292,7 +291,7 @@ func runCFSync(configPath, mode string, dryRun bool, format string, metricsAddr 
 	if cfg.AbuseIPDB.APIKey != "" {
 		preBanTransport = abtransport.New(hc, cfg.AbuseIPDB.APIKey)
 	}
-	trustRegistry := sectrust.DefaultRegistry()
+	trustRegistry := buildTrustRegistry(cfg)
 	var preBanChecker *abadapter.Checker
 	if preBanTransport != nil {
 		preBanChecker = abadapter.NewChecker(preBanTransport, abadapter.Config{TTL: cfg.AbuseIPDB.CacheTTL, Timeout: cfg.AbuseIPDB.RequestTimeout})

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"strings"
 	"time"
 
 	"github.com/jm/security-automation-go/internal/abuseipdb"
@@ -18,6 +19,34 @@ import (
 	"github.com/jm/security-automation-go/internal/storage/sqlite"
 	"github.com/jm/security-automation-go/internal/telemetry/sinks"
 )
+
+// buildTrustRegistry returns a trust.Registry seeded with defaults plus any
+// operator-protected hosts from cfg.Global.ProtectedHosts.
+func buildTrustRegistry(cfg *config.Config) *sectrust.Registry {
+	r := sectrust.DefaultRegistry()
+	if cfg == nil {
+		return r
+	}
+	for _, host := range cfg.Global.ProtectedHosts {
+		host = strings.TrimSpace(host)
+		if host == "" {
+			continue
+		}
+		cidr := host
+		if !strings.Contains(host, "/") {
+			cidr = host + "/32"
+		}
+		r.Add(sectrust.ProtectedResource{
+			Name:             "operator-host-" + host,
+			Kind:             "host",
+			CIDR:             cidr,
+			Tags:             []string{"operator", "protected"},
+			MinConfidence:    1.0,
+			AllowPropagation: false,
+		})
+	}
+	return r
+}
 
 func newSecurityTelemetry(cfg *config.Config, betterClient betterstack.IngestClient) sinks.Sink {
 	if cfg.BetterStack.SourceToken != "" && cfg.BetterStack.IngestingHost != "" && betterClient != nil {
