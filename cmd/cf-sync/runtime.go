@@ -318,7 +318,7 @@ func runCFSync(configPath, mode string, dryRun bool, format string, metricsAddr 
 	rollbackExecutor.SetFencingValidator(execution.NewLeaseStoreFencingValidator(leaseRepo).RequireFencing(true))
 	rollbackExecutor.SetCheckpointStore(sqlite.NewRollbackCheckpointStore(sqliteDB))
 
-	collector := status.NewCollector("v1.0.0", time.Now(), healthMgr, cb, stateStore, filepath.Join(scopeDir, "daemon.lock"), filepath.Join(scopeDir, "quarantine"))
+	collector := status.NewCollector(version, time.Now(), healthMgr, cb, stateStore, filepath.Join(scopeDir, "daemon.lock"), filepath.Join(scopeDir, "quarantine"))
 	orch := pipeline.NewOrchestrator(cf, abuse, planner, trans, val, admController, leaseMgr, sm, driftEng, gov, convVal, invEng, rollbackPlanner, rollbackExecutor, jsonlJournal, stateStore, cb, eventBus, healthMgr, filepath.Join(scopeDir, "KILL_SWITCH"))
 	s := stateful_scheduler.New(stateStore, orch, sm, cooldownMgr, logger, cfg.Interval)
 
@@ -339,8 +339,8 @@ func runCFSync(configPath, mode string, dryRun bool, format string, metricsAddr 
 	}
 
 	if mode == "daemon" || mode == "ui" {
-		wafReplay := newWAFReplayService(cf, abuse, securityTelemetry, trustRegistry, cfg, reportingStores)
-		runDaemonWithLocker(ctx, logger, orch, collector, jsonlJournal, qStore, stateStore, sm, driftMem, cooldownMgr, evidenceRecorder, bundleReg, activationMgr, fedRes, admController, reportingStores.Evidence, ownershipRepo, s.GetPool(), outboxWorker, scopeDir, cfg.Interval, metricsAddr, cfg.Cloudflare.ZoneID, wafReplay, cursorStore, quotaRefreshers, false)
+		bundle := newWAFBundle(cf, abuse, securityTelemetry, trustRegistry, cfg, reportingStores)
+		runDaemonWithLocker(ctx, logger, orch, collector, jsonlJournal, qStore, stateStore, sm, driftMem, cooldownMgr, evidenceRecorder, bundleReg, activationMgr, fedRes, admController, reportingStores.Evidence, ownershipRepo, s.GetPool(), outboxWorker, scopeDir, cfg.Interval, metricsAddr, cfg.Cloudflare.ZoneID, bundle.cfWAFService(), cursorStore, quotaRefreshers, bundle, false)
 		// In ui mode the HTTP server runs in a goroutine above. If runDaemonWithLocker
 		// returns early (e.g. API token not configured) while the context is still live,
 		// keep the process alive so the UI goroutine can continue serving.

@@ -132,6 +132,71 @@ func newDaemonContext(ctx context.Context, logger *slog.Logger, srv *http.Server
 	return childCtx, cancel
 }
 
+// startCrowdSecOpenRestyPoller starts a background goroutine that reads CrowdSec
+// decisions and OpenResty Lua events on each interval tick and feeds them into
+// the shared reporting service (evidence + AbuseIPDB outbox).
+func startCrowdSecOpenRestyPoller(ctx context.Context, logger *slog.Logger, interval time.Duration, bundle *wafBundle) {
+	if bundle == nil {
+		return
+	}
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+			processCrowdSecOnce(ctx, logger, bundle)
+			processOpenRestyOnce(ctx, logger, bundle)
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+			}
+		}
+	}()
+}
+
+func processCrowdSecOnce(ctx context.Context, logger *slog.Logger, bundle *wafBundle) {
+	if bundle == nil || bundle.csSource == nil || bundle.cs == nil {
+		return
+	}
+	events, err := bundle.csSource.Read(ctx)
+	if err != nil {
+		logger.WarnContext(ctx, "crowdsec live source read failed", "error", err)
+		return
+	}
+	for _, event := range events {
+		if _, err := bundle.cs.Process(ctx, event); err != nil {
+			logger.WarnContext(ctx, "crowdsec event processing failed", "ip", event.IP, "rule_id", event.RuleID, "error", err)
+		}
+	}
+	if len(events) > 0 {
+		logger.Info("crowdsec waf events processed", "count", len(events))
+	}
+}
+
+func processOpenRestyOnce(ctx context.Context, logger *slog.Logger, bundle *wafBundle) {
+	if bundle == nil || bundle.orSource == nil || bundle.or == nil {
+		return
+	}
+	events, err := bundle.orSource.Read(ctx)
+	if err != nil {
+		logger.WarnContext(ctx, "openresty live source read failed", "error", err)
+		return
+	}
+	for _, event := range events {
+		if _, err := bundle.or.Process(ctx, event); err != nil {
+			logger.WarnContext(ctx, "openresty event processing failed", "ip", event.IP, "rule_id", event.RuleID, "error", err)
+		}
+	}
+	if len(events) > 0 {
+		logger.Info("openresty waf events processed", "count", len(events))
+	}
+}
+
 func startWAFReplayPoller(ctx context.Context, logger *slog.Logger, interval time.Duration, zoneID string, wafReplay *cloudflareevent.Service, cursorStore cursorStateStore) {
 	if wafReplay == nil {
 		return
@@ -221,7 +286,7 @@ func nextWAFReplayCursor(report cloudflareevent.ProcessingReport, previous time.
 	return previous.UTC()
 }
 
-func runDaemonWithLocker(ctx context.Context, logger *slog.Logger, orch *pipeline.Orchestrator, collector *status.Collector, j journal.JournalStore, qStore *quarantine.Store, store *state.StateStore, sm *engine.StateMachine, dm *memory.Store, cm *cooldown.Manager, rec *recorder.Recorder, br *registry.Registry, am *activation.Manager, fr *federation.Resolver, adm *admission.Controller, evidence reporting.EvidenceStore, ownershipRepo *sqlite.OwnershipRepository, p *pool.Pool, outboxWorker *reporting.OutboxWorker, stateDir string, interval time.Duration, metricsAddr string, zoneID string, wafReplay *cloudflareevent.Service, cursorStore *sqlite.CursorStore, quotaRefreshers *quotaRefreshers, acquireLock bool) {
+func runDaemonWithLocker(ctx context.Context, logger *slog.Logger, orch *pipeline.Orchestrator, collector *status.Collector, j journal.JournalStore, qStore *quarantine.Store, store *state.StateStore, sm *engine.StateMachine, dm *memory.Store, cm *cooldown.Manager, rec *recorder.Recorder, br *registry.Registry, am *activation.Manager, fr *federation.Resolver, adm *admission.Controller, evidence reporting.EvidenceStore, ownershipRepo *sqlite.OwnershipRepository, p *pool.Pool, outboxWorker *reporting.OutboxWorker, stateDir string, interval time.Duration, metricsAddr string, zoneID string, wafReplay *cloudflareevent.Service, cursorStore *sqlite.CursorStore, quotaRefreshers *quotaRefreshers, bundle *wafBundle, acquireLock bool) {
 	logger.Info("starting in daemon mode", "state_dir", stateDir, "interval", interval, "metrics_addr", metricsAddr)
 	var ownershipLineage *ownership.LineageQueryService
 	if ownershipRepo != nil {
@@ -260,6 +325,7 @@ func runDaemonWithLocker(ctx context.Context, logger *slog.Logger, orch *pipelin
 	childCtx, cancel := newDaemonContext(ctx, logger, srv)
 	defer cancel()
 	startWAFReplayPoller(childCtx, logger, interval, zoneID, wafReplay, cursorStore)
+	startCrowdSecOpenRestyPoller(childCtx, logger, interval, bundle)
 	if quotaRefreshers != nil {
 		quotaRefreshers.start(childCtx, logger)
 	}

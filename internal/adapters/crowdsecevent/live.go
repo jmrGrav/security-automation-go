@@ -123,7 +123,11 @@ func (s *LiveSource) acceptDecision(eventType, origin, action, decisionType, sce
 		if decisionType != "ban" {
 			return false
 		}
-		if origin != "crowdsec" && origin != "cscli" {
+		// Accept local agent decisions, manual cscli bans, and CAPI community blocklist.
+		// origin is already lowercased by the caller.
+		switch origin {
+		case "crowdsec", "cscli", "capi":
+		default:
 			return false
 		}
 	default:
