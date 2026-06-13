@@ -52,9 +52,10 @@ test.describe('Providers', () => {
     }
   });
 
-  test('Replace Key POST without CSRF token is rejected with 403', async ({ page, request }) => {
-    // Attempt a key replacement without a CSRF token — must be rejected.
-    const response = await request.post('/admin/providers/spamhaus/key', {
+  test('Replace Key POST without CSRF token is rejected with 403', async ({ page }) => {
+    // Must be authenticated (beforeEach login already ran) so the auth guard
+    // does not redirect — the CSRF guard fires and returns 403.
+    const response = await page.request.post('/admin/providers/spamhaus/key', {
       form: {
         new_api_key: 'fake-test-key-no-csrf',
         confirm_replace: 'yes',
