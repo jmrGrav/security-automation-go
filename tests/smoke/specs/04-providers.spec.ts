@@ -32,4 +32,35 @@ test.describe('Providers', () => {
     const hasMeaning = meaningfulStrings.some(s => body.toLowerCase().includes(s));
     expect(hasMeaning, 'providers page must show at least one status value').toBe(true);
   });
+
+  test('Replace Key forms have CSRF token and no pre-filled key value', async ({ page }) => {
+    await page.goto('/providers');
+    // Every Replace Key form must include a csrf_token hidden field.
+    const csrfInputs = await page.locator('form input[name="csrf_token"]').all();
+    expect(csrfInputs.length, 'at least one CSRF-protected form must be present').toBeGreaterThan(0);
+    for (const input of csrfInputs) {
+      const val = await input.getAttribute('value');
+      expect(val, 'csrf_token must have a non-empty value').toBeTruthy();
+    }
+    // Password fields for key entry must never carry a pre-filled value.
+    const passwordInputs = await page.locator('input[name="new_api_key"]').all();
+    for (const input of passwordInputs) {
+      const val = await input.getAttribute('value');
+      expect(val ?? '', 'key input must not be pre-filled').toBe('');
+      const type = await input.getAttribute('type');
+      expect(type, 'key input must be type=password').toBe('password');
+    }
+  });
+
+  test('Replace Key POST without CSRF token is rejected with 403', async ({ page, request }) => {
+    // Attempt a key replacement without a CSRF token — must be rejected.
+    const response = await request.post('/admin/providers/spamhaus/key', {
+      form: {
+        new_api_key: 'fake-test-key-no-csrf',
+        confirm_replace: 'yes',
+      },
+    });
+    // Server must reject with 403 Forbidden when csrf_token is absent.
+    expect(response.status(), 'POST without CSRF must be rejected').toBe(403);
+  });
 });

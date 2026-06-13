@@ -242,3 +242,43 @@ func TestProviderManagementTestProviderUsesStubAndRedacts(t *testing.T) {
 		}
 	}
 }
+
+func TestNormalizeAIConfigRestoresDefaultModels(t *testing.T) {
+	cfg := ai.Config{
+		OpenAI:    ai.ProviderConfig{Enabled: true, Model: ""},
+		Anthropic: ai.ProviderConfig{Enabled: true, Model: ""},
+		Gemini:    ai.ProviderConfig{Enabled: true, Model: ""},
+	}
+	got := normalizeAIConfig(cfg)
+	if got.OpenAI.Model != ai.DefaultOpenAIModel {
+		t.Errorf("openai: want %q, got %q", ai.DefaultOpenAIModel, got.OpenAI.Model)
+	}
+	if got.Anthropic.Model != ai.DefaultAnthropicModel {
+		t.Errorf("anthropic: want %q, got %q", ai.DefaultAnthropicModel, got.Anthropic.Model)
+	}
+	if got.Gemini.Model != ai.DefaultGeminiModel {
+		t.Errorf("gemini: want %q, got %q", ai.DefaultGeminiModel, got.Gemini.Model)
+	}
+
+	// Disabled providers must not get a model injected.
+	cfgDisabled := ai.Config{
+		OpenAI:    ai.ProviderConfig{Enabled: false, Model: ""},
+		Anthropic: ai.ProviderConfig{Enabled: false, Model: ""},
+		Gemini:    ai.ProviderConfig{Enabled: false, Model: ""},
+	}
+	gotDisabled := normalizeAIConfig(cfgDisabled)
+	if gotDisabled.OpenAI.Model != "" || gotDisabled.Anthropic.Model != "" || gotDisabled.Gemini.Model != "" {
+		t.Errorf("disabled providers must not get default models injected: %+v", gotDisabled)
+	}
+
+	// Explicitly-set models must not be overwritten.
+	cfgWithModel := ai.Config{
+		OpenAI:    ai.ProviderConfig{Enabled: true, Model: "gpt-3.5-turbo"},
+		Anthropic: ai.ProviderConfig{Enabled: true, Model: "claude-2"},
+		Gemini:    ai.ProviderConfig{Enabled: true, Model: "gemini-pro"},
+	}
+	gotWithModel := normalizeAIConfig(cfgWithModel)
+	if gotWithModel.OpenAI.Model != "gpt-3.5-turbo" {
+		t.Errorf("openai: explicit model should not be overwritten, got %q", gotWithModel.OpenAI.Model)
+	}
+}

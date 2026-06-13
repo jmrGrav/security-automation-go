@@ -37,6 +37,17 @@ func normalizeAIConfig(cfg ai.Config) ai.Config {
 	if cfg.Timeout <= 0 {
 		cfg.Timeout = 15 * time.Second
 	}
+	// Restore safe model defaults when a provider is enabled but the model was
+	// not persisted (e.g. after a credential store migration).
+	if cfg.OpenAI.Enabled && cfg.OpenAI.Model == "" {
+		cfg.OpenAI.Model = ai.DefaultOpenAIModel
+	}
+	if cfg.Anthropic.Enabled && cfg.Anthropic.Model == "" {
+		cfg.Anthropic.Model = ai.DefaultAnthropicModel
+	}
+	if cfg.Gemini.Enabled && cfg.Gemini.Model == "" {
+		cfg.Gemini.Model = ai.DefaultGeminiModel
+	}
 	return cfg
 }
 

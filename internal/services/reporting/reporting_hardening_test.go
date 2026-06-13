@@ -15,6 +15,85 @@ import (
 	"github.com/jm/security-automation-go/internal/telemetry/sinks"
 )
 
+// TestOperatorProtectedIPIsNeverReported verifies that an IP added to the trust
+// registry as an operator-protected host is suppressed with "protected_target"
+// and never forwarded to the upstream AbuseIPDB reporter.
+func TestOperatorProtectedIPIsNeverReported(t *testing.T) {
+	const operatorIP = "82.65.145.189"
+	base := time.Date(2026, 6, 13, 10, 0, 0, 0, time.UTC)
+
+	reg := trust.DefaultRegistry()
+	reg.Add(trust.ProtectedResource{
+		Name:             "operator-host-" + operatorIP,
+		Kind:             "host",
+		CIDR:             operatorIP + "/32",
+		Tags:             []string{"operator", "protected"},
+		MinConfidence:    1.0,
+		AllowPropagation: false,
+	})
+
+	reporter := &fakeReporter{}
+	svc := reporting.New(reporter, &sinks.RecorderSink{}, reg, time.Minute)
+	svc.SetClock(func() time.Time { return base })
+
+	event, err := cloudflareevent.Normalize(cloudflareevent.RawEvent{
+		IP:        operatorIP,
+		URI:       "/admin",
+		UserAgent: "Mozilla/5.0",
+		Timestamp: base,
+		Hits:      5,
+		WindowSec: 300,
+		RuleID:    "block-001",
+		Action:    "block",
+		Source:    "cloudflare",
+		Hostname:  "example.com",
+	})
+	if err != nil {
+		t.Fatalf("normalize: %v", err)
+	}
+
+	result, err := svc.Process(context.Background(), reporting.Request{Source: abuseformat.SourceCloudflareWAF, Event: event})
+	if err != nil {
+		t.Fatalf("process: %v", err)
+	}
+	if !result.Suppressed {
+		t.Fatalf("expected operator IP to be suppressed, got %+v", result)
+	}
+	if result.SuppressionReason != "protected_target" {
+		t.Fatalf("expected suppression reason 'protected_target', got %q", result.SuppressionReason)
+	}
+	if result.Reported {
+		t.Fatal("operator IP must never be reported to AbuseIPDB")
+	}
+	if len(reporter.Reports()) != 0 {
+		t.Fatalf("expected zero upstream calls for operator IP, got %d", len(reporter.Reports()))
+	}
+
+	// Unrelated IP must still be reportable (regression guard).
+	otherEvent, err := cloudflareevent.Normalize(cloudflareevent.RawEvent{
+		IP:        "1.2.3.4",
+		URI:       "/wp-login.php",
+		UserAgent: "sqlmap",
+		Timestamp: base,
+		Hits:      10,
+		WindowSec: 300,
+		RuleID:    "block-002",
+		Action:    "block",
+		Source:    "cloudflare",
+		Hostname:  "example.com",
+	})
+	if err != nil {
+		t.Fatalf("normalize other: %v", err)
+	}
+	otherResult, err := svc.Process(context.Background(), reporting.Request{Source: abuseformat.SourceCloudflareWAF, Event: otherEvent})
+	if err != nil {
+		t.Fatalf("process other: %v", err)
+	}
+	if !otherResult.Reported {
+		t.Fatalf("non-protected IP should be reportable, got suppressed=%v reason=%q", otherResult.Suppressed, otherResult.SuppressionReason)
+	}
+}
+
 func TestReplayHashWrappersAreStableAndDistinct(t *testing.T) {
 	base := time.Date(2026, 6, 1, 10, 0, 0, 0, time.UTC)
 	event, err := cloudflareevent.Normalize(cloudflareevent.RawEvent{
