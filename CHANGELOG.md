@@ -2,6 +2,27 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v1.6.3] — 2026-06-13
+
+### Summary
+
+Security hardening and observability improvements. Adds an operator-protected IP guard to prevent the operator's own IPs from ever being reported to AbuseIPDB or propagated to Cloudflare. Restores safe AI model defaults after credential-store migration. Improves the CF ban sync page with actionable dry-run and no-data messaging. Adds Replace Key form CSRF smoke tests.
+
+### Fixes
+
+- **FIX-GUARD — Operator-protected IP guard** — Add `global.protected_hosts` YAML field and `SECURITY_AUTOMATION_PROTECTED_HOSTS` env var to register operator-controlled IPs/CIDRs in the trust registry at startup. The existing `reporting.Service.isProtected()` chokepoint suppresses these IPs with reason `protected_target` before any AbuseIPDB report or Cloudflare propagation. The `CloudflarePropagationGuard` (Cloudflare mutation path) also consults the same registry. Added 3 unit tests: env-var parsing, YAML parsing, and end-to-end suppression through `reporting.Service`.
+- **FIX-AI-DEFAULTS — Restore safe AI model defaults** — Added `DefaultOpenAIModel`/`DefaultAnthropicModel`/`DefaultGeminiModel` constants. `normalizeAIConfig` now applies them when a provider is enabled but the model field is empty (e.g. after credential-store migration that stored the key but not the model).
+- **FIX-CFSYNC-PAGE — CF ban sync page clarity** — When no sync cycles are recorded: dry-run mode shows `DRY-RUN` badge with instructions; missing CrowdSec decisions source shows config guidance; otherwise shows "Waiting for first enforcement cycle". When cycles exist, a `MUTATIONS ON`/`DRY-RUN` mode badge appears alongside the `IN SYNC`/`DRIFT DETECTED` status badge.
+
+### Tests
+
+- `TestOperatorProtectedIPIsNeverReported` — end-to-end suppression
+- `TestProtectedHostsFromEnvVar` / `TestProtectedHostsFromYAML` — config parsing
+- `TestNormalizeAIConfigRestoresDefaultModels` — model defaulting
+- `04-providers.spec.ts` — Replace Key form: CSRF token present, no pre-filled value, POST without CSRF rejected with 403
+
+---
+
 ## [v1.6.2] — 2026-06-13
 
 ### Summary
