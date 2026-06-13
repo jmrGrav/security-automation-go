@@ -89,6 +89,49 @@ func TestLiveSourceSkipsMalformedEntries(t *testing.T) {
 	}
 }
 
+func TestAcceptDecision_CAPIOrigin(t *testing.T) {
+	s := NewLiveSource("", "", 24*time.Hour)
+	// CAPI (Community API) decisions must be accepted — they represent the majority
+	// of real-world bans from the CrowdSec threat-intel community blocklist.
+	if !s.acceptDecision("decision", "capi", "", "ban", "crowdsecurity/http-scan") {
+		t.Error("CAPI origin must be accepted")
+	}
+	if !s.acceptDecision("decision", "crowdsec", "", "ban", "crowdsecurity/http-scan") {
+		t.Error("crowdsec origin must still be accepted")
+	}
+	if !s.acceptDecision("decision", "cscli", "", "ban", "crowdsecurity/http-scan") {
+		t.Error("cscli origin must still be accepted")
+	}
+	if s.acceptDecision("decision", "unknown", "", "ban", "crowdsecurity/http-scan") {
+		t.Error("unknown origin must be rejected")
+	}
+	if s.acceptDecision("decision", "capi", "", "allow", "crowdsecurity/http-scan") {
+		t.Error("non-ban type must be rejected")
+	}
+}
+
+func TestLiveSourceAcceptsCAPIDecisions(t *testing.T) {
+	dir := t.TempDir()
+	decisionsLog := filepath.Join(dir, "decisions.log")
+	now := time.Now().UTC().Format(time.RFC3339)
+	// CAPI (Community API) bans — the majority of real-world CrowdSec decisions.
+	content := `{"dt":"` + now + `","cs":{"event_type":"decision","origin":"CAPI","type":"ban","scenario":"http:scan","ip":"92.119.36.158","id":"14590968"}}` + "\n"
+	if err := os.WriteFile(decisionsLog, []byte(content), 0644); err != nil {
+		t.Fatalf("write decisions log: %v", err)
+	}
+	source := NewLiveSource(decisionsLog, "", 24*time.Hour)
+	events, err := source.Read(context.Background())
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("expected 1 CAPI event, got %d — CAPI origin must not be rejected", len(events))
+	}
+	if events[0].IP != "92.119.36.158" {
+		t.Errorf("unexpected IP: %s", events[0].IP)
+	}
+}
+
 // Non-HTTP bans (SSH brute-force, raw TCP) have no nginx URI. Normalize must
 // substitute "unknown" so the event passes through the pipeline.
 func TestNormalizeEmptyURIsFallsBackToUnknown(t *testing.T) {

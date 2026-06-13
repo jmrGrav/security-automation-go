@@ -4,6 +4,14 @@ import (
 	"flag"
 )
 
+// version, commit, and buildDate are injected by ldflags at build time.
+// They fall back to safe defaults when built without -ldflags (e.g. go test).
+var (
+	version   = "dev"
+	commit    = "unknown"
+	buildDate = "unknown"
+)
+
 func main() {
 	configPath := flag.String("config", "", "Path to YAML config file")
 	mode := flag.String("mode", "cli", "Execution mode (cli|daemon|doctor|status|ui)")
