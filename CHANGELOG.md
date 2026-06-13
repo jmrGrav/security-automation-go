@@ -2,6 +2,24 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v1.6.4] — 2026-06-13
+
+### Summary
+
+Provider credential-store hotfix release. Fixes non-AI provider read paths so Spamhaus, VirusTotal, and AbuseIPDB now render their configured state directly from the encrypted CredentialStore. Also normalizes old uppercase credential keys to dotted keys, lazily initializes quota clients from stored credentials, and adds smoke coverage for the provider Replace Key flow.
+
+### Fixes
+
+- **FIX-PROVIDERS — Non-AI provider read path** — `providerConfiguredValue()` usage removed from the provider views. `nonAIProviderEntries()`, `providerHealthViews()`, and `providerViews()` now read the encrypted CredentialStore directly, so Replace Key updates are visible in the UI immediately.
+- **FIX-MIGRATION — Uppercase credential key migration** — One-time startup migration copies `SPAMHAUS_API_KEY`, `VIRUSTOTAL_API_KEY`, and `ABUSEIPDB_KEY` into dotted keys (`spamhaus.api_key`, `virustotal.api_key`, `abuseipdb.api_key`) without deleting the old entries.
+- **FIX-QUOTA — Lazy quota client init** — Spamhaus and VirusTotal quota refreshers now initialize from CredentialStore on first refresh when the provider is enabled, so quota monitoring does not require a daemon restart after Replace Key.
+
+### Tests
+
+- `TestNonAIProviderReplaceKeyUpdatesDisplay` — Replace Key immediately updates the provider status view for Spamhaus, VirusTotal, and AbuseIPDB.
+- `TestNonAIProviderKeyNeverLeaksInHTML` — seeded non-AI credential values are never rendered raw in `/providers`.
+- `04-providers.spec.ts` — smoke coverage for Spamhaus Replace Key, configured badge, and redaction.
+
 ## [v1.6.3] — 2026-06-13
 
 ### Summary

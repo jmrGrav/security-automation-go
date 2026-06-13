@@ -149,7 +149,7 @@ func TestNonAIProviderReplaceKeyWritesToCredentialStore(t *testing.T) {
 	if rr.Code != http.StatusSeeOther {
 		t.Fatalf("expected redirect, got %d: %s", rr.Code, rr.Body.String())
 	}
-	rec, ok, err := sqlite.NewCredentialStore(db).Get(context.Background(), "ABUSEIPDB_KEY")
+	rec, ok, err := sqlite.NewCredentialStore(db).Get(context.Background(), "abuseipdb.api_key")
 	if err != nil {
 		t.Fatalf("load credential: %v", err)
 	}
@@ -280,5 +280,86 @@ func TestNormalizeAIConfigRestoresDefaultModels(t *testing.T) {
 	gotWithModel := normalizeAIConfig(cfgWithModel)
 	if gotWithModel.OpenAI.Model != "gpt-3.5-turbo" {
 		t.Errorf("openai: explicit model should not be overwritten, got %q", gotWithModel.OpenAI.Model)
+	}
+}
+
+// TestNonAIProviderReplaceKeyUpdatesDisplay verifies that after a Replace Key POST,
+// the /providers page immediately shows "CONFIGURED" for the provider without restart.
+func TestNonAIProviderReplaceKeyUpdatesDisplay(t *testing.T) {
+	for _, tc := range []struct {
+		slug    string
+		credKey string
+	}{
+		{"spamhaus", "spamhaus.api_key"},
+		{"virustotal", "virustotal.api_key"},
+		{"abuseipdb", "abuseipdb.api_key"},
+	} {
+		t.Run(tc.slug, func(t *testing.T) {
+			srv, db, _ := newCredentialStoreServer(t, nil)
+			cookie := loginCookie(t, srv, "test-password-123!@#")
+			csrf := srv.csrfTokenFor(cookie.Value)
+
+			// POST Replace Key
+			body := "confirm_replace=yes&new_api_key=placeholder-" + tc.slug
+			req := httptest.NewRequest(http.MethodPost, "/admin/providers/"+tc.slug+"/key", strings.NewReader(body))
+			req.AddCookie(cookie)
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			req.Header.Set("X-CSRF-Token", csrf)
+			rr := httptest.NewRecorder()
+			srv.Handler().ServeHTTP(rr, req)
+			if rr.Code != http.StatusSeeOther {
+				t.Fatalf("expected redirect, got %d: %s", rr.Code, rr.Body.String())
+			}
+
+			// Verify written under the dotted key name
+			rec, ok, err := sqlite.NewCredentialStore(db).Get(context.Background(), tc.credKey)
+			if err != nil {
+				t.Fatalf("load credential: %v", err)
+			}
+			if !ok || rec.Value != "placeholder-"+tc.slug {
+				t.Fatalf("credential not stored under %q: ok=%v value=%q", tc.credKey, ok, rec.Value)
+			}
+
+			// Verify GET /providers now shows CONFIGURED for this provider
+			req2 := httptest.NewRequest(http.MethodGet, "/providers", nil)
+			req2.AddCookie(cookie)
+			rr2 := httptest.NewRecorder()
+			srv.Handler().ServeHTTP(rr2, req2)
+			if rr2.Code != http.StatusOK {
+				t.Fatalf("GET /providers: %d", rr2.Code)
+			}
+			html := rr2.Body.String()
+			if !strings.Contains(strings.ToUpper(html), "CONFIGURED") {
+				t.Errorf("%s: /providers page must show CONFIGURED after Replace Key", tc.slug)
+			}
+			if strings.Contains(html, "placeholder-"+tc.slug) {
+				t.Errorf("%s: raw key must never appear in /providers HTML", tc.slug)
+			}
+		})
+	}
+}
+
+// TestNonAIProviderKeyNeverLeaksInHTML verifies that the raw key value is never rendered,
+// only a masked representation.
+func TestNonAIProviderKeyNeverLeaksInHTML(t *testing.T) {
+	srv, db, _ := newCredentialStoreServer(t, nil)
+	// Seed a key directly into the credential store
+	const syntheticKey = "placeholder-spamhaus-value"
+	if err := sqlite.NewCredentialStore(db).Set(context.Background(), "spamhaus.api_key", syntheticKey, true); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	cookie := loginCookie(t, srv, "test-password-123!@#")
+	req := httptest.NewRequest(http.MethodGet, "/providers", nil)
+	req.AddCookie(cookie)
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+
+	html := rr.Body.String()
+	if strings.Contains(html, syntheticKey) {
+		t.Error("raw Spamhaus API key must never appear in /providers HTML")
+	}
+	if !strings.Contains(strings.ToUpper(html), "CONFIGURED") {
+		t.Error("/providers page must show CONFIGURED for Spamhaus after key is seeded")
 	}
 }

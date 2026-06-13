@@ -25,11 +25,23 @@ const (
 	abuseIPDBFailureBackoffMax     = 2 * time.Hour
 )
 
+// credentialLooker is a minimal interface for credential store reads used by the quota refreshers.
+type credentialLooker interface {
+	Lookup(ctx context.Context, key string) (string, bool, error)
+}
+
 type quotaRefreshers struct {
 	cloudflare *cfclient.Client
 	abuse      *abtransport.Transport
 	virustotal *virustotal.QuotaClient
 	spamhaus   *spamhaus.QuotaClient
+
+	// credStore and hc allow lazy client creation after a credential is saved via UI
+	// without requiring a daemon restart.
+	credStore   credentialLooker
+	hc          httpclient.Client
+	spamEnabled bool
+	vtEnabled   bool
 
 	mu               sync.Mutex
 	abuseFailures    int
@@ -37,7 +49,7 @@ type quotaRefreshers struct {
 	now              func() time.Time
 }
 
-func newQuotaRefreshers(cfg *config.Config, hc httpclient.Client, cf *cfclient.Client, abuse *abtransport.Transport) *quotaRefreshers {
+func newQuotaRefreshers(cfg *config.Config, hc httpclient.Client, cf *cfclient.Client, abuse *abtransport.Transport, cs credentialLooker) *quotaRefreshers {
 	if cfg == nil {
 		return nil
 	}
@@ -49,15 +61,21 @@ func newQuotaRefreshers(cfg *config.Config, hc httpclient.Client, cf *cfclient.C
 	if cfg.Spamhaus.Enabled && cfg.Spamhaus.APIKey != "" {
 		sh = spamhaus.NewQuotaClient(hc, cfg.Spamhaus.APIKey)
 	}
-	if cf == nil && abuse == nil && vt == nil && sh == nil {
+	spamLazy := cs != nil && cfg.Spamhaus.Enabled && sh == nil
+	vtLazy := cs != nil && cfg.VirusTotal.Enabled && vt == nil
+	if cf == nil && abuse == nil && vt == nil && sh == nil && !spamLazy && !vtLazy {
 		return nil
 	}
 	return &quotaRefreshers{
-		cloudflare: cf,
-		abuse:      abuse,
-		virustotal: vt,
-		spamhaus:   sh,
-		now:        time.Now,
+		cloudflare:  cf,
+		abuse:       abuse,
+		virustotal:  vt,
+		spamhaus:    sh,
+		credStore:   cs,
+		hc:          hc,
+		spamEnabled: cfg.Spamhaus.Enabled,
+		vtEnabled:   cfg.VirusTotal.Enabled,
+		now:         time.Now,
 	}
 }
 
@@ -71,10 +89,10 @@ func (q *quotaRefreshers) start(ctx context.Context, logger *slog.Logger) {
 	if q.abuse != nil {
 		q.runPoller(ctx, logger, "abuseipdb", abuseIPDBQuotaRefreshInterval, q.refreshAbuseIPDB)
 	}
-	if q.virustotal != nil {
+	if q.virustotal != nil || (q.credStore != nil && q.vtEnabled) {
 		q.runPoller(ctx, logger, "virustotal", thirdPartyQuotaRefreshInterval, q.refreshVirusTotal)
 	}
-	if q.spamhaus != nil {
+	if q.spamhaus != nil || (q.credStore != nil && q.spamEnabled) {
 		q.runPoller(ctx, logger, "spamhaus", thirdPartyQuotaRefreshInterval, q.refreshSpamhaus)
 	}
 }
@@ -154,11 +172,27 @@ func (q *quotaRefreshers) refreshAbuseIPDB(ctx context.Context) error {
 }
 
 func (q *quotaRefreshers) refreshVirusTotal(ctx context.Context) error {
+	if q.virustotal == nil && q.credStore != nil && q.vtEnabled {
+		if v, ok, _ := q.credStore.Lookup(ctx, "virustotal.api_key"); ok && v != "" {
+			q.virustotal = virustotal.NewQuotaClient(q.hc, v)
+		}
+	}
+	if q.virustotal == nil {
+		return nil
+	}
 	_, err := q.virustotal.Fetch(ctx)
 	return err
 }
 
 func (q *quotaRefreshers) refreshSpamhaus(ctx context.Context) error {
+	if q.spamhaus == nil && q.credStore != nil && q.spamEnabled {
+		if v, ok, _ := q.credStore.Lookup(ctx, "spamhaus.api_key"); ok && v != "" {
+			q.spamhaus = spamhaus.NewQuotaClient(q.hc, v)
+		}
+	}
+	if q.spamhaus == nil {
+		return nil
+	}
 	_, err := q.spamhaus.Fetch(ctx)
 	return err
 }

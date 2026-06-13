@@ -12,6 +12,7 @@ description = "Test fixtures — bcrypt hashes and synthetic keys in test code"
 paths = [
   '''.*_test\.go$''',
   '''.*testdata/.*''',
+  '''tests/smoke/.*''',
 ]
 
 [[allowlists]]

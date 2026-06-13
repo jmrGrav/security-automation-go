@@ -52,40 +52,49 @@ func normalizeAIConfig(cfg ai.Config) ai.Config {
 }
 
 func (s *Server) nonAIProviderEntries() []NonAIProviderEntry {
-	cfSentinel := s.cfSentinelToken() != "" && s.cfZoneIDFromSetup(context.Background()) != ""
+	ctx := context.Background()
+	cfSentinel := s.cfSentinelToken() != "" && s.cfZoneIDFromSetup(ctx) != ""
 	crowdSecCfg := strings.TrimSpace(s.cfg.CrowdSec.APIKey) != "" || strings.TrimSpace(s.cfg.CrowdSec.DecisionsLog) != ""
 	betterStackCfg := strings.TrimSpace(s.cfg.BetterStack.SourceToken) != ""
+
+	const abKey = "abuseipdb.api_key"
+	const shKey = "spamhaus.api_key"
+	const vtKey = "virustotal.api_key"
+
+	abConfigured := credentialConfigured(ctx, s.credentialStore, abKey)
+	shConfigured := credentialConfigured(ctx, s.credentialStore, shKey)
+	vtConfigured := credentialConfigured(ctx, s.credentialStore, vtKey)
 
 	return []NonAIProviderEntry{
 		{
 			Name:             "AbuseIPDB",
 			Category:         nonAIProviderCategory("abuseipdb"),
-			CredentialKey:    "ABUSEIPDB_KEY",
+			CredentialKey:    abKey,
 			HasKeyManagement: true,
 			Enabled:          s.cfg.AbuseIPDB.Enabled,
-			Configured:       providerConfiguredValue(s.cfg.AbuseIPDB.APIKey, s.secretProvider, "ABUSEIPDB_KEY") != "",
-			MaskedKey:        maskedProviderValue(s.cfg.AbuseIPDB.APIKey, s.secretProvider, "ABUSEIPDB_KEY"),
-			Status:           providerStatus(s.cfg.AbuseIPDB.Enabled, providerConfiguredValue(s.cfg.AbuseIPDB.APIKey, s.secretProvider, "ABUSEIPDB_KEY") != ""),
+			Configured:       abConfigured,
+			MaskedKey:        maskedCredentialStoreValue(ctx, s.credentialStore, abKey),
+			Status:           providerStatus(s.cfg.AbuseIPDB.Enabled, abConfigured),
 		},
 		{
 			Name:             "Spamhaus",
 			Category:         nonAIProviderCategory("spamhaus"),
-			CredentialKey:    "SPAMHAUS_API_KEY",
+			CredentialKey:    shKey,
 			HasKeyManagement: true,
 			Enabled:          s.cfg.Spamhaus.Enabled,
-			Configured:       providerConfiguredValue(s.cfg.Spamhaus.APIKey, s.secretProvider, "SPAMHAUS_API_KEY") != "",
-			MaskedKey:        maskedProviderValue(s.cfg.Spamhaus.APIKey, s.secretProvider, "SPAMHAUS_API_KEY"),
-			Status:           providerStatus(s.cfg.Spamhaus.Enabled, providerConfiguredValue(s.cfg.Spamhaus.APIKey, s.secretProvider, "SPAMHAUS_API_KEY") != ""),
+			Configured:       shConfigured,
+			MaskedKey:        maskedCredentialStoreValue(ctx, s.credentialStore, shKey),
+			Status:           providerStatus(s.cfg.Spamhaus.Enabled, shConfigured),
 		},
 		{
 			Name:             "VirusTotal",
 			Category:         nonAIProviderCategory("virustotal"),
-			CredentialKey:    "VIRUSTOTAL_API_KEY",
+			CredentialKey:    vtKey,
 			HasKeyManagement: true,
 			Enabled:          s.cfg.VirusTotal.Enabled,
-			Configured:       providerConfiguredValue(s.cfg.VirusTotal.APIKey, s.secretProvider, "VIRUSTOTAL_API_KEY") != "",
-			MaskedKey:        maskedProviderValue(s.cfg.VirusTotal.APIKey, s.secretProvider, "VIRUSTOTAL_API_KEY"),
-			Status:           providerStatus(s.cfg.VirusTotal.Enabled, providerConfiguredValue(s.cfg.VirusTotal.APIKey, s.secretProvider, "VIRUSTOTAL_API_KEY") != ""),
+			Configured:       vtConfigured,
+			MaskedKey:        maskedCredentialStoreValue(ctx, s.credentialStore, vtKey),
+			Status:           providerStatus(s.cfg.VirusTotal.Enabled, vtConfigured),
 		},
 		{
 			Name:             "Cloudflare",
