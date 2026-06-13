@@ -10,16 +10,19 @@ import (
 
 // CFSyncView is the view model for the /sync (Cloudflare ban sync) page.
 type CFSyncView struct {
-	HasData      bool
-	CycleAt      time.Time
-	AgreementPct float64
-	InSync       bool
-	ToAdd        []string // IPs Go would add to CF
-	ToDelete     []string // IPs Go would remove from CF
-	ActiveBans   int
-	CFRules      int
-	CycleCount   int // total cycles in store
-	Error        string
+	HasData       bool
+	CycleAt       time.Time
+	AgreementPct  float64
+	InSync        bool
+	ToAdd         []string // IPs Go would add to CF
+	ToDelete      []string // IPs Go would remove from CF
+	ActiveBans    int
+	CFRules       int
+	CycleCount    int // total cycles in store
+	Error         string
+	NoCycleReason string // explains why HasData is false (no error)
+	MutationsOn   bool   // true when Cloudflare mutations are enabled
+	DryRun        bool   // true when CF mutations are disabled (observation-only)
 }
 
 type ProviderView struct {
