@@ -801,58 +801,60 @@ func (s *Server) pruneSessionsLocked(now time.Time) {
 }
 
 func (s *Server) providerViews() []ProviderView {
+	ctx := context.Background()
 	views := []ProviderView{
 		{
 			Name:       "AbuseIPDB",
 			Enabled:    s.cfg.AbuseIPDB.Enabled,
-			Configured: providerConfiguredValue(s.cfg.AbuseIPDB.APIKey, s.secretProvider, "ABUSEIPDB_KEY") != "",
-			MaskedKey:  maskedProviderValue(s.cfg.AbuseIPDB.APIKey, s.secretProvider, "ABUSEIPDB_KEY"),
-			Status:     providerStatus(s.cfg.AbuseIPDB.Enabled, providerConfiguredValue(s.cfg.AbuseIPDB.APIKey, s.secretProvider, "ABUSEIPDB_KEY") != ""),
+			Configured: credentialConfigured(ctx, s.credentialStore, "abuseipdb.api_key"),
+			MaskedKey:  maskedCredentialStoreValue(ctx, s.credentialStore, "abuseipdb.api_key"),
+			Status:     providerStatus(s.cfg.AbuseIPDB.Enabled, credentialConfigured(ctx, s.credentialStore, "abuseipdb.api_key")),
 		},
 		{
 			Name:       "Spamhaus",
 			Enabled:    s.cfg.Spamhaus.Enabled,
-			Configured: providerConfiguredValue(s.cfg.Spamhaus.APIKey, s.secretProvider, "SPAMHAUS_API_KEY") != "",
-			MaskedKey:  maskedProviderValue(s.cfg.Spamhaus.APIKey, s.secretProvider, "SPAMHAUS_API_KEY"),
-			Status:     providerStatus(s.cfg.Spamhaus.Enabled, providerConfiguredValue(s.cfg.Spamhaus.APIKey, s.secretProvider, "SPAMHAUS_API_KEY") != ""),
+			Configured: credentialConfigured(ctx, s.credentialStore, "spamhaus.api_key"),
+			MaskedKey:  maskedCredentialStoreValue(ctx, s.credentialStore, "spamhaus.api_key"),
+			Status:     providerStatus(s.cfg.Spamhaus.Enabled, credentialConfigured(ctx, s.credentialStore, "spamhaus.api_key")),
 		},
 		{
 			Name:       "VirusTotal",
 			Enabled:    s.cfg.VirusTotal.Enabled,
-			Configured: providerConfiguredValue(s.cfg.VirusTotal.APIKey, s.secretProvider, "VIRUSTOTAL_API_KEY") != "",
-			MaskedKey:  maskedProviderValue(s.cfg.VirusTotal.APIKey, s.secretProvider, "VIRUSTOTAL_API_KEY"),
-			Status:     providerStatus(s.cfg.VirusTotal.Enabled, providerConfiguredValue(s.cfg.VirusTotal.APIKey, s.secretProvider, "VIRUSTOTAL_API_KEY") != ""),
+			Configured: credentialConfigured(ctx, s.credentialStore, "virustotal.api_key"),
+			MaskedKey:  maskedCredentialStoreValue(ctx, s.credentialStore, "virustotal.api_key"),
+			Status:     providerStatus(s.cfg.VirusTotal.Enabled, credentialConfigured(ctx, s.credentialStore, "virustotal.api_key")),
 		},
 	}
 	return views
 }
 
 func (s *Server) providerHealthViews() []ProviderHealth {
+	ctx := context.Background()
 	views := []ProviderHealth{
 		{
 			Name:           "AbuseIPDB",
 			Enabled:        s.cfg.AbuseIPDB.Enabled,
-			Configured:     providerConfiguredValue(s.cfg.AbuseIPDB.APIKey, s.secretProvider, "ABUSEIPDB_KEY") != "",
-			MaskedKey:      maskedProviderValue(s.cfg.AbuseIPDB.APIKey, s.secretProvider, "ABUSEIPDB_KEY"),
-			Status:         providerStatus(s.cfg.AbuseIPDB.Enabled, providerConfiguredValue(s.cfg.AbuseIPDB.APIKey, s.secretProvider, "ABUSEIPDB_KEY") != ""),
+			Configured:     credentialConfigured(ctx, s.credentialStore, "abuseipdb.api_key"),
+			MaskedKey:      maskedCredentialStoreValue(ctx, s.credentialStore, "abuseipdb.api_key"),
+			Status:         providerStatus(s.cfg.AbuseIPDB.Enabled, credentialConfigured(ctx, s.credentialStore, "abuseipdb.api_key")),
 			QuotaRemaining: "quota not exposed",
 			Notes:          []string{"lookup/report split remains explicit"},
 		},
 		{
 			Name:           "Spamhaus",
 			Enabled:        s.cfg.Spamhaus.Enabled,
-			Configured:     providerConfiguredValue(s.cfg.Spamhaus.APIKey, s.secretProvider, "SPAMHAUS_API_KEY") != "",
-			MaskedKey:      maskedProviderValue(s.cfg.Spamhaus.APIKey, s.secretProvider, "SPAMHAUS_API_KEY"),
-			Status:         providerStatus(s.cfg.Spamhaus.Enabled, providerConfiguredValue(s.cfg.Spamhaus.APIKey, s.secretProvider, "SPAMHAUS_API_KEY") != ""),
+			Configured:     credentialConfigured(ctx, s.credentialStore, "spamhaus.api_key"),
+			MaskedKey:      maskedCredentialStoreValue(ctx, s.credentialStore, "spamhaus.api_key"),
+			Status:         providerStatus(s.cfg.Spamhaus.Enabled, credentialConfigured(ctx, s.credentialStore, "spamhaus.api_key")),
 			QuotaRemaining: "quota not exposed",
 			Notes:          []string{"lookup/report split remains explicit"},
 		},
 		{
 			Name:           "VirusTotal",
 			Enabled:        s.cfg.VirusTotal.Enabled,
-			Configured:     providerConfiguredValue(s.cfg.VirusTotal.APIKey, s.secretProvider, "VIRUSTOTAL_API_KEY") != "",
-			MaskedKey:      maskedProviderValue(s.cfg.VirusTotal.APIKey, s.secretProvider, "VIRUSTOTAL_API_KEY"),
-			Status:         providerStatus(s.cfg.VirusTotal.Enabled, providerConfiguredValue(s.cfg.VirusTotal.APIKey, s.secretProvider, "VIRUSTOTAL_API_KEY") != ""),
+			Configured:     credentialConfigured(ctx, s.credentialStore, "virustotal.api_key"),
+			MaskedKey:      maskedCredentialStoreValue(ctx, s.credentialStore, "virustotal.api_key"),
+			Status:         providerStatus(s.cfg.VirusTotal.Enabled, credentialConfigured(ctx, s.credentialStore, "virustotal.api_key")),
 			QuotaRemaining: "quota not exposed",
 			Notes:          []string{"manual forensic only"},
 		},
@@ -958,6 +960,19 @@ func (s *Server) auditTrailView() AuditTrailView {
 		return AuditTrailView{}
 	}
 	return AuditTrailView{Entries: reader.Entries()}
+}
+
+// maskedCredentialStoreValue looks up key from the credential store and returns a redacted
+// display string. Returns "" if the key is absent or the store is nil; never returns the raw value.
+func maskedCredentialStoreValue(ctx context.Context, cs CredentialStorer, key string) string {
+	if cs == nil {
+		return ""
+	}
+	v, ok, err := cs.Lookup(ctx, key)
+	if err != nil || !ok {
+		return ""
+	}
+	return redactValue(v)
 }
 
 func maskedCloudflareValue(token string) string {

@@ -770,11 +770,11 @@ func enabledBadgeState(enabled bool) string {
 func nonAICredentialKey(name string) string {
 	switch strings.ToLower(strings.TrimSpace(name)) {
 	case "abuseipdb":
-		return "ABUSEIPDB_KEY"
+		return "abuseipdb.api_key"
 	case "spamhaus":
-		return "SPAMHAUS_API_KEY"
+		return "spamhaus.api_key"
 	case "virustotal":
-		return "VIRUSTOTAL_API_KEY"
+		return "virustotal.api_key"
 	default:
 		return ""
 	}

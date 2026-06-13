@@ -222,10 +222,55 @@ func newAbuseQuotaRefreshersForTest(do func(context.Context) (*http.Response, er
 func TestNewQuotaRefreshers_EmptyAbuseIPDBKey(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.AbuseIPDB.APIKey = ""
-	q := newQuotaRefreshers(cfg, nil, nil, nil)
+	q := newQuotaRefreshers(cfg, nil, nil, nil, nil)
 	// With no providers at all, newQuotaRefreshers returns nil.
 	if q != nil {
 		t.Error("expected nil refreshers when no providers are configured")
+	}
+}
+
+// fakeCredentialStore is a minimal in-memory implementation of credentialLooker for tests.
+type fakeCredentialStore struct {
+	entries map[string]string
+}
+
+func (f *fakeCredentialStore) Lookup(_ context.Context, key string) (string, bool, error) {
+	v, ok := f.entries[key]
+	return v, ok, nil
+}
+
+// TestNewQuotaRefreshers_LazySpamhausInit verifies that when Spamhaus is enabled and a credential
+// store is provided but no APIKey is in config, the refresher is configured for lazy client creation.
+func TestNewQuotaRefreshers_LazySpamhausInit(t *testing.T) {
+	cs := &fakeCredentialStore{entries: map[string]string{
+		"spamhaus.api_key": "test-spamhaus-key",
+	}}
+	cfg := &config.Config{}
+	cfg.Spamhaus.Enabled = true
+	cfg.Spamhaus.APIKey = "" // not in config, only in credential store
+
+	q := newQuotaRefreshers(cfg, nil, nil, nil, cs)
+	if q == nil {
+		t.Fatal("expected non-nil refreshers when credential store has Spamhaus key and Spamhaus is enabled")
+	}
+	if q.spamhaus != nil {
+		t.Error("spamhaus client should be nil before first refresh (lazy init)")
+	}
+	if q.credStore == nil {
+		t.Error("credStore must be set for lazy init to work")
+	}
+	if !q.spamEnabled {
+		t.Error("spamEnabled must be true for lazy init to run")
+	}
+}
+
+// TestNewQuotaRefreshers_NilCredStoreAndNilProviders verifies that nil credStore + no enabled
+// providers still returns nil (no pollers to start).
+func TestNewQuotaRefreshers_NilCredStoreAndNilProviders(t *testing.T) {
+	cfg := &config.Config{}
+	q := newQuotaRefreshers(cfg, nil, nil, nil, nil)
+	if q != nil {
+		t.Error("expected nil when no providers configured and no credential store")
 	}
 }
 

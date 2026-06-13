@@ -184,6 +184,26 @@ func runCFSync(configPath, mode string, dryRun bool, format string, metricsAddr 
 	if v, ok, _ := credentialStore.Lookup(ctx, "betterstack.source_token"); ok {
 		cfg.BetterStack.SourceToken = v
 	}
+	// One-time migration: old uppercase credential key names → dotted convention.
+	// Copies the old value to the new name if the new name is not yet present;
+	// the old entry is left in place to avoid data loss.
+	for _, m := range []struct{ old, newName string }{
+		{"SPAMHAUS_API_KEY", "spamhaus.api_key"},
+		{"VIRUSTOTAL_API_KEY", "virustotal.api_key"},
+		{"ABUSEIPDB_KEY", "abuseipdb.api_key"},
+	} {
+		if old, ok, _ := credentialStore.Lookup(ctx, m.old); ok && old != "" {
+			if _, exists, _ := credentialStore.Lookup(ctx, m.newName); !exists {
+				_ = credentialStore.Set(ctx, m.newName, old, true)
+			}
+		}
+	}
+	if v, ok, _ := credentialStore.Lookup(ctx, "spamhaus.api_key"); ok {
+		cfg.Spamhaus.APIKey = v
+	}
+	if v, ok, _ := credentialStore.Lookup(ctx, "virustotal.api_key"); ok {
+		cfg.VirusTotal.APIKey = v
+	}
 
 	// Apply runtime feature flags from SQLite (single source of truth post env-elimination).
 	if rflags, err := setupStore.GetRuntimeFlags(ctx); err == nil {
@@ -297,7 +317,7 @@ func runCFSync(configPath, mode string, dryRun bool, format string, metricsAddr 
 		preBanChecker = abadapter.NewChecker(preBanTransport, abadapter.Config{TTL: cfg.AbuseIPDB.CacheTTL, Timeout: cfg.AbuseIPDB.RequestTimeout})
 	}
 	securityTelemetry := newSecurityTelemetry(cfg, betterClient)
-	quotaRefreshers := newQuotaRefreshers(cfg, hc, cf, preBanTransport)
+	quotaRefreshers := newQuotaRefreshers(cfg, hc, cf, preBanTransport, credentialStore)
 	var outboxWorker *reporting.OutboxWorker
 	if abuse != nil {
 		outboxWorker = reporting.NewOutboxWorker(reportingStores.Outbox, abuse.Executor, reportingStores.Dedup, reportingStores.Evidence, securityTelemetry, reporting.OutboxWorkerConfig{

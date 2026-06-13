@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# smoke-ui-runtime.sh — pre-release v1.6.0 live smoke test runner
+# smoke-ui-runtime.sh — pre-release v1.6.4 live smoke test runner
 #
 # NEVER run in CI. This script connects to a running local instance with
 # real credentials. It is opt-in only.
@@ -223,7 +223,7 @@ echo "[SMOKE] Report written to: $REPORT_FILE"
 echo ""
 
 if [[ $PLAYWRIGHT_EXIT -eq 0 ]]; then
-  echo "[SMOKE] ✅ ALL SMOKE TESTS PASSED — GO for v1.6.0"
+  echo "[SMOKE] ✅ ALL SMOKE TESTS PASSED — GO for v1.6.4"
 else
   echo "[SMOKE] ❌ SMOKE TESTS FAILED — NO-GO until failures are resolved"
   echo "[SMOKE] See: $REPORT_FILE"

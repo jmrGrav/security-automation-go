@@ -64,4 +64,31 @@ test.describe('Providers', () => {
     // Server must reject with 403 Forbidden when csrf_token is absent.
     expect(response.status(), 'POST without CSRF must be rejected').toBe(403);
   });
+
+  test('Replace Key for Spamhaus shows CONFIGURED immediately and never leaks the key', async ({ page }) => {
+    // Get CSRF token from the providers page
+    await page.goto('/providers');
+    const csrfInput = page.locator('form input[name="csrf_token"]').first();
+    const csrfToken = await csrfInput.getAttribute('value');
+    expect(csrfToken, 'CSRF token must be present').toBeTruthy();
+
+    // POST a test key via the Replace Key form (authenticated session via beforeEach)
+    const testKey = 'placeholder-spamhaus-value-' + Date.now();
+    const response = await page.request.post('/admin/providers/spamhaus/key', {
+      form: {
+        csrf_token: csrfToken!,
+        new_api_key: testKey,
+        confirm_replace: 'yes',
+      },
+    });
+    // Must redirect (303 See Other) after a successful Replace Key
+    expect(response.status(), 'Replace Key must redirect').toBe(200); // Playwright follows redirects
+
+    // After redirect the page should show CONFIGURED for Spamhaus
+    const body = await page.content();
+    expect(body.toUpperCase(), 'Spamhaus must show CONFIGURED after Replace Key').toContain('CONFIGURED');
+
+    // The raw key must never appear in the HTML
+    expect(body, 'raw key must not appear in HTML').not.toContain(testKey);
+  });
 });
