@@ -79,16 +79,29 @@ type DashboardConsoleView struct {
 	Environment   EnvironmentWidget
 	ReportedTotal int  // historical AbuseIPDB-reported count from evidence store
 	EvidenceWired bool // true when evidence store is available
+	UpdatedAt     string
+	HealthyCount  int
+	WarningCount  int
+	ErrorCount    int
+	DisabledCount int
 }
 
 type AIProviderDashboardView struct {
-	Name         string
-	Status       string
-	Model        string
-	LastTestAt   string
-	LastLatency  string
-	SecretState  string
-	EnabledState string
+	Name            string
+	Status          string
+	Model           string
+	Configured      string
+	Enabled         string
+	Healthy         string
+	ConfiguredState string
+	EnabledState    string
+	HealthyState    string
+	LastTestAt      string
+	LastSuccessAt   string
+	LastFailureAt   string
+	LastLatency     string
+	LastError       string
+	SecretState     string
 }
 
 type AIProviderManagementView struct {
@@ -101,10 +114,15 @@ type AIProviderManagementEntry struct {
 	Name              string
 	Status            string
 	Model             string
+	ConfiguredState   string
+	EnabledState      string
 	Enabled           bool
 	SecretState       string
+	HealthyState      string
 	SecretPathDisplay string
 	LastTestAt        string
+	LastSuccessAt     string
+	LastFailureAt     string
 	LastTestStatus    string
 	LastTestLatencyMS string
 	LastErrorCode     string
@@ -118,10 +136,19 @@ type NonAIProviderEntry struct {
 	Category         string // "reporting", "enrichment", "logging", "detection"
 	Configured       bool
 	Enabled          bool
+	Healthy          bool
 	MaskedKey        string
 	HasKeyManagement bool // true when a credential-store key exists for this provider
 	CredentialKey    string
 	Status           string
+	ConfiguredState  string
+	EnabledState     string
+	HealthyState     string
+	LastTestAt       string
+	LastSuccessAt    string
+	LastFailureAt    string
+	LastLatencyMS    string
+	LastErrorCode    string
 	Notes            string
 }
 
@@ -139,7 +166,9 @@ type ComingSoonView struct {
 }
 
 type AuditTrailView struct {
-	Entries []audit.AuditEntry
+	Entries    []audit.AuditEntry
+	Query      string
+	RefreshURL string
 }
 
 type BuildInfoView struct {
@@ -203,11 +232,14 @@ type DashboardView struct {
 }
 
 type PipelineHealthRow struct {
-	Source     string
-	Classified int
-	Reported   int
-	Suppressed int
-	Pending    int // Decision == "report_pending", awaiting outbox
+	Source           string
+	State            string
+	LastEventAt      string
+	LatestEvidenceID string
+	Classified       int
+	Reported         int
+	Suppressed       int
+	Pending          int // Decision == "report_pending", awaiting outbox
 }
 
 type PipelineHealthView struct {
@@ -215,4 +247,15 @@ type PipelineHealthView struct {
 	Total     PipelineHealthRow
 	Truncated bool // hit the 100k search cap — counts may be incomplete
 	Error     string
+}
+
+type EvidenceDetailView struct {
+	Evidence          reporting.DecisionEvidence
+	GateResult        string
+	DecisionResult    string
+	ActionResult      string
+	NormalizedJSON    string
+	RawJSON           string
+	ProtectedSummary  string
+	SuppressionReason string
 }

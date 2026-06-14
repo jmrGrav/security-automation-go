@@ -11,6 +11,12 @@ function setBusy(form, busy){
   var button = form.querySelector('button[type="submit"]');
   if(button){ button.disabled = !!busy; button.textContent = busy ? 'Explaining...' : 'Explain with AI'; }
 }
+function csrfFrom(form){
+  var field = form.querySelector('[name="csrf_token"]');
+  if(field && field.value){ return field.value; }
+  var meta = document.querySelector('meta[name="csrf-token"]');
+  return meta ? (meta.getAttribute('content') || '') : '';
+}
 function renderResult(node, payload){
   if(!node){ return; }
   var bits = [];
@@ -41,7 +47,7 @@ document.addEventListener('submit', function(ev){
     credentials: 'same-origin',
     headers: {
       'Content-Type': 'application/json',
-      'X-CSRF-Token': body.get('csrf_token') || ''
+      'X-CSRF-Token': csrfFrom(form)
     },
     body: JSON.stringify({
       subject_type: body.get('subject_type') || '',

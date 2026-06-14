@@ -27,6 +27,9 @@ func TestTimelineEmptyState(t *testing.T) {
 	if !strings.Contains(body, "Security Timeline") {
 		t.Fatalf("timeline page missing heading: %s", body)
 	}
+	if !strings.Contains(body, `data-live-shell="timeline"`) || !strings.Contains(body, `data-live-search-form="true"`) {
+		t.Fatalf("timeline page should expose live shell and live search form: %s", body)
+	}
 	if !strings.Contains(body, "No timeline events yet") {
 		t.Fatalf("timeline empty state missing: %s", body)
 	}
@@ -211,6 +214,25 @@ func TestTimelinePage_IPTargetLinksToForensic(t *testing.T) {
 	}
 }
 
+func TestTimelinePage_ShowsEvidenceDetailLinks(t *testing.T) {
+	srv, _, _ := newTestServer(t, nil)
+	srv.evidence = &stubEvidenceStore{
+		items: []reporting.DecisionEvidence{
+			{EvidenceID: "ev1", IP: "5.6.7.8", Source: "cloudflare_waf", Decision: "local_block", Timestamp: time.Now()},
+		},
+	}
+	cookie := loginCookie(t, srv, "test-password-123!@#")
+	req := httptest.NewRequest(http.MethodGet, "/timeline", nil)
+	req.AddCookie(cookie)
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+
+	body := rr.Body.String()
+	if !strings.Contains(body, `/evidence/ev1`) || !strings.Contains(body, `data-live-panel-link="true"`) {
+		t.Fatalf("expected evidence detail link in timeline for WAF event, body: %s", body)
+	}
+}
+
 func TestTimelineFiltersAndExportsReadOnlyEvents(t *testing.T) {
 	srv, audit, _ := newTestServer(t, nil)
 	audit.Record("security_intelligence_lookup", map[string]string{
@@ -271,5 +293,62 @@ func TestTimelineFiltersAndExportsReadOnlyEvents(t *testing.T) {
 	}
 	if strings.Contains(body, "super-secret-token") || strings.Contains(body, "ui-secret-value") {
 		t.Fatalf("timeline CSV leaked secret: %s", body)
+	}
+}
+
+func TestTimelineProjectsProviderTestTargetAndLegacyEventID(t *testing.T) {
+	srv, auditSink, _ := newTestServer(t, nil)
+	auditSink.Record("provider_test", map[string]string{
+		"actor":          "local",
+		"source":         "ui",
+		"provider":       "cloudflare",
+		"result":         "ready",
+		"correlation_id": "corr-provider",
+	})
+
+	events := srv.allTimelineEvents(context.Background())
+	for _, event := range events {
+		if event.Action != "provider_test" {
+			continue
+		}
+		if event.Target != "cloudflare" {
+			t.Fatalf("expected provider_test target to project provider name, got %+v", event)
+		}
+		if event.EvidenceID != "corr-provider" {
+			t.Fatalf("expected provider_test legacy event id fallback, got %+v", event)
+		}
+		if event.Result != "ready" {
+			t.Fatalf("expected provider_test result to stay useful, got %+v", event)
+		}
+		return
+	}
+	t.Fatalf("expected provider_test event in timeline, got %+v", events)
+}
+
+func TestTimelinePageFallsBackToCorrelationForLegacyEventID(t *testing.T) {
+	srv, auditSink, _ := newTestServer(t, nil)
+	auditSink.Record("provider_test", map[string]string{
+		"actor":          "local",
+		"source":         "ui",
+		"provider":       "cloudflare",
+		"result":         "ready",
+		"correlation_id": "corr-legacy",
+	})
+	cookie := loginCookie(t, srv, "test-password-123!@#")
+
+	req := httptest.NewRequest(http.MethodGet, "/timeline", nil)
+	req.AddCookie(cookie)
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	body := rr.Body.String()
+	if strings.Count(body, "corr-legacy") < 2 {
+		t.Fatalf("expected correlation fallback in timeline event id cell, got %s", body)
+	}
+	if strings.Contains(body, ">unknown<") {
+		t.Fatalf("legacy correlation row should not render unknown event id, got %s", body)
 	}
 }

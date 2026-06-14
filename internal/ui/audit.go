@@ -23,6 +23,13 @@ type AuditReader interface {
 	audit.AuditReader
 }
 
+func (s *Server) auditRecord(action string, fields map[string]string) {
+	if s == nil || s.audit == nil {
+		return
+	}
+	s.audit.Record(action, fields)
+}
+
 type BufferAuditSink struct {
 	mu      sync.Mutex
 	buf     bytes.Buffer
@@ -182,8 +189,16 @@ func (s *FileAuditSink) EntriesContext(ctx context.Context) ([]audit.AuditEntry,
 				entry.RemoteIP = value
 			case "target":
 				entry.Target = value
+			case "provider", "subject_id":
+				if entry.Target == "" {
+					entry.Target = value
+				}
 			case "result":
 				entry.Result = value
+			case "reason":
+				if entry.Result == "" {
+					entry.Result = value
+				}
 			case "error":
 				entry.Error = value
 			case "correlation_id", "correlation":
@@ -225,8 +240,16 @@ func auditEntryFromFields(action string, fields map[string]string) audit.AuditEn
 			entry.RemoteIP = value
 		case "target":
 			entry.Target = value
+		case "provider", "subject_id":
+			if entry.Target == "" {
+				entry.Target = value
+			}
 		case "result":
 			entry.Result = value
+		case "reason":
+			if entry.Result == "" {
+				entry.Result = value
+			}
 		case "error":
 			entry.Error = value
 		case "correlation_id", "correlation":
@@ -239,6 +262,39 @@ func auditEntryFromFields(action string, fields map[string]string) audit.AuditEn
 		entry.ActorSession = entry.Source
 	}
 	return entry
+}
+
+func filterAuditEntries(entries []audit.AuditEntry, query string) []audit.AuditEntry {
+	query = strings.TrimSpace(strings.ToLower(query))
+	if query == "" {
+		return entries
+	}
+	out := make([]audit.AuditEntry, 0, len(entries))
+	for _, entry := range entries {
+		fields := []string{
+			entry.Timestamp,
+			entry.Action,
+			entry.ActorSession,
+			entry.Source,
+			entry.RemoteIP,
+			entry.Target,
+			entry.Result,
+			entry.Error,
+			entry.Correlation,
+			entry.EventID,
+		}
+		matched := false
+		for _, field := range fields {
+			if strings.Contains(strings.ToLower(field), query) {
+				matched = true
+				break
+			}
+		}
+		if matched {
+			out = append(out, entry)
+		}
+	}
+	return out
 }
 
 func sanitizeAuditFields(fields map[string]string) map[string]string {

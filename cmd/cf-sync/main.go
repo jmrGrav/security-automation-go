@@ -2,14 +2,11 @@ package main
 
 import (
 	"flag"
-)
+	"fmt"
+	"io"
+	"os"
 
-// version, commit, and buildDate are injected by ldflags at build time.
-// They fall back to safe defaults when built without -ldflags (e.g. go test).
-var (
-	version   = "dev"
-	commit    = "unknown"
-	buildDate = "unknown"
+	"github.com/jm/security-automation-go/internal/buildmeta"
 )
 
 func main() {
@@ -18,7 +15,21 @@ func main() {
 	dryRun := flag.Bool("dry-run", true, "Execute in dry-run mode (default true)")
 	format := flag.String("format", "text", "Output format (text|json)")
 	metricsAddr := flag.String("metrics-addr", "127.0.0.1:9092", "Address to expose Prometheus metrics and API")
+	versionFlag := flag.Bool("version", false, "Print build metadata and exit")
 	flag.Parse()
 
+	if *versionFlag {
+		printVersion(os.Stdout)
+		return
+	}
+
 	runCFSync(*configPath, *mode, *dryRun, *format, *metricsAddr, flag.Args())
+}
+
+func versionText() string {
+	return buildmeta.Current().String()
+}
+
+func printVersion(w io.Writer) {
+	_, _ = fmt.Fprintln(w, versionText())
 }

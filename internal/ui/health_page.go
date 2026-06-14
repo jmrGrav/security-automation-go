@@ -49,7 +49,7 @@ func (s *Server) buildHealthConfig() health.Config {
 		CloudflareTokenConfigured: cloudflareConfigured,
 		CloudflareZoneID:          s.cfZoneIDFromSetup(context.Background()),
 		AbuseIPDBConfigured:       abuseConfigured,
-		AbuseIPDBEnabled:          s.cfg.AbuseIPDB.Enabled,
+		AbuseIPDBEnabled:          providerRuntimeEnabled(context.Background(), s.setupStore, "abuseipdb", s.cfg.AbuseIPDB.Enabled),
 		BetterStackConfigured:     betterstackConfigured,
 		CrowdSecLAPIKeyConfigured: crowdSecLAPIConfigured,
 		StateDir:                  s.cfg.StateDir,

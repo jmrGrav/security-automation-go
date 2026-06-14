@@ -84,4 +84,20 @@ test.describe('Cross-page coherence', () => {
         .not.toMatch(/openresty.*critical|openresty.*failed/i);
     }
   });
+
+  test('evidence and timeline pages expose detail links when tables are present', async ({ page }) => {
+    await page.goto('/evidence');
+    let body = await page.content();
+    if (body.includes('<table')) {
+      expect(body).toContain('evidence id');
+      expect(body).toContain('suppression');
+      expect(body).toContain('/evidence/');
+    }
+
+    await page.goto('/timeline');
+    body = await page.content();
+    if (body.includes('<table')) {
+      expect(body).toContain('/evidence/');
+    }
+  });
 });

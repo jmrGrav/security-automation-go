@@ -2,10 +2,10 @@ GO ?= go
 GOFLAGS ?=
 GIT_COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 BUILD_DATE := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
-LDFLAGS ?= -s -w -X main.version=$(VERSION) -X main.commit=$(GIT_COMMIT) -X main.buildDate=$(BUILD_DATE)
+LDFLAGS ?= -s -w -X github.com/jm/security-automation-go/internal/buildmeta.Version=$(VERSION) -X github.com/jm/security-automation-go/internal/buildmeta.Commit=$(GIT_COMMIT) -X github.com/jm/security-automation-go/internal/buildmeta.BuildDate=$(BUILD_DATE)
 BUILD_FLAGS ?= -trimpath -buildvcs=false -ldflags "$(LDFLAGS)"
 STATIC_ENV = CGO_ENABLED=0
-VERSION ?= 1.6.4
+VERSION ?= 1.7.0-dev
 GOPATH_BIN := $(shell $(GO) env GOPATH)/bin
 
 GOFMT_FILES := $(shell find . -type f -name '*.go' -not -path './vendor/*')

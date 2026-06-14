@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -11,6 +12,7 @@ import (
 	cfclient "github.com/jm/security-automation-go/internal/cloudflare/client"
 	"github.com/jm/security-automation-go/internal/config"
 	"github.com/jm/security-automation-go/internal/httpclient"
+	"github.com/jm/security-automation-go/internal/runtime/providerstate"
 	"github.com/jm/security-automation-go/internal/security/enrichment/spamhaus"
 	"github.com/jm/security-automation-go/internal/security/enrichment/virustotal"
 	"github.com/jm/security-automation-go/internal/security/quota"
@@ -38,10 +40,15 @@ type quotaRefreshers struct {
 
 	// credStore and hc allow lazy client creation after a credential is saved via UI
 	// without requiring a daemon restart.
-	credStore   credentialLooker
-	hc          httpclient.Client
-	spamEnabled bool
-	vtEnabled   bool
+	credStore    credentialLooker
+	stateStore   providerstate.Store
+	hc           httpclient.Client
+	abuseEnabled bool
+	spamEnabled  bool
+	vtEnabled    bool
+	abuseKey     string
+	spamKey      string
+	vtKey        string
 
 	mu               sync.Mutex
 	abuseFailures    int
@@ -49,7 +56,7 @@ type quotaRefreshers struct {
 	now              func() time.Time
 }
 
-func newQuotaRefreshers(cfg *config.Config, hc httpclient.Client, cf *cfclient.Client, abuse *abtransport.Transport, cs credentialLooker) *quotaRefreshers {
+func newQuotaRefreshers(cfg *config.Config, hc httpclient.Client, cf *cfclient.Client, abuse *abtransport.Transport, cs credentialLooker, store providerstate.Store) *quotaRefreshers {
 	if cfg == nil {
 		return nil
 	}
@@ -61,21 +68,28 @@ func newQuotaRefreshers(cfg *config.Config, hc httpclient.Client, cf *cfclient.C
 	if cfg.Spamhaus.Enabled && cfg.Spamhaus.APIKey != "" {
 		sh = spamhaus.NewQuotaClient(hc, cfg.Spamhaus.APIKey)
 	}
-	spamLazy := cs != nil && cfg.Spamhaus.Enabled && sh == nil
-	vtLazy := cs != nil && cfg.VirusTotal.Enabled && vt == nil
-	if cf == nil && abuse == nil && vt == nil && sh == nil && !spamLazy && !vtLazy {
+	abuseKey := strings.TrimSpace(cfg.AbuseIPDB.APIKey)
+	if abuse == nil && abuseKey != "" {
+		abuse = abtransport.New(hc, abuseKey)
+	}
+	if cf == nil && abuse == nil && vt == nil && sh == nil && cs == nil && store == nil {
 		return nil
 	}
 	return &quotaRefreshers{
-		cloudflare:  cf,
-		abuse:       abuse,
-		virustotal:  vt,
-		spamhaus:    sh,
-		credStore:   cs,
-		hc:          hc,
-		spamEnabled: cfg.Spamhaus.Enabled,
-		vtEnabled:   cfg.VirusTotal.Enabled,
-		now:         time.Now,
+		cloudflare:   cf,
+		abuse:        abuse,
+		virustotal:   vt,
+		spamhaus:     sh,
+		credStore:    cs,
+		stateStore:   store,
+		hc:           hc,
+		abuseEnabled: cfg.AbuseIPDB.Enabled,
+		spamEnabled:  cfg.Spamhaus.Enabled,
+		vtEnabled:    cfg.VirusTotal.Enabled,
+		abuseKey:     abuseKey,
+		spamKey:      strings.TrimSpace(cfg.Spamhaus.APIKey),
+		vtKey:        strings.TrimSpace(cfg.VirusTotal.APIKey),
+		now:          time.Now,
 	}
 }
 
@@ -86,13 +100,13 @@ func (q *quotaRefreshers) start(ctx context.Context, logger *slog.Logger) {
 	if q.cloudflare != nil {
 		q.runPoller(ctx, logger, "cloudflare", cloudflareQuotaRefreshInterval, q.refreshCloudflare)
 	}
-	if q.abuse != nil {
+	if q.abuse != nil || q.credStore != nil || q.stateStore != nil {
 		q.runPoller(ctx, logger, "abuseipdb", abuseIPDBQuotaRefreshInterval, q.refreshAbuseIPDB)
 	}
-	if q.virustotal != nil || (q.credStore != nil && q.vtEnabled) {
+	if q.virustotal != nil || q.credStore != nil || q.stateStore != nil {
 		q.runPoller(ctx, logger, "virustotal", thirdPartyQuotaRefreshInterval, q.refreshVirusTotal)
 	}
-	if q.spamhaus != nil || (q.credStore != nil && q.spamEnabled) {
+	if q.spamhaus != nil || q.credStore != nil || q.stateStore != nil {
 		q.runPoller(ctx, logger, "spamhaus", thirdPartyQuotaRefreshInterval, q.refreshSpamhaus)
 	}
 }
@@ -140,8 +154,24 @@ func (q *quotaRefreshers) refreshCloudflare(ctx context.Context) error {
 }
 
 func (q *quotaRefreshers) refreshAbuseIPDB(ctx context.Context) error {
-	if q == nil || q.abuse == nil {
+	if q == nil {
 		return nil
+	}
+	if !q.runtimeEnabled(ctx, "abuseipdb", q.abuseEnabled) {
+		return nil
+	}
+	if key, ok := q.currentCredential(ctx, "abuseipdb.api_key"); ok && key != "" && key != q.abuseKey {
+		q.abuseKey = key
+		q.abuse = nil
+	}
+	if q.abuseKey == "" {
+		return nil
+	}
+	if q.abuse == nil {
+		if q.hc == nil {
+			return nil
+		}
+		q.abuse = abtransport.New(q.hc, q.abuseKey)
 	}
 	now := q.nowTime()
 	obs, ok := quota.DefaultRegistry().Get("abuseipdb")
@@ -172,29 +202,70 @@ func (q *quotaRefreshers) refreshAbuseIPDB(ctx context.Context) error {
 }
 
 func (q *quotaRefreshers) refreshVirusTotal(ctx context.Context) error {
-	if q.virustotal == nil && q.credStore != nil && q.vtEnabled {
-		if v, ok, _ := q.credStore.Lookup(ctx, "virustotal.api_key"); ok && v != "" {
-			q.virustotal = virustotal.NewQuotaClient(q.hc, v)
-		}
+	if !q.runtimeEnabled(ctx, "virustotal", q.vtEnabled) {
+		return nil
+	}
+	if v, ok := q.currentCredential(ctx, "virustotal.api_key"); ok && v != "" && v != q.vtKey {
+		q.vtKey = v
+		q.virustotal = nil
+	}
+	if q.vtKey == "" {
+		return nil
 	}
 	if q.virustotal == nil {
-		return nil
+		if q.hc == nil {
+			return nil
+		}
+		q.virustotal = virustotal.NewQuotaClient(q.hc, q.vtKey)
 	}
 	_, err := q.virustotal.Fetch(ctx)
 	return err
 }
 
 func (q *quotaRefreshers) refreshSpamhaus(ctx context.Context) error {
-	if q.spamhaus == nil && q.credStore != nil && q.spamEnabled {
-		if v, ok, _ := q.credStore.Lookup(ctx, "spamhaus.api_key"); ok && v != "" {
-			q.spamhaus = spamhaus.NewQuotaClient(q.hc, v)
-		}
+	if !q.runtimeEnabled(ctx, "spamhaus", q.spamEnabled) {
+		return nil
+	}
+	if v, ok := q.currentCredential(ctx, "spamhaus.api_key"); ok && v != "" && v != q.spamKey {
+		q.spamKey = v
+		q.spamhaus = nil
+	}
+	if q.spamKey == "" {
+		return nil
 	}
 	if q.spamhaus == nil {
-		return nil
+		if q.hc == nil {
+			return nil
+		}
+		q.spamhaus = spamhaus.NewQuotaClient(q.hc, q.spamKey)
 	}
 	_, err := q.spamhaus.Fetch(ctx)
 	return err
+}
+
+func (q *quotaRefreshers) currentCredential(ctx context.Context, key string) (string, bool) {
+	if q == nil || q.credStore == nil {
+		return "", false
+	}
+	v, ok, err := q.credStore.Lookup(ctx, key)
+	if err != nil || !ok {
+		return "", false
+	}
+	return strings.TrimSpace(v), true
+}
+
+func (q *quotaRefreshers) runtimeEnabled(ctx context.Context, slug string, fallback bool) bool {
+	if q == nil {
+		return fallback
+	}
+	if q.stateStore == nil {
+		return fallback
+	}
+	state, ok, err := providerstate.Load(ctx, q.stateStore, slug)
+	if err != nil || !ok {
+		return fallback
+	}
+	return state.Enabled
 }
 
 func (q *quotaRefreshers) shouldRefreshAbuseIPDB(now time.Time, obs quota.Observation, ok bool) bool {

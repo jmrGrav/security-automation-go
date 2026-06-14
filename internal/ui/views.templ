@@ -24,7 +24,8 @@ templ Layout(title string, csrfToken string) {
 				label { display: block; margin: .5rem 0 .25rem; }
 				input[type="password"], input[type="text"] { width: 100%; box-sizing: border-box; padding: .7rem .8rem; border: 1px solid #c9d5e5; border-radius: 6px; }
 				button { margin-top: .75rem; padding: .65rem .9rem; border: 0; border-radius: 6px; background: #185adb; color: white; }
-				code, pre { background: #f4f7fb; border-radius: 6px; padding: .75rem; display: block; overflow: auto; }
+				code { background: #f4f7fb; border-radius: 6px; padding: .15rem .35rem; display: inline-block; overflow: auto; }
+				pre { background: #f4f7fb; border-radius: 6px; padding: .75rem; display: block; overflow: auto; max-height: 55vh; white-space: pre-wrap; word-break: break-word; tab-size: 2; line-height: 1.45; }
 			</style>
 		</head>
 		<body>

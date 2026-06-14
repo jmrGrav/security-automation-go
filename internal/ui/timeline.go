@@ -21,17 +21,18 @@ import (
 )
 
 type TimelineView struct {
-	Query     string
-	Action    string
-	Source    string // filter: "audit", "waf", or "" (all)
-	Page      int
-	PageSize  int
-	Total     int
-	HasPrev   bool
-	HasNext   bool
-	EmptyText string
-	Entries   []audit.TimelineEvent
-	Badges    []StatusItem
+	Query      string
+	Action     string
+	Source     string // filter: "audit", "waf", or "" (all)
+	Page       int
+	PageSize   int
+	Total      int
+	HasPrev    bool
+	HasNext    bool
+	EmptyText  string
+	Entries    []audit.TimelineEvent
+	Badges     []StatusItem
+	RefreshURL string
 }
 
 // timedEvent pairs a parsed wall-clock time with its event for a stable merged sort.
@@ -41,13 +42,15 @@ type timedEvent struct {
 }
 
 func (s *Server) timelineView(r *http.Request) TimelineView {
+	ctx, cancel := stableUIReadContext(r.Context())
+	defer cancel()
 	query := strings.TrimSpace(r.URL.Query().Get("q"))
 	action := strings.TrimSpace(r.URL.Query().Get("action"))
 	source := strings.TrimSpace(r.URL.Query().Get("source"))
 	page := parsePositiveInt(r.URL.Query().Get("page"), 1)
 	pageSize := clampInt(parsePositiveInt(r.URL.Query().Get("limit"), 20), 5, 100)
 
-	events := s.allTimelineEvents(r.Context())
+	events := s.allTimelineEvents(ctx)
 	events = filterTimelineEvents(events, query, action, source)
 	total := len(events)
 	paged, hasPrev, hasNext := paginateTimelineEvents(events, page, pageSize)
@@ -72,17 +75,18 @@ func (s *Server) timelineView(r *http.Request) TimelineView {
 	}
 
 	return TimelineView{
-		Query:     query,
-		Action:    action,
-		Source:    source,
-		Page:      page,
-		PageSize:  pageSize,
-		Total:     total,
-		HasPrev:   hasPrev,
-		HasNext:   hasNext,
-		EmptyText: emptyText,
-		Entries:   paged,
-		Badges:    badges,
+		Query:      query,
+		Action:     action,
+		Source:     source,
+		Page:       page,
+		PageSize:   pageSize,
+		Total:      total,
+		HasPrev:    hasPrev,
+		HasNext:    hasNext,
+		EmptyText:  emptyText,
+		Entries:    paged,
+		Badges:     badges,
+		RefreshURL: r.URL.RequestURI(),
 	}
 }
 
@@ -93,6 +97,8 @@ func (s *Server) timelineView(r *http.Request) TimelineView {
 // lifecycle events (startup, config reloads) require a dedicated capture
 // mechanism not yet wired — deferred to a follow-up.
 func (s *Server) allTimelineEvents(ctx context.Context) []audit.TimelineEvent {
+	ctx, cancel := stableUIReadContext(ctx)
+	defer cancel()
 	var timed []timedEvent
 
 	if reader, ok := s.audit.(AuditReader); ok && reader != nil {
@@ -131,7 +137,7 @@ func auditEntryToTimelineEvent(entry audit.AuditEntry) audit.TimelineEvent {
 		EventType:      valueOrUnknown(entry.Action),
 		Severity:       timelineSeverity(entry),
 		CorrelationID:  auditDisplayValue(entry.Correlation),
-		EvidenceID:     auditDisplayValue(entry.EventID),
+		EvidenceID:     auditDisplayValue(resolvedAuditEventID(entry)),
 		ReplaySequence: "unavailable",
 		ActorSource:    auditDisplayValue(timelineActorSource(entry)),
 		Action:         valueOrUnknown(entry.Action),
@@ -139,6 +145,13 @@ func auditEntryToTimelineEvent(entry audit.AuditEntry) audit.TimelineEvent {
 		Result:         auditDisplayValue(entry.Result),
 		Summary:        timelineSummary(entry),
 	}
+}
+
+func resolvedAuditEventID(entry audit.AuditEntry) string {
+	if strings.TrimSpace(entry.EventID) != "" {
+		return entry.EventID
+	}
+	return strings.TrimSpace(entry.Correlation)
 }
 
 func evidenceToTimelineEvent(ev reporting.DecisionEvidence) audit.TimelineEvent {
@@ -337,10 +350,10 @@ func TimelinePage(view TimelineView, csrfToken string) templ.Component {
 		Active:      "/timeline",
 		BadgeLabels: view.Badges,
 		Body: templ.ComponentFunc(func(ctx context.Context, w io.Writer) error {
-			if _, err := fmt.Fprint(w, `<div class="panel"><p class="muted">This page is read-only. Filters update the projection only; JSON and CSV exports are derived from the same server-side event stream.</p></div>`); err != nil {
+			if _, err := fmt.Fprintf(w, `<div class="stack" data-live-shell="timeline" data-live-refresh-url="%s" data-live-refresh-interval="10000"><div class="panel"><p class="muted">This page is read-only. Filters update the projection only; JSON and CSV exports are derived from the same server-side event stream.</p></div>`, html.EscapeString(view.RefreshURL)); err != nil {
 				return err
 			}
-			if _, err := fmt.Fprint(w, `<div class="panel"><form method="get" action="/timeline" class="stack">`); err != nil {
+			if _, err := fmt.Fprint(w, `<div class="panel"><form method="get" action="/timeline" class="stack" data-live-search-form="true">`); err != nil {
 				return err
 			}
 			// Source filter row
@@ -415,9 +428,13 @@ func TimelinePage(view TimelineView, csrfToken string) templ.Component {
 			}
 
 			if len(view.Entries) == 0 {
-				return writeEmptyState(w, view.EmptyText)
+				if err := writeEmptyState(w, view.EmptyText); err != nil {
+					return err
+				}
+				_, err := fmt.Fprint(w, `</div>`)
+				return err
 			}
-			if _, err := fmt.Fprint(w, `<table><thead><tr><th>timestamp</th><th>scope</th><th>event type</th><th>severity</th><th>correlation id</th><th>evidence id</th><th>replay seq</th><th>actor/source</th><th>action</th><th>target</th><th>result</th><th>ai</th></tr></thead><tbody>`); err != nil {
+			if _, err := fmt.Fprint(w, `<div class="table-wrap"><table><thead><tr><th>timestamp</th><th>scope</th><th>event type</th><th>severity</th><th>correlation id</th><th>evidence id</th><th>replay seq</th><th>actor/source</th><th>action</th><th>target</th><th>result</th><th>ai</th></tr></thead><tbody>`); err != nil {
 				return err
 			}
 			for _, entry := range view.Entries {
@@ -427,19 +444,19 @@ func TimelinePage(view TimelineView, csrfToken string) templ.Component {
 					html.EscapeString(valueOrUnknown(entry.EventType)),
 					html.EscapeString(statusClass(entry.Severity)),
 					html.EscapeString(strings.ToUpper(valueOrUnknown(entry.Severity))),
-					html.EscapeString(auditDisplayValue(entry.CorrelationID)),
-					html.EscapeString(auditDisplayValue(entry.EvidenceID)),
-					html.EscapeString(auditDisplayValue(entry.ReplaySequence)),
-					html.EscapeString(auditDisplayValue(entry.ActorSource)),
+					compactCopyHTML(auditDisplayValue(entry.CorrelationID), 14, "Correlation copied"),
+					evidenceDetailLinkHTML(auditDisplayValue(entry.EvidenceID)),
+					compactCopyHTML(auditDisplayValue(entry.ReplaySequence), 10, "Replay sequence copied"),
+					compactCopyHTML(auditDisplayValue(entry.ActorSource), 14, "Actor copied"),
 					html.EscapeString(valueOrUnknown(entry.Action)),
 					timelineTargetCell(entry.Target),
-					html.EscapeString(auditDisplayValue(entry.Result)),
+					compactCopyHTML(auditDisplayValue(entry.Result), 16, "Result copied"),
 					timelineAIButtonHTML("timeline_event", timelineExplainSubjectID(entry), csrfToken),
 				); err != nil {
 					return err
 				}
 			}
-			_, err := fmt.Fprint(w, `</tbody></table>`)
+			_, err := fmt.Fprint(w, `</tbody></table></div></div>`)
 			return err
 		}),
 	})
@@ -450,10 +467,9 @@ func TimelinePage(view TimelineView, csrfToken string) templ.Component {
 func timelineTargetCell(target string) string {
 	v := auditDisplayValue(target)
 	if addr, err := netip.ParseAddr(strings.TrimSpace(target)); err == nil && addr.IsValid() {
-		return fmt.Sprintf(`<a href="/forensic?ip=%s" title="Explain this IP">%s</a>`,
-			html.EscapeString(addr.String()), html.EscapeString(addr.String()))
+		return compactLinkCopyHTML("/forensic?ip="+url.QueryEscape(addr.String()), addr.String(), "Explain this IP", "Forensic Lookup", "IP copied", 14)
 	}
-	return html.EscapeString(v)
+	return compactCopyHTML(v, 18, "Target copied")
 }
 
 func timelineExplainSubjectID(entry audit.TimelineEvent) string {

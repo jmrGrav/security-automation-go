@@ -193,14 +193,39 @@ func TestStrictReservationSuccessRecordsPendingAndSucceededEvidence(t *testing.T
 	if err != nil {
 		t.Fatalf("process: %v", err)
 	}
-	if !result.Reported || len(reporter.reports) != 1 || store.markCount != 1 {
-		t.Fatalf("expected reported result, reports=%d marks=%d result=%+v", len(reporter.reports), store.markCount, result)
+	if !result.Suppressed || result.SuppressionReason != "report_pending" {
+		t.Fatalf("expected pending reservation, got %+v", result)
+	}
+	if len(reporter.reports) != 0 || store.markCount != 0 {
+		t.Fatalf("upstream report must be deferred to outbox, reports=%d marks=%d", len(reporter.reports), store.markCount)
+	}
+	if len(evidence.evidence) != 1 {
+		t.Fatalf("expected pending evidence only before outbox processing, got %d", len(evidence.evidence))
+	}
+	if len(reservations.reserve) != 1 || reservations.statuses[reservations.reserve[0].EvidenceID] != reporting.ReportStatusPending {
+		t.Fatalf("expected pending reservation, got %#v %#v", reservations.reserve, reservations.statuses)
+	}
+
+	worker := reporting.NewOutboxWorker(reservations, reporter, store, evidence, &sinks.RecorderSink{}, reporting.OutboxWorkerConfig{
+		Clock:      func() time.Time { return base.Add(31 * time.Second) },
+		Limit:      1,
+		ClaimLease: 5 * time.Second,
+	})
+	processed, err := worker.ProcessOnce(context.Background())
+	if err != nil {
+		t.Fatalf("outbox process: %v", err)
+	}
+	if processed != 1 {
+		t.Fatalf("expected one pending item to be processed, got %d", processed)
+	}
+	if len(reporter.reports) != 1 || store.markCount != 1 {
+		t.Fatalf("expected deferred upstream report after worker, reports=%d marks=%d", len(reporter.reports), store.markCount)
 	}
 	if len(evidence.evidence) < 2 {
 		t.Fatalf("expected pending and success evidence, got %d", len(evidence.evidence))
 	}
 	if reservations.statuses[reservations.reserve[0].EvidenceID] != reporting.ReportStatusReported {
-		t.Fatalf("expected reported reservation status, got %#v", reservations.statuses)
+		t.Fatalf("expected reported reservation status after worker, got %#v", reservations.statuses)
 	}
 }
 

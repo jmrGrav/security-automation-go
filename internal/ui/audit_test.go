@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -119,6 +121,8 @@ func TestAuditTrailPageRendersForensicTable(t *testing.T) {
 	body := buf.String()
 
 	for _, want := range []string{
+		`data-live-shell="audit"`,
+		`data-live-search-form="true"`,
 		"timestamp",
 		"actor/source",
 		"action",
@@ -152,6 +156,9 @@ func TestAuditTrailPageEmptyState(t *testing.T) {
 	if !strings.Contains(body, "No audit events yet") {
 		t.Fatalf("audit page should render empty state, got %s", body)
 	}
+	if !strings.Contains(body, `data-live-shell="audit"`) || !strings.Contains(body, `data-live-search-form="true"`) {
+		t.Fatalf("audit page should expose live shell and search form, got %s", body)
+	}
 	if !strings.Contains(body, "UI lookups and operator actions will appear here") {
 		t.Fatalf("audit page should explain empty state, got %s", body)
 	}
@@ -175,5 +182,88 @@ func TestFileAuditSinkEntriesContextHonorsCancellation(t *testing.T) {
 
 	if _, err := sink.EntriesContext(ctx); !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected context cancellation, got %v", err)
+	}
+}
+
+func TestLoginAndLogoutAuditEntriesIncludeUsefulMetadata(t *testing.T) {
+	srv, auditSink, _ := newTestServer(t, nil)
+
+	cookie := loginCookie(t, srv, "test-password-123!@#")
+	entries := auditSink.Entries()
+	if len(entries) == 0 {
+		t.Fatal("expected login to emit an audit entry")
+	}
+
+	loginEntry := entries[len(entries)-1]
+	if loginEntry.Action != "login_success" {
+		t.Fatalf("expected login_success, got %+v", loginEntry)
+	}
+	if loginEntry.Target == "" || loginEntry.Target == "unknown" {
+		t.Fatalf("expected useful login target, got %+v", loginEntry)
+	}
+	if loginEntry.Result != "success" {
+		t.Fatalf("expected login success result, got %+v", loginEntry)
+	}
+	if loginEntry.EventID == "" {
+		t.Fatalf("expected login event_id, got %+v", loginEntry)
+	}
+	if loginEntry.Correlation != loginEntry.EventID {
+		t.Fatalf("expected login correlation/event_id parity, got %+v", loginEntry)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/logout", nil)
+	req.AddCookie(cookie)
+	req.Header.Set("X-CSRF-Token", srv.csrfTokenFor(cookie.Value))
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusFound {
+		t.Fatalf("expected logout redirect, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	entries = auditSink.Entries()
+	logoutEntry := entries[len(entries)-1]
+	if logoutEntry.Action != "logout" {
+		t.Fatalf("expected logout entry, got %+v", logoutEntry)
+	}
+	if logoutEntry.Target == "" || logoutEntry.Target == "unknown" {
+		t.Fatalf("expected useful logout target, got %+v", logoutEntry)
+	}
+	if logoutEntry.Result != "success" {
+		t.Fatalf("expected logout success result, got %+v", logoutEntry)
+	}
+	if logoutEntry.EventID == "" {
+		t.Fatalf("expected logout event_id, got %+v", logoutEntry)
+	}
+	if logoutEntry.Correlation != logoutEntry.EventID {
+		t.Fatalf("expected logout correlation/event_id parity, got %+v", logoutEntry)
+	}
+}
+
+func TestAuditTrailPageFallsBackToCorrelationForLegacyEventID(t *testing.T) {
+	view := AuditTrailView{
+		Entries: []audit.AuditEntry{
+			{
+				Timestamp:    "2026-06-01T09:01:00Z",
+				ActorSession: "local",
+				Source:       "ui",
+				Action:       "provider_test",
+				Target:       "cloudflare",
+				Result:       "ready",
+				Correlation:  "corr-legacy",
+			},
+		},
+	}
+
+	var buf bytes.Buffer
+	if err := AuditTrailPage(view, "csrf-token").Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render audit trail page: %v", err)
+	}
+	body := buf.String()
+
+	if strings.Count(body, "corr-legacy") < 2 {
+		t.Fatalf("expected legacy correlation to populate event id fallback, got %s", body)
+	}
+	if strings.Contains(body, ">unknown<") {
+		t.Fatalf("legacy correlation row should not render unknown event id, got %s", body)
 	}
 }

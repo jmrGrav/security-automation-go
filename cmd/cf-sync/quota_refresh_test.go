@@ -212,8 +212,10 @@ func (c abuseQuotaRefreshClient) Do(ctx context.Context, req *http.Request) (*ht
 
 func newAbuseQuotaRefreshersForTest(do func(context.Context) (*http.Response, error)) *quotaRefreshers {
 	return &quotaRefreshers{
-		abuse: abtransport.New(abuseQuotaRefreshClient{do: do}, "token"),
-		now:   time.Now,
+		abuse:        abtransport.New(abuseQuotaRefreshClient{do: do}, "token"),
+		abuseEnabled: true,
+		abuseKey:     "token",
+		now:          time.Now,
 	}
 }
 
@@ -222,7 +224,7 @@ func newAbuseQuotaRefreshersForTest(do func(context.Context) (*http.Response, er
 func TestNewQuotaRefreshers_EmptyAbuseIPDBKey(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.AbuseIPDB.APIKey = ""
-	q := newQuotaRefreshers(cfg, nil, nil, nil, nil)
+	q := newQuotaRefreshers(cfg, nil, nil, nil, nil, nil)
 	// With no providers at all, newQuotaRefreshers returns nil.
 	if q != nil {
 		t.Error("expected nil refreshers when no providers are configured")
@@ -249,7 +251,7 @@ func TestNewQuotaRefreshers_LazySpamhausInit(t *testing.T) {
 	cfg.Spamhaus.Enabled = true
 	cfg.Spamhaus.APIKey = "" // not in config, only in credential store
 
-	q := newQuotaRefreshers(cfg, nil, nil, nil, cs)
+	q := newQuotaRefreshers(cfg, nil, nil, nil, cs, nil)
 	if q == nil {
 		t.Fatal("expected non-nil refreshers when credential store has Spamhaus key and Spamhaus is enabled")
 	}
@@ -268,7 +270,7 @@ func TestNewQuotaRefreshers_LazySpamhausInit(t *testing.T) {
 // providers still returns nil (no pollers to start).
 func TestNewQuotaRefreshers_NilCredStoreAndNilProviders(t *testing.T) {
 	cfg := &config.Config{}
-	q := newQuotaRefreshers(cfg, nil, nil, nil, nil)
+	q := newQuotaRefreshers(cfg, nil, nil, nil, nil, nil)
 	if q != nil {
 		t.Error("expected nil when no providers configured and no credential store")
 	}

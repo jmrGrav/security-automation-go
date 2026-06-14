@@ -11,6 +11,7 @@ import (
 
 	"github.com/jm/security-automation-go/internal/security/enrichment"
 	"github.com/jm/security-automation-go/internal/security/enrichment/asn"
+	"github.com/jm/security-automation-go/internal/services/reporting"
 )
 
 // fakeEnrichmentDNS returns a fixed hostname+address pair.
@@ -168,6 +169,34 @@ func TestForensic_NoEnrichmentServiceReturnsEmptyState(t *testing.T) {
 	}
 }
 
+func TestForensic_StableContextIgnoresCanceledRequestContext(t *testing.T) {
+	svc := enrichment.NewService(forensicCfg(), nil, nil, nil, nil)
+	srv := newTestServerWithEnrichment(t, svc)
+	srv.evidence = &fakeEvidenceStore{
+		records: []reporting.DecisionEvidence{
+			{EvidenceID: "ev1", IP: "203.0.113.5", Source: "cloudflare_waf", AbuseType: "scanner", RiskScore: 10, Decision: "local_block", Timestamp: time.Now()},
+		},
+	}
+	cookie := loginCookie(t, srv, "test-password-123!@#")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	req := httptest.NewRequestWithContext(ctx, http.MethodGet, "/forensic?ip=203.0.113.5", nil)
+	req.AddCookie(cookie)
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	body := rr.Body.String()
+	for _, want := range []string{"203.0.113.5", "Local Evidence History"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("forensic page missing %q: %s", want, body)
+		}
+	}
+}
+
 func TestForensic_AuditLogWrittenOnLookup(t *testing.T) {
 	svc := enrichment.NewService(forensicCfg(), nil, nil, nil, nil)
 	srv, audit, _ := newTestServer(t, map[string]string{"UI_SECRET": "test-secret"})
@@ -265,6 +294,21 @@ func TestForensic_GETWithoutIP_ShowsBlankForm(t *testing.T) {
 	body := rr.Body.String()
 	if !strings.Contains(body, "Forensic") {
 		t.Errorf("expected forensic page title: %s", body)
+	}
+}
+
+func TestForensicPageIncludesCSRFToken(t *testing.T) {
+	srv, _, _ := newTestServer(t, nil)
+	cookie := loginCookie(t, srv, "test-password-123!@#")
+
+	req := httptest.NewRequest(http.MethodGet, "/forensic", nil)
+	req.AddCookie(cookie)
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+
+	body := rr.Body.String()
+	if !strings.Contains(body, `name="csrf_token"`) {
+		t.Fatalf("forensic page should include csrf token field: %s", body)
 	}
 }
 

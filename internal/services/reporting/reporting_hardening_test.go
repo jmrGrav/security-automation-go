@@ -291,13 +291,28 @@ func TestFinalizeReportedDecisionRecordsDedupFailureButKeepsReported(t *testing.
 	if err != nil {
 		t.Fatalf("process: %v", err)
 	}
-	if !result.Reported {
-		t.Fatalf("expected reported result despite dedup mark error, got %+v", result)
+	if !result.Suppressed || result.SuppressionReason != "report_pending" {
+		t.Fatalf("expected pending result before outbox worker, got %+v", result)
 	}
-	if result.TelemetryEvent.Metadata["dedup_store_mark_error"] == "" {
-		t.Fatalf("expected dedup mark error metadata, got %+v", result.TelemetryEvent.Metadata)
+	if len(reporter.reports) != 0 {
+		t.Fatalf("report must be deferred to outbox, got %d upstream calls", len(reporter.reports))
+	}
+	worker := reporting.NewOutboxWorker(reservations, reporter, dedup, evidence, &sinks.RecorderSink{}, reporting.OutboxWorkerConfig{
+		Clock:      func() time.Time { return base.Add(31 * time.Second) },
+		Limit:      1,
+		ClaimLease: 5 * time.Second,
+	})
+	processed, err := worker.ProcessOnce(context.Background())
+	if err == nil {
+		t.Fatal("expected outbox process to return dedup mark error")
+	}
+	if processed != 1 {
+		t.Fatalf("expected one pending item to be processed, got %d", processed)
+	}
+	if len(reporter.reports) != 1 {
+		t.Fatalf("expected one deferred report after worker, got %d", len(reporter.reports))
 	}
 	if reservations.statuses == nil || reservations.statuses[reservations.reserve[0].EvidenceID] != reporting.ReportStatusReportedDedupFailed {
-		t.Fatalf("expected dedup-failed reservation status, got %+v", reservations.statuses)
+		t.Fatalf("expected dedup-failed reservation status after worker, got %+v", reservations.statuses)
 	}
 }

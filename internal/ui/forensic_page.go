@@ -11,15 +11,21 @@ import (
 	"github.com/a-h/templ"
 )
 
-func renderForensicPage(ctx context.Context, w http.ResponseWriter, view ForensicView) {
-	_ = ForensicPage(view).Render(ctx, w)
+func renderForensicPage(ctx context.Context, w http.ResponseWriter, view ForensicView, csrfToken string) {
+	_ = ForensicPage(view, csrfToken).Render(ctx, w)
 }
 
-func ForensicPage(view ForensicView) templ.Component {
+func ForensicPage(view ForensicView, csrfToken string) templ.Component {
 	body := templ.ComponentFunc(func(ctx context.Context, w io.Writer) error {
 		escaped := html.EscapeString(view.IP)
 
-		if _, err := fmt.Fprint(w, `<section class="grid"><div class="panel"><h2>Forensic IP Lookup</h2><form action="/forensic" method="post"><label for="ip">IP address</label><input id="ip" name="ip" type="text" value="`); err != nil {
+		if _, err := fmt.Fprint(w, `<div data-live-panel-content data-live-panel-title="Forensic Lookup"><section class="grid"><div class="panel"><h2>Forensic IP Lookup</h2><form action="/forensic" method="post"><input type="hidden" name="csrf_token" value="`); err != nil {
+			return err
+		}
+		if _, err := io.WriteString(w, html.EscapeString(csrfToken)); err != nil {
+			return err
+		}
+		if _, err := fmt.Fprint(w, `"/><label for="ip">IP address</label><input id="ip" name="ip" type="text" value="`); err != nil {
 			return err
 		}
 		if _, err := io.WriteString(w, escaped); err != nil {
@@ -54,7 +60,7 @@ func ForensicPage(view ForensicView) templ.Component {
 		}
 
 		if !view.HasData {
-			if _, err := fmt.Fprint(w, `</section>`); err != nil {
+			if _, err := fmt.Fprint(w, `</section></div>`); err != nil {
 				return err
 			}
 			return nil
@@ -105,7 +111,7 @@ func ForensicPage(view ForensicView) templ.Component {
 				return err
 			}
 
-			asnText := "unknown"
+			asnText := "not configured"
 			if s.ASN.Org != "" {
 				asnText = html.EscapeString(s.ASN.Org)
 			}
@@ -144,7 +150,7 @@ func ForensicPage(view ForensicView) templ.Component {
 		}
 
 		if len(view.LocalEvidence) > 0 {
-			if _, err := fmt.Fprint(w, `<div class="panel"><h2>Local Evidence History</h2><table><thead><tr><th>timestamp</th><th>source</th><th>type</th><th>score</th><th>decision</th><th>status</th></tr></thead><tbody>`); err != nil {
+			if _, err := fmt.Fprint(w, `<div class="panel"><h2>Local Evidence History</h2><div class="table-wrap"><table><thead><tr><th>timestamp</th><th>source</th><th>type</th><th>score</th><th>decision</th><th>status</th></tr></thead><tbody>`); err != nil {
 				return err
 			}
 			for _, ev := range view.LocalEvidence {
@@ -168,12 +174,12 @@ func ForensicPage(view ForensicView) templ.Component {
 					return err
 				}
 			}
-			if _, err := fmt.Fprint(w, `</tbody></table></div>`); err != nil {
+			if _, err := fmt.Fprint(w, `</tbody></table></div></div>`); err != nil {
 				return err
 			}
 		}
 
-		if _, err := fmt.Fprint(w, `</section>`); err != nil {
+		if _, err := fmt.Fprint(w, `</section></div>`); err != nil {
 			return err
 		}
 		return nil

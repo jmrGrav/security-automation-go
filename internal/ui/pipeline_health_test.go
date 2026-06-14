@@ -4,8 +4,10 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jm/security-automation-go/internal/services/reporting"
 )
@@ -52,6 +54,12 @@ func (s *stubEvidenceStore) Search(_ context.Context, opts reporting.EvidenceSea
 		}
 		out = append(out, ev)
 	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].Timestamp.Equal(out[j].Timestamp) {
+			return out[i].EvidenceID > out[j].EvidenceID
+		}
+		return out[i].Timestamp.After(out[j].Timestamp)
+	})
 	if opts.Offset > 0 {
 		if opts.Offset >= len(out) {
 			return nil, nil
@@ -171,6 +179,50 @@ func TestPipelineHealthMatrixCounts(t *testing.T) {
 	}
 	if view.Total.Reported != 3 {
 		t.Errorf("total reported: want 3, got %d", view.Total.Reported)
+	}
+}
+
+func TestPipelineHealthMatrixShowsLastEventAndState(t *testing.T) {
+	base := time.Date(2026, 6, 13, 16, 0, 0, 0, time.UTC)
+	store := &stubEvidenceStore{
+		items: []reporting.DecisionEvidence{
+			{EvidenceID: "ev-cf-1", Source: "cloudflare_waf", Timestamp: base.Add(-10 * time.Minute)},
+			{EvidenceID: "ev-cf-2", Source: "cloudflare_waf", Timestamp: base.Add(-2 * time.Minute)},
+			{EvidenceID: "ev-cs-1", Source: "crowdsec_waf", Suppressed: true, Timestamp: base.Add(-5 * time.Minute)},
+		},
+	}
+
+	srv, _, _ := newTestServer(t, nil)
+	srv.evidence = store
+
+	view := srv.buildPipelineHealthView(context.Background())
+	if view.Error != "" {
+		t.Fatalf("unexpected error: %s", view.Error)
+	}
+
+	bySource := make(map[string]PipelineHealthRow, len(view.Rows))
+	for _, r := range view.Rows {
+		bySource[r.Source] = r
+	}
+
+	cf := bySource["Cloudflare WAF"]
+	if cf.State != "active" {
+		t.Fatalf("expected Cloudflare WAF active state, got %q", cf.State)
+	}
+	if cf.LastEventAt == "" {
+		t.Fatal("expected Cloudflare WAF last event timestamp")
+	}
+	if cf.LatestEvidenceID != "ev-cf-2" {
+		t.Fatalf("expected latest Cloudflare evidence ev-cf-2, got %q", cf.LatestEvidenceID)
+	}
+
+	or := bySource["OpenResty WAF"]
+	if or.State != "no events yet" {
+		t.Fatalf("expected OpenResty no events yet state, got %q", or.State)
+	}
+
+	if view.Total.LastEventAt == "" {
+		t.Fatal("expected total last event timestamp")
 	}
 }
 

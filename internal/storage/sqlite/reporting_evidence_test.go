@@ -140,14 +140,27 @@ func TestReportReservationStorePreventsConcurrentPendingForSameIP(t *testing.T) 
 	second := first
 	second.IdempotencyKey = "idem-2"
 	second.EvidenceID = "ev-pending-2"
-	if err := store.Reserve(ctx, second); err == nil {
-		t.Fatal("expected duplicate pending reservation to fail")
+	if err := store.Reserve(ctx, second); err != nil {
+		t.Fatalf("expected duplicate pending reservation to merge, got %v", err)
+	}
+	var count int
+	if err := db.Conn().QueryRowContext(ctx, `SELECT count(*) FROM abuseipdb_report_outbox`).Scan(&count); err != nil {
+		t.Fatalf("count pending rows: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("expected one pending row after merge, got %d", count)
 	}
 	if err := store.MarkStatus(ctx, first.EvidenceID, reporting.ReportStatusReported); err != nil {
 		t.Fatalf("mark reported: %v", err)
 	}
 	if err := store.Reserve(ctx, second); err != nil {
 		t.Fatalf("reserve after reported status: %v", err)
+	}
+	if err := db.Conn().QueryRowContext(ctx, `SELECT count(*) FROM abuseipdb_report_outbox`).Scan(&count); err != nil {
+		t.Fatalf("count after reported status: %v", err)
+	}
+	if count != 2 {
+		t.Fatalf("expected new row after reported status, got %d", count)
 	}
 }
 
@@ -203,7 +216,7 @@ func TestReportReservationStoreListsRetryableWithReportPayload(t *testing.T) {
 		IdempotencyKey: "idem-retry",
 		EvidenceID:     "ev-retry",
 		Status:         reporting.ReportStatusPending,
-		ExpiresAt:      time.Now().UTC().Add(time.Hour),
+		ExpiresAt:      time.Now().UTC().Add(-time.Minute),
 		Report: abmodels.ExecutableReport{
 			ExecutionID: "idem-retry",
 			IP:          "8.8.4.6",
@@ -261,12 +274,20 @@ func TestReportReservationStorePrunesOldRows(t *testing.T) {
 		}
 	}
 
-	items, err := store.ListRetryable(context.Background(), base, 10)
+	var total int
+	if err := db.Conn().QueryRowContext(context.Background(), `SELECT count(*) FROM abuseipdb_report_outbox`).Scan(&total); err != nil {
+		t.Fatalf("count outbox rows: %v", err)
+	}
+	if total != 2 {
+		t.Fatalf("expected outbox to stay bounded at 2 rows, got %d", total)
+	}
+
+	items, err := store.ListRetryable(context.Background(), base.Add(25*time.Hour), 10)
 	if err != nil {
 		t.Fatalf("list retryable after prune: %v", err)
 	}
 	if len(items) != 2 {
-		t.Fatalf("expected outbox to stay bounded at 2 rows, got %d", len(items))
+		t.Fatalf("expected retryable view to expose two rows after expiry, got %d", len(items))
 	}
 	if items[0].Reservation.EvidenceID != "ev-2" || items[1].Reservation.EvidenceID != "ev-3" {
 		t.Fatalf("unexpected outbox retention order: %+v", items)
@@ -289,7 +310,7 @@ func TestReportReservationStoreClaimRetryableLeasesRowsUntilClaimExpires(t *test
 		IdempotencyKey: "idem-claim",
 		EvidenceID:     "ev-claim",
 		Status:         reporting.ReportStatusPending,
-		ExpiresAt:      now.Add(time.Hour),
+		ExpiresAt:      now.Add(-time.Second),
 		Report: abmodels.ExecutableReport{
 			ExecutionID: "idem-claim",
 			IP:          "8.8.4.7",

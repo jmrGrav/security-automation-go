@@ -32,10 +32,12 @@ func (s *Server) setupGuardMiddleware(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		complete, err := s.setupStore.IsComplete(r.Context())
+		ctx, cancel := stableUIReadContext(r.Context())
+		defer cancel()
+		complete, err := s.setupStore.IsComplete(ctx)
 		if err != nil || !complete {
 			step := 1
-			if st, e := s.setupStore.GetCurrentStep(r.Context()); e == nil {
+			if st, e := s.setupStore.GetCurrentStep(ctx); e == nil {
 				step = st
 			}
 			http.Redirect(w, r, fmt.Sprintf("/setup/step/%d", step), http.StatusFound)
@@ -839,6 +841,11 @@ func validateAbuseIPDB(ctx context.Context, key string) error {
 		return fmt.Errorf("API key rejected (HTTP %d)", resp.StatusCode)
 	}
 	return nil
+}
+
+// ValidateAbuseIPDB exposes the setup-wizard AbuseIPDB check for runtime health refreshers.
+func ValidateAbuseIPDB(ctx context.Context, key string) error {
+	return validateAbuseIPDB(ctx, key)
 }
 
 // validateBetterStack sends a test log event. Returns nil on HTTP 202.

@@ -33,6 +33,24 @@ test.describe('Providers', () => {
     expect(hasMeaning, 'providers page must show at least one status value').toBe(true);
   });
 
+  test('provider action rail stays readable and buttons stay large', async ({ page }) => {
+    await page.goto('/providers');
+    const actionRail = page.locator('.provider-actions').first();
+    await expect(actionRail).toBeVisible();
+
+    const updateKey = page.getByRole('button', { name: /Update Key/i }).first();
+    await expect(updateKey).toBeVisible();
+
+    const testButton = page.getByRole('button', { name: /Test Now/i }).first();
+    await expect(testButton).toBeVisible();
+
+    const minHeight = await testButton.evaluate(el => {
+      const value = getComputedStyle(el).minHeight;
+      return Number.parseFloat(value || '0');
+    });
+    expect(minHeight, 'provider action buttons should be visibly larger').toBeGreaterThanOrEqual(40);
+  });
+
   test('Replace Key forms have CSRF token and no pre-filled key value', async ({ page }) => {
     await page.goto('/providers');
     // Every Replace Key form must include a csrf_token hidden field.
@@ -53,16 +71,17 @@ test.describe('Providers', () => {
   });
 
   test('Replace Key POST without CSRF token is rejected with 403', async ({ page }) => {
-    // Must be authenticated (beforeEach login already ran) so the auth guard
-    // does not redirect — the CSRF guard fires and returns 403.
-    const response = await page.request.post('/admin/providers/spamhaus/key', {
-      form: {
-        new_api_key: 'fake-test-key-no-csrf',
-        confirm_replace: 'yes',
-      },
+    // Use the browser session so the auth cookie is present. The request still
+    // omits csrf_token, so the server must reject it with 403.
+    const status = await page.evaluate(async () => {
+      const response = await fetch('/admin/providers/spamhaus/key', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: 'new_api_key=fake-test-key-no-csrf&confirm_replace=yes',
+      });
+      return response.status;
     });
-    // Server must reject with 403 Forbidden when csrf_token is absent.
-    expect(response.status(), 'POST without CSRF must be rejected').toBe(403);
+    expect(status, 'POST without CSRF must be rejected').toBe(403);
   });
 
   test('Replace Key for Spamhaus shows CONFIGURED immediately and never leaks the key', async ({ page }) => {

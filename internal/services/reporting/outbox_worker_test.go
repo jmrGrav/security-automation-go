@@ -180,7 +180,7 @@ func TestOutboxWorkerClaimsRowBeforeReporting(t *testing.T) {
 		IdempotencyKey: "exec-claim",
 		EvidenceID:     "ev-claim",
 		Status:         reporting.ReportStatusPending,
-		ExpiresAt:      base.Add(time.Hour),
+		ExpiresAt:      base.Add(-time.Second),
 		Report:         abmodels.ExecutableReport{ExecutionID: "exec-claim", IP: "8.8.8.8", Categories: "21", Comment: "x", CreatedAt: base},
 	}
 	if err := store.Reserve(context.Background(), reservation); err != nil {

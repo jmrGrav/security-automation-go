@@ -117,6 +117,7 @@ func newDaemonContext(ctx context.Context, logger *slog.Logger, srv *http.Server
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
 	go func() {
+		defer signal.Stop(sigChan)
 		sig := <-sigChan
 		logger.Info("received signal, shutting down", "signal", sig)
 

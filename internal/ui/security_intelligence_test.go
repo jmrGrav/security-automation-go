@@ -216,3 +216,18 @@ func TestSecurityIntelligence_NoSecretRendered(t *testing.T) {
 		}
 	}
 }
+
+func TestSecurityIntelligencePageIncludesCSRFToken(t *testing.T) {
+	srv, _, _ := newTestServer(t, nil)
+	cookie := loginCookie(t, srv, "test-password-123!@#")
+
+	req := httptest.NewRequest(http.MethodGet, "/intelligence", nil)
+	req.AddCookie(cookie)
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+
+	body := rr.Body.String()
+	if !strings.Contains(body, `name="csrf_token"`) {
+		t.Fatalf("security intelligence page should include csrf token field: %s", body)
+	}
+}

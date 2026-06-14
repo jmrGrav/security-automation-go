@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -54,6 +55,12 @@ func (f *fakeEvidenceStore) Search(_ context.Context, opts reporting.EvidenceSea
 		}
 		out = append(out, r)
 	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].Timestamp.Equal(out[j].Timestamp) {
+			return out[i].EvidenceID > out[j].EvidenceID
+		}
+		return out[i].Timestamp.After(out[j].Timestamp)
+	})
 	limit := opts.Limit
 	if limit <= 0 {
 		limit = len(out)
@@ -185,6 +192,93 @@ func TestEvidencePage_IPColumnLinksToForensic(t *testing.T) {
 	body := rr.Body.String()
 	if !strings.Contains(body, `/forensic?ip=1.2.3.4`) {
 		t.Errorf("expected forensic deep-link for IP in evidence table, body: %s", body)
+	}
+}
+
+func TestEvidencePage_ShowsEvidenceLinks(t *testing.T) {
+	store := &fakeEvidenceStore{
+		records: []reporting.DecisionEvidence{
+			{EvidenceID: "ev1", IP: "1.2.3.4", Source: "cloudflare_waf", AbuseType: "scanner", Decision: "local_block", Timestamp: time.Now()},
+		},
+	}
+	srv, _, _ := newTestServer(t, nil)
+	srv.evidence = store
+	cookie := loginCookie(t, srv, "test-password-123!@#")
+
+	req := httptest.NewRequest(http.MethodGet, "/evidence", nil)
+	req.AddCookie(cookie)
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+
+	body := rr.Body.String()
+	if !strings.Contains(body, `/evidence/ev1`) {
+		t.Fatalf("expected evidence detail link in evidence list, body: %s", body)
+	}
+}
+
+type cancelSensitiveCountEvidenceStore struct {
+	total int
+	rows  []reporting.DecisionEvidence
+}
+
+func (s cancelSensitiveCountEvidenceStore) Append(context.Context, reporting.DecisionEvidence) error {
+	return nil
+}
+func (s cancelSensitiveCountEvidenceStore) List(context.Context, int) ([]reporting.DecisionEvidence, error) {
+	return s.rows, nil
+}
+func (s cancelSensitiveCountEvidenceStore) Get(context.Context, string) (reporting.DecisionEvidence, bool, error) {
+	return reporting.DecisionEvidence{}, false, nil
+}
+func (s cancelSensitiveCountEvidenceStore) Search(ctx context.Context, opts reporting.EvidenceSearchOptions) ([]reporting.DecisionEvidence, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if len(s.rows) == 0 {
+		return nil, nil
+	}
+	if opts.Limit > 0 && opts.Limit < len(s.rows) {
+		return s.rows[:opts.Limit], nil
+	}
+	return s.rows, nil
+}
+func (s cancelSensitiveCountEvidenceStore) Count(ctx context.Context, opts reporting.EvidenceSearchOptions) (int, error) {
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+	if opts.AbuseIPDBReported {
+		return s.total, nil
+	}
+	return len(s.rows), nil
+}
+
+func TestEvidencePage_StableContextIgnoresCanceledRequestContext(t *testing.T) {
+	store := cancelSensitiveCountEvidenceStore{
+		total: 17,
+		rows: []reporting.DecisionEvidence{
+			{EvidenceID: "ev1", IP: "1.2.3.4", Source: "cloudflare_waf", AbuseType: "scanner", RiskScore: 10, Confidence: 0.82, Decision: "local_block", Timestamp: time.Now()},
+		},
+	}
+	srv, _, _ := newTestServer(t, nil)
+	srv.evidence = store
+	cookie := loginCookie(t, srv, "test-password-123!@#")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	req := httptest.NewRequestWithContext(ctx, http.MethodGet, "/evidence", nil)
+	req.AddCookie(cookie)
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	body := rr.Body.String()
+	if !strings.Contains(body, ">17<") {
+		t.Fatalf("expected stable count despite canceled request context, got: %s", body)
+	}
+	if !strings.Contains(body, "1.2.3.4") {
+		t.Fatalf("expected evidence row to render, got: %s", body)
 	}
 }
 

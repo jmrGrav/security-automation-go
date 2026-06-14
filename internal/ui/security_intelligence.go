@@ -44,10 +44,14 @@ type SecurityIntelligenceView struct {
 }
 
 func (s *Server) handleIntelligencePage(w http.ResponseWriter, r *http.Request) {
-	renderSecurityIntelligencePage(r.Context(), w, SecurityIntelligenceView{}, s.csrfTokenFromRequest(r))
+	ctx, cancel := stableUIReadContext(r.Context())
+	defer cancel()
+	renderSecurityIntelligencePage(ctx, w, SecurityIntelligenceView{}, s.csrfTokenFromRequest(r))
 }
 
 func (s *Server) handleIntelligenceLookup(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := stableUIReadContext(r.Context())
+	defer cancel()
 	eventID := newUIEventID()
 	if !s.validCSRF(r) {
 		s.audit.Record("security_intelligence_lookup", map[string]string{
@@ -67,14 +71,14 @@ func (s *Server) handleIntelligenceLookup(w http.ResponseWriter, r *http.Request
 			"correlation_id": eventID,
 			"event_id":       eventID,
 		})
-		renderSecurityIntelligencePage(r.Context(), w, SecurityIntelligenceView{
+		renderSecurityIntelligencePage(ctx, w, SecurityIntelligenceView{
 			Error:            "bad request",
 			ProviderNote:     "Provider failures stay neutral. External signal alone cannot hard-ban.",
 			CurrentIP:        "",
-			Kind:             "unknown",
+			Kind:             "not configured",
 			Outcome:          "neutral",
-			Protected:        "unknown",
-			NoHardBan:        "unknown",
+			Protected:        "not configured",
+			NoHardBan:        "not configured",
 			ScoreDelta:       "0",
 			CloudflareStatus: cloudflareStatus(s.cfg.Cloudflare.APIToken, s.cfg.Cloudflare.ZoneID, s.cfg.Cloudflare.MutationsEnabled),
 			CrowdSecStatus:   crowdSecStatus(s.cfg.CrowdSec.DecisionsLog),
@@ -83,7 +87,7 @@ func (s *Server) handleIntelligenceLookup(w http.ResponseWriter, r *http.Request
 	}
 
 	ipStr := strings.TrimSpace(r.PostForm.Get("ip"))
-	view, result := s.securityIntelligenceLookupView(r.Context(), ipStr)
+	view, result := s.securityIntelligenceLookupView(ctx, ipStr)
 	s.audit.Record("security_intelligence_lookup", map[string]string{
 		"source":         "ui",
 		"ip":             ipStr,
@@ -91,16 +95,16 @@ func (s *Server) handleIntelligenceLookup(w http.ResponseWriter, r *http.Request
 		"correlation_id": eventID,
 		"event_id":       eventID,
 	})
-	renderSecurityIntelligencePage(r.Context(), w, view, s.csrfTokenFromRequest(r))
+	renderSecurityIntelligencePage(ctx, w, view, s.csrfTokenFromRequest(r))
 }
 
 func (s *Server) securityIntelligenceLookupView(ctx context.Context, ipStr string) (SecurityIntelligenceView, string) {
 	view := SecurityIntelligenceView{
 		CurrentIP:    ipStr,
-		Kind:         "unknown",
+		Kind:         "not configured",
 		Outcome:      "neutral",
-		Protected:    "unknown",
-		NoHardBan:    "unknown",
+		Protected:    "not configured",
+		NoHardBan:    "not configured",
 		ScoreDelta:   "0",
 		ProviderNote: "Provider failures stay neutral. External signal alone cannot hard-ban.",
 	}
@@ -165,7 +169,13 @@ func SecurityIntelligencePage(view SecurityIntelligenceView, csrfToken string) t
 			return err
 		}
 
-		if _, err := fmt.Fprint(w, `<div class="panel"><h2>Read-only lookup</h2><p class="muted">Enter an IP address to inspect DNS, ASN, protected-network flags, and provider signals. Provider failures stay neutral. External signal alone cannot hard-ban.</p><form action="/intelligence" method="post"><label for="ip">IP address</label><input id="ip" name="ip" type="text" value="`); err != nil {
+		if _, err := fmt.Fprint(w, `<div class="panel"><h2>Read-only lookup</h2><p class="muted">Enter an IP address to inspect DNS, ASN, protected-network flags, and provider signals. Provider failures stay neutral. External signal alone cannot hard-ban.</p><form action="/intelligence" method="post"><input type="hidden" name="csrf_token" value="`); err != nil {
+			return err
+		}
+		if _, err := io.WriteString(w, html.EscapeString(csrfToken)); err != nil {
+			return err
+		}
+		if _, err := fmt.Fprint(w, `"/><label for="ip">IP address</label><input id="ip" name="ip" type="text" value="`); err != nil {
 			return err
 		}
 		if _, err := io.WriteString(w, html.EscapeString(view.CurrentIP)); err != nil {
@@ -279,8 +289,8 @@ func buildSecurityIntelligenceView(s *Server, summary enrichment.EnrichmentSumma
 		Kind:              securityIntelligenceKind(summary.ASN.Kind, summary.ASN.Protected),
 		DNS:               "unavailable",
 		DNSForwardConfirm: "unavailable",
-		ASN:               "unknown",
-		Organisation:      "unknown",
+		ASN:               "not configured",
+		Organisation:      "not configured",
 		Protected:         boolText(summary.ASN.Protected),
 		NoHardBan:         boolText(assessment.NoHardBan),
 		ScoreDelta:        fmt.Sprintf("%+d", assessment.Score),
@@ -327,18 +337,18 @@ func buildSecurityIntelligenceProviders(s *Server, summary enrichment.Enrichment
 	}{
 		{
 			name:       "AbuseIPDB",
-			enabled:    s.cfg.AbuseIPDB.Enabled,
-			configured: providerConfiguredValue(s.cfg.AbuseIPDB.APIKey, s.secretProvider, "ABUSEIPDB_KEY") != "",
+			enabled:    providerRuntimeEnabled(context.Background(), s.setupStore, "abuseipdb", s.cfg.AbuseIPDB.Enabled),
+			configured: credentialConfigured(context.Background(), s.credentialStore, "abuseipdb.api_key"),
 		},
 		{
 			name:       "VirusTotal",
-			enabled:    s.cfg.VirusTotal.Enabled,
-			configured: providerConfiguredValue(s.cfg.VirusTotal.APIKey, s.secretProvider, "VIRUSTOTAL_API_KEY") != "",
+			enabled:    providerRuntimeEnabled(context.Background(), s.setupStore, "virustotal", s.cfg.VirusTotal.Enabled),
+			configured: credentialConfigured(context.Background(), s.credentialStore, "virustotal.api_key"),
 		},
 		{
 			name:       "Spamhaus",
-			enabled:    s.cfg.Spamhaus.Enabled,
-			configured: providerConfiguredValue(s.cfg.Spamhaus.APIKey, s.secretProvider, "SPAMHAUS_API_KEY") != "",
+			enabled:    providerRuntimeEnabled(context.Background(), s.setupStore, "spamhaus", s.cfg.Spamhaus.Enabled),
+			configured: credentialConfigured(context.Background(), s.credentialStore, "spamhaus.api_key"),
 		},
 	}
 
@@ -346,18 +356,26 @@ func buildSecurityIntelligenceProviders(s *Server, summary enrichment.Enrichment
 	for _, provider := range providers {
 		state := providerStateText(provider.enabled, provider.configured)
 		signal := "neutral / unavailable"
+		statusCode := "lookup skipped"
 		if !provider.enabled {
-			signal = "disabled"
+			signal = "not called"
+			statusCode = "disabled by operator"
 		} else if !provider.configured {
 			signal = "missing configuration"
+			statusCode = "missing configuration"
 		} else if verdict, ok := lookup(provider.name); ok {
 			signal = providerSignalText(verdict)
+			if verdict.Score != 0 {
+				statusCode = fmt.Sprintf("score %+d", verdict.Score)
+			} else {
+				statusCode = "neutral"
+			}
 		}
 		rows = append(rows, SecurityIntelligenceProviderView{
 			Name:       provider.name,
 			State:      state,
 			Signal:     signal,
-			StatusCode: "not exposed",
+			StatusCode: statusCode,
 		})
 	}
 	return rows
@@ -377,7 +395,7 @@ func buildSecurityIntelligenceEvidence(view SecurityIntelligenceView, summary en
 		"Why: " + valueOrUnknown(view.HardBanReason),
 	}
 	for _, provider := range view.Providers {
-		lines = append(lines, fmt.Sprintf("%s: %s (%s)", provider.Name, valueOrUnknown(provider.Signal), valueOrUnknown(provider.State)))
+		lines = append(lines, fmt.Sprintf("%s: %s (%s, %s)", provider.Name, valueOrUnknown(provider.Signal), valueOrUnknown(provider.State), valueOrUnknown(provider.StatusCode)))
 	}
 	lines = append(lines, "Cloudflare: "+valueOrUnknown(view.CloudflareStatus))
 	lines = append(lines, "CrowdSec: "+valueOrUnknown(view.CrowdSecStatus))
@@ -396,7 +414,7 @@ func providerRowsAsPairs(providers []SecurityIntelligenceProviderView) []keyValu
 	for _, provider := range providers {
 		rows = append(rows, keyValueRow{
 			Key:   provider.Name,
-			Value: provider.State + " · " + provider.Signal + " · status code: " + valueOrUnknown(provider.StatusCode),
+			Value: provider.State + " · " + provider.Signal + " · " + valueOrUnknown(provider.StatusCode),
 		})
 	}
 	return rows

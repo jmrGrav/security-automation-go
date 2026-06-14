@@ -41,9 +41,21 @@ type ExecutableReport struct {
 	StableIdentityKey string `json:"stable_identity_key"`
 
 	IP         string `json:"ip"`
+	Source     string `json:"source,omitempty"`
+	AbuseType  string `json:"abuse_type,omitempty"`
 	Categories string `json:"categories"`
 	Comment    string `json:"comment"`
+	Action     string `json:"action,omitempty"`
 
 	OriginatingOpID string    `json:"originating_op_id"`
 	CreatedAt       time.Time `json:"created_at"`
+
+	Hits            int      `json:"hits,omitempty"`
+	WindowSec       int      `json:"window_seconds,omitempty"`
+	URIs            []string `json:"uris,omitempty"`
+	RuleIDs         []string `json:"rule_ids,omitempty"`
+	Sources         []string `json:"sources,omitempty"`
+	ConfidenceSum   float64  `json:"confidence_sum,omitempty"`
+	ConfidenceCount int      `json:"confidence_count,omitempty"`
+	ConfidenceMax   float64  `json:"confidence_max,omitempty"`
 }

@@ -28,6 +28,8 @@ type EvidenceView struct {
 }
 
 func (s *Server) handleEvidencePage(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := stableUIReadContext(r.Context())
+	defer cancel()
 	filter := strings.TrimSpace(r.URL.Query().Get("filter"))
 	page := parsePositiveInt(r.URL.Query().Get("page"), 1)
 	pageSize := clampInt(parsePositiveInt(r.URL.Query().Get("limit"), evidencePageSize), 10, 200)
@@ -41,7 +43,7 @@ func (s *Server) handleEvidencePage(w http.ResponseWriter, r *http.Request) {
 
 	if s.evidence == nil {
 		view.EmptyText = "Evidence store not available — daemon not yet started."
-		_ = EvidencePage(view).Render(r.Context(), w)
+		_ = EvidencePage(view).Render(ctx, w)
 		return
 	}
 
@@ -53,10 +55,10 @@ func (s *Server) handleEvidencePage(w http.ResponseWriter, r *http.Request) {
 		baseOpts.Suppressed = true
 	}
 
-	total, err := s.evidence.Count(r.Context(), baseOpts)
+	total, err := s.evidence.Count(ctx, baseOpts)
 	if err != nil {
 		view.EmptyText = fmt.Sprintf("Error loading evidence: %v", err)
-		_ = EvidencePage(view).Render(r.Context(), w)
+		_ = EvidencePage(view).Render(ctx, w)
 		return
 	}
 
@@ -64,17 +66,17 @@ func (s *Server) handleEvidencePage(w http.ResponseWriter, r *http.Request) {
 	pageOpts := baseOpts
 	pageOpts.Limit = pageSize
 	pageOpts.Offset = offset
-	entries, err := s.evidence.Search(r.Context(), pageOpts)
+	entries, err := s.evidence.Search(ctx, pageOpts)
 	if err != nil {
 		view.EmptyText = fmt.Sprintf("Error loading evidence: %v", err)
-		_ = EvidencePage(view).Render(r.Context(), w)
+		_ = EvidencePage(view).Render(ctx, w)
 		return
 	}
 
 	hasPrev := offset > 0
 	hasNext := offset+pageSize < total
 
-	reportedCount, _ := s.evidence.Count(r.Context(), reporting.EvidenceSearchOptions{AbuseIPDBReported: true})
+	reportedCount, _ := s.evidence.Count(ctx, reporting.EvidenceSearchOptions{AbuseIPDBReported: true})
 
 	badges := []StatusItem{
 		{Label: "Total events", Level: "healthy", Detail: strconv.Itoa(total)},
@@ -94,7 +96,7 @@ func (s *Server) handleEvidencePage(w http.ResponseWriter, r *http.Request) {
 		view.EmptyText = "No matching events."
 	}
 
-	_ = EvidencePage(view).Render(r.Context(), w)
+	_ = EvidencePage(view).Render(ctx, w)
 }
 
 func EvidencePage(view EvidenceView) templ.Component {
@@ -158,35 +160,43 @@ func EvidencePage(view EvidenceView) templ.Component {
 				return writeEmptyState(w, view.EmptyText)
 			}
 
-			if _, err := fmt.Fprint(w, `<table><thead><tr><th>timestamp</th><th>source</th><th>IP</th><th>type</th><th>score</th><th>confidence</th><th>decision</th><th>status</th></tr></thead><tbody>`); err != nil {
+			if _, err := fmt.Fprint(w, `<div class="table-wrap"><table><thead><tr><th>timestamp</th><th>evidence id</th><th>source</th><th>IP</th><th>type</th><th>score</th><th>confidence</th><th>decision</th><th>suppression</th><th>status</th></tr></thead><tbody>`); err != nil {
 				return err
 			}
 			for _, ev := range view.Entries {
 				statusBadge := `<span class="badge">ok</span>`
+				suppression := `<span class="muted">none</span>`
 				switch {
 				case ev.AbuseIPDBReported:
-					statusBadge = `<span class="badge bad">AbuseIPDB</span>`
+					statusBadge = `<span class="badge bad" title="reported to AbuseIPDB">AbuseIPDB</span>`
 				case ev.Suppressed:
-					statusBadge = `<span class="badge warning">suppressed</span>`
+					statusBadge = `<span class="badge warning" title="suppressed">suppressed</span>`
+					if ev.SuppressionReason != "" {
+						reason := html.EscapeString(ev.SuppressionReason)
+						suppression = `<span class="badge warning cell-clip" title="` + reason + `">` + reason + `</span>`
+					}
 				case ev.Decision == "report_pending":
-					statusBadge = `<span class="badge live">pending</span>`
+					statusBadge = `<span class="badge live" title="report pending">pending</span>`
 				}
-				ipCell := fmt.Sprintf(`<a href="/forensic?ip=%s" title="Explain this IP">%s</a>`,
+				evidenceLink := evidenceDetailLinkHTML(ev.EvidenceID)
+				ipCell := fmt.Sprintf(`<a href="/forensic?ip=%s" title="Explain this IP" data-live-panel-link="true" data-live-panel-title="Forensic Lookup">%s</a>`,
 					html.EscapeString(ev.IP), html.EscapeString(ev.IP))
-				if _, err := fmt.Fprintf(w, `<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%d</td><td>%.2f</td><td>%s</td><td>%s</td></tr>`,
+				if _, err := fmt.Fprintf(w, `<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%d</td><td>%.2f</td><td>%s</td><td>%s</td><td>%s</td></tr>`,
 					html.EscapeString(ev.Timestamp.Format("2006-01-02 15:04:05")),
+					evidenceLink,
 					html.EscapeString(ev.Source),
 					ipCell,
 					html.EscapeString(ev.AbuseType),
 					ev.RiskScore,
 					ev.Confidence,
 					html.EscapeString(ev.Decision),
+					suppression,
 					statusBadge,
 				); err != nil {
 					return err
 				}
 			}
-			_, err := fmt.Fprint(w, `</tbody></table>`)
+			_, err := fmt.Fprint(w, `</tbody></table></div>`)
 			return err
 		}),
 	})

@@ -9,6 +9,8 @@ const AUTH_REQUIRED_PAGES = [
   '/forensic',
   '/about',
   '/health',
+  '/pipeline',
+  '/evidence',
   '/intelligence',
   '/timeline',
   '/replay',
@@ -42,6 +44,15 @@ test.describe('Authenticated pages render without error', () => {
     const hasTable = body.includes('<table') || body.includes('table');
     expect(hasTable, 'Trusted Networks must render a table layout').toBe(true);
     assertNoSecretLeakage(body, '/trusted-networks');
+  });
+
+  test('About/System shows release, runtime, features, and providers sections', async ({ page }) => {
+    await page.goto('/about');
+    const body = await page.content();
+    for (const want of ['Release', 'Runtime', 'Features', 'Providers']) {
+      expect(body, `about/system must include ${want}`).toContain(want);
+    }
+    assertNoSecretLeakage(body, '/about');
   });
 
   test('unauthenticated request to protected page redirects to login', async ({ browser }) => {

@@ -32,10 +32,12 @@ func TestReportingStoresConfigureWiresPersistence(t *testing.T) {
 	if stores == nil {
 		t.Fatal("expected reporting stores")
 	}
+	base := time.Date(2026, 6, 1, 17, 0, 0, 0, time.UTC)
+	stores.Outbox.now = func() time.Time { return base }
 
 	service := reporting.New(noOpReporter{}, &sinks.RecorderSink{}, trust.DefaultRegistry(), time.Minute)
 	stores.Configure(service)
-	service.SetClock(func() time.Time { return time.Date(2026, 6, 1, 17, 0, 0, 0, time.UTC) })
+	service.SetClock(func() time.Time { return base })
 
 	event, err := cloudflareevent.Normalize(cloudflareevent.RawEvent{
 		IP:        "8.8.8.8",
@@ -57,16 +59,16 @@ func TestReportingStoresConfigureWiresPersistence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("process: %v", err)
 	}
-	if !result.Reported {
-		t.Fatalf("expected report through configured stores, got %+v", result)
+	if !result.Suppressed || result.SuppressionReason != "report_pending" {
+		t.Fatalf("expected pending reservation through configured stores, got %+v", result)
 	}
 
 	var evidenceCount int
 	if err := db.Conn().QueryRowContext(context.Background(), `SELECT count(*) FROM abuseipdb_reporting_evidence`).Scan(&evidenceCount); err != nil {
 		t.Fatalf("count evidence: %v", err)
 	}
-	if evidenceCount < 2 {
-		t.Fatalf("expected pending and success evidence rows, got %d", evidenceCount)
+	if evidenceCount != 1 {
+		t.Fatalf("expected one pending evidence row before outbox processing, got %d", evidenceCount)
 	}
 
 	var outboxStatus string
@@ -78,8 +80,33 @@ func TestReportingStoresConfigureWiresPersistence(t *testing.T) {
 	`).Scan(&outboxStatus); err != nil {
 		t.Fatalf("query outbox: %v", err)
 	}
+	if outboxStatus != reporting.ReportStatusPending {
+		t.Fatalf("expected pending outbox status before processing, got %s", outboxStatus)
+	}
+
+	worker := reporting.NewOutboxWorker(stores.Outbox, noOpReporter{}, stores.Dedup, stores.Evidence, &sinks.RecorderSink{}, reporting.OutboxWorkerConfig{
+		Clock:      func() time.Time { return base.Add(31 * time.Second) },
+		Limit:      1,
+		ClaimLease: 5 * time.Second,
+	})
+	processed, err := worker.ProcessOnce(context.Background())
+	if err != nil {
+		t.Fatalf("outbox process: %v", err)
+	}
+	if processed != 1 {
+		t.Fatalf("expected one pending item to be processed, got %d", processed)
+	}
+
+	if err := db.Conn().QueryRowContext(context.Background(), `
+		SELECT status
+		FROM abuseipdb_report_outbox
+		ORDER BY created_at DESC
+		LIMIT 1
+	`).Scan(&outboxStatus); err != nil {
+		t.Fatalf("query outbox after worker: %v", err)
+	}
 	if outboxStatus != reporting.ReportStatusReported {
-		t.Fatalf("expected reported outbox status, got %s", outboxStatus)
+		t.Fatalf("expected reported outbox status after worker processing, got %s", outboxStatus)
 	}
 }
 

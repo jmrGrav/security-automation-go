@@ -246,10 +246,6 @@ func TestServer_SidebarIncludesFuturePages(t *testing.T) {
 		"Audit Trail",
 		"Trusted Networks",
 		"Cloudflare Diff",
-		"Replay",
-		"Deban",
-		"Recovery",
-		"Drift",
 		"About/System",
 	} {
 		if !strings.Contains(body, want) {
@@ -271,12 +267,14 @@ func TestServer_ImplementedWorkflowRoutesAreNotMarkedSoon(t *testing.T) {
 	for _, label := range []string{
 		"Timeline</a><span class=\"soon\">soon</span>",
 		"Cloudflare Diff</a><span class=\"soon\">soon</span>",
-		"Replay</a><span class=\"soon\">soon</span>",
-		"Recovery</a><span class=\"soon\">soon</span>",
-		"Drift</a><span class=\"soon\">soon</span>",
 	} {
 		if strings.Contains(body, label) {
 			t.Fatalf("implemented workflow route still marked soon: %q", label)
+		}
+	}
+	for _, hidden := range []string{`href="/replay"`, `href="/deban"`} {
+		if strings.Contains(body, hidden) {
+			t.Fatalf("soon route link %q should be hidden from the default sidebar: %s", hidden, body)
 		}
 	}
 }

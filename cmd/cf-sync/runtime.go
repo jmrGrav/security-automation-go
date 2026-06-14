@@ -13,6 +13,7 @@ import (
 
 	abtransport "github.com/jm/security-automation-go/internal/abuseipdb/transport"
 	abadapter "github.com/jm/security-automation-go/internal/adapters/abuseipdb"
+	"github.com/jm/security-automation-go/internal/buildmeta"
 	"github.com/jm/security-automation-go/internal/cloudflare/mutate"
 	"github.com/jm/security-automation-go/internal/cloudflare/resources"
 	"github.com/jm/security-automation-go/internal/cloudflare/transport"
@@ -62,6 +63,7 @@ func runCFSync(configPath, mode string, dryRun bool, format string, metricsAddr 
 	if err := config.LoadEnvFile(config.DefaultEnvFile); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: could not read %s: %v\n", config.DefaultEnvFile, err)
 	}
+	build := buildmeta.Current()
 	cfg, err := config.Load(configPath)
 	if err != nil {
 		if configPath != "" {
@@ -78,7 +80,8 @@ func runCFSync(configPath, mode string, dryRun bool, format string, metricsAddr 
 		return
 	}
 
-	ctx := context.Background()
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 	otelShutdown, err := tracing.InitTracer(ctx, tracing.Config{
 		Enabled:      cfg.Global.Tracing.Enabled,
 		ServiceName:  cfg.Global.ServiceName,
@@ -317,15 +320,14 @@ func runCFSync(configPath, mode string, dryRun bool, format string, metricsAddr 
 		preBanChecker = abadapter.NewChecker(preBanTransport, abadapter.Config{TTL: cfg.AbuseIPDB.CacheTTL, Timeout: cfg.AbuseIPDB.RequestTimeout})
 	}
 	securityTelemetry := newSecurityTelemetry(cfg, betterClient)
-	quotaRefreshers := newQuotaRefreshers(cfg, hc, cf, preBanTransport, credentialStore)
+	quotaRefreshers := newQuotaRefreshers(cfg, hc, cf, preBanTransport, credentialStore, setupStore)
+	abuseExecutor := newRuntimeAbuseExecutor(hc, credentialStore, setupStore, cfg != nil && cfg.AbuseIPDB.Enabled, abuse)
 	var outboxWorker *reporting.OutboxWorker
-	if abuse != nil {
-		outboxWorker = reporting.NewOutboxWorker(reportingStores.Outbox, abuse.Executor, reportingStores.Dedup, reportingStores.Evidence, securityTelemetry, reporting.OutboxWorkerConfig{
-			Limit:      25,
-			Interval:   cfg.Interval,
-			LeaseGuard: outboxLeaseGuard,
-		})
-	}
+	outboxWorker = reporting.NewOutboxWorker(reportingStores.Outbox, abuseExecutor, reportingStores.Dedup, reportingStores.Evidence, securityTelemetry, reporting.OutboxWorkerConfig{
+		Limit:      25,
+		Interval:   cfg.Interval,
+		LeaseGuard: outboxLeaseGuard,
+	})
 	configureSecurityGuard(govExec, preBanChecker, trustRegistry, cfg)
 	govExec.SetTelemetrySink(securityTelemetry)
 	govExec.SetApprovalEvidenceStore(sqlite.NewApprovalEvidenceStore(sqliteDB))
@@ -337,7 +339,7 @@ func runCFSync(configPath, mode string, dryRun bool, format string, metricsAddr 
 	rollbackExecutor.SetFencingValidator(execution.NewLeaseStoreFencingValidator(leaseRepo).RequireFencing(true))
 	rollbackExecutor.SetCheckpointStore(sqlite.NewRollbackCheckpointStore(sqliteDB))
 
-	collector := status.NewCollector(version, time.Now(), healthMgr, cb, stateStore, filepath.Join(scopeDir, "daemon.lock"), filepath.Join(scopeDir, "quarantine"))
+	collector := status.NewCollector(build.Version, time.Now(), healthMgr, cb, stateStore, filepath.Join(scopeDir, "daemon.lock"), filepath.Join(scopeDir, "quarantine"))
 	orch := pipeline.NewOrchestrator(cf, abuse, planner, trans, val, admController, leaseMgr, sm, driftEng, gov, convVal, invEng, rollbackPlanner, rollbackExecutor, jsonlJournal, stateStore, cb, eventBus, healthMgr, filepath.Join(scopeDir, "KILL_SWITCH"))
 	s := stateful_scheduler.New(stateStore, orch, sm, cooldownMgr, logger, cfg.Interval)
 
@@ -358,20 +360,11 @@ func runCFSync(configPath, mode string, dryRun bool, format string, metricsAddr 
 	}
 
 	if mode == "daemon" || mode == "ui" {
-		bundle := newWAFBundle(cf, abuse, securityTelemetry, trustRegistry, cfg, reportingStores)
+		bundle := newWAFBundle(cf, abuse, hc, credentialStore, setupStore, securityTelemetry, trustRegistry, cfg, reportingStores)
 		runDaemonWithLocker(ctx, logger, orch, collector, jsonlJournal, qStore, stateStore, sm, driftMem, cooldownMgr, evidenceRecorder, bundleReg, activationMgr, fedRes, admController, reportingStores.Evidence, ownershipRepo, s.GetPool(), outboxWorker, scopeDir, cfg.Interval, metricsAddr, cfg.Cloudflare.ZoneID, bundle.cfWAFService(), cursorStore, quotaRefreshers, bundle, false)
 		// In ui mode the HTTP server runs in a goroutine above. If runDaemonWithLocker
 		// returns early (e.g. API token not configured) while the context is still live,
 		// keep the process alive so the UI goroutine can continue serving.
-		if mode == "ui" && ctx.Err() == nil {
-			sigChan := make(chan os.Signal, 1)
-			signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-			defer signal.Stop(sigChan)
-			select {
-			case <-sigChan:
-			case <-ctx.Done():
-			}
-		}
 	} else if mode == "evidence" {
 		runEvidenceCLI(ctx, reportingStores.Evidence, args, format)
 	} else if mode == "ownership" {

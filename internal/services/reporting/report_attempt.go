@@ -16,15 +16,7 @@ type reportAttempt struct {
 }
 
 func (s *Service) prepareReportAttempt(req Request, cls classifier.Classification, comment string) reportAttempt {
-	report := abmodels.ExecutableReport{
-		ExecutionID:       executionID(req, cls),
-		StableIdentityKey: fingerprint(req, cls),
-		IP:                req.Event.IP,
-		Categories:        categoryIDs(cls.Categories),
-		Comment:           comment,
-		OriginatingOpID:   req.Event.RuleID,
-		CreatedAt:         req.Event.Timestamp,
-	}
+	report := buildAggregatedReport(req, cls, s.now())
 	return reportAttempt{
 		report:            report,
 		pendingEvidenceID: decisionEvidenceID(req, cls, "report_pending", s.now()),
@@ -39,7 +31,7 @@ func (s *Service) reserveAndRecordPending(ctx context.Context, req Request, cls 
 			_ = s.publish(ctx, *telemetryEvent)
 			return Result{
 				Classification:    cls,
-				Comment:           comment,
+				Comment:           attempt.report.Comment,
 				Suppressed:        true,
 				SuppressionReason: "report_pending",
 				TelemetryEvent:    *telemetryEvent,
@@ -52,28 +44,54 @@ func (s *Service) reserveAndRecordPending(ctx context.Context, req Request, cls 
 			IdempotencyKey: attempt.report.ExecutionID,
 			EvidenceID:     attempt.pendingEvidenceID,
 			Status:         ReportStatusPending,
-			ExpiresAt:      s.now().Add(s.reportWindow),
+			ExpiresAt:      s.now().Add(abuseAggregationWindow),
 			Report:         attempt.report,
 		}); err != nil {
 			metrics.AbuseIPDBReportDedupStoreErrorsTotal.Inc()
 			telemetryEvent.SuppressionReason = "abuseipdb_report_reservation_failed"
 			telemetryEvent.Metadata["reservation_error"] = err.Error()
-			evidenceID := s.recordEvidenceWithID(ctx, attempt.pendingEvidenceID, req, cls, comment, *telemetryEvent, false, true, "abuseipdb_report_reservation_failed")
+			evidenceID := s.recordEvidenceWithID(ctx, attempt.pendingEvidenceID, req, cls, attempt.report.Comment, *telemetryEvent, false, true, "abuseipdb_report_reservation_failed")
 			if evidenceID != "" {
 				telemetryEvent.Metadata["evidence_id"] = evidenceID
 			}
 			_ = s.publish(ctx, *telemetryEvent)
-			return Result{Classification: cls, Comment: comment, Suppressed: true, SuppressionReason: "abuseipdb_report_reservation_failed", TelemetryEvent: *telemetryEvent}, true
+			return Result{Classification: cls, Comment: attempt.report.Comment, Suppressed: true, SuppressionReason: "abuseipdb_report_reservation_failed", TelemetryEvent: *telemetryEvent}, true
 		}
+		evidenceID := s.recordEvidenceWithID(ctx, attempt.pendingEvidenceID, req, cls, attempt.report.Comment, *telemetryEvent, false, true, "report_pending")
+		if evidenceID != "" {
+			telemetryEvent.Metadata["evidence_id"] = evidenceID
+		}
+		if evidenceID == "" && s.evidenceStore != nil {
+			_ = s.reservationStore.MarkStatus(ctx, attempt.pendingEvidenceID, ReportStatusFailed)
+			telemetryEvent.SuppressionReason = "abuseipdb_report_evidence_failed"
+			_ = s.publish(ctx, *telemetryEvent)
+			return Result{
+				Classification:    cls,
+				Comment:           attempt.report.Comment,
+				Suppressed:        true,
+				SuppressionReason: "abuseipdb_report_evidence_failed",
+				TelemetryEvent:    *telemetryEvent,
+				Report:            &attempt.report,
+			}, true
+		}
+		_ = s.publish(ctx, *telemetryEvent)
+		return Result{
+			Classification:    cls,
+			Comment:           attempt.report.Comment,
+			Suppressed:        true,
+			SuppressionReason: "report_pending",
+			TelemetryEvent:    *telemetryEvent,
+			Report:            &attempt.report,
+		}, true
 	}
-	evidenceID := s.recordEvidenceWithID(ctx, attempt.pendingEvidenceID, req, cls, comment, *telemetryEvent, false, false, "report_pending")
+	evidenceID := s.recordEvidenceWithID(ctx, attempt.pendingEvidenceID, req, cls, attempt.report.Comment, *telemetryEvent, false, false, "report_pending")
 	if evidenceID == "" && s.evidenceStore != nil {
 		if s.reservationStore != nil {
 			_ = s.reservationStore.MarkStatus(ctx, attempt.pendingEvidenceID, ReportStatusFailed)
 		}
 		telemetryEvent.SuppressionReason = "abuseipdb_report_evidence_failed"
 		_ = s.publish(ctx, *telemetryEvent)
-		return Result{Classification: cls, Comment: comment, Suppressed: true, SuppressionReason: "abuseipdb_report_evidence_failed", TelemetryEvent: *telemetryEvent}, true
+		return Result{Classification: cls, Comment: attempt.report.Comment, Suppressed: true, SuppressionReason: "abuseipdb_report_evidence_failed", TelemetryEvent: *telemetryEvent}, true
 	}
 	return Result{}, false
 }
@@ -94,7 +112,7 @@ func (s *Service) executeUpstreamReport(ctx context.Context, req Request, cls cl
 		_ = s.publish(ctx, *telemetryEvent)
 		return Result{
 			Classification:    cls,
-			Comment:           comment,
+			Comment:           attempt.report.Comment,
 			Suppressed:        true,
 			SuppressionReason: "abuseipdb_report_failed",
 			TelemetryEvent:    *telemetryEvent,

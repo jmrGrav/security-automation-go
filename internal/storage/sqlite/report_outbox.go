@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	abmodels "github.com/jm/security-automation-go/internal/abuseipdb/models"
 	"github.com/jm/security-automation-go/internal/apperr"
 	"github.com/jm/security-automation-go/internal/observability/metrics"
 	"github.com/jm/security-automation-go/internal/services/reporting"
@@ -39,7 +40,11 @@ func (s *ReportReservationStore) Reserve(ctx context.Context, reservation report
 		return err
 	}
 	if reservation.ExpiresAt.IsZero() {
-		reservation.ExpiresAt = time.Now().UTC().Add(24 * time.Hour)
+		if s.now != nil {
+			reservation.ExpiresAt = s.now().UTC().Add(24 * time.Hour)
+		} else {
+			reservation.ExpiresAt = time.Now().UTC().Add(24 * time.Hour)
+		}
 	}
 	if reservation.Status == "" {
 		reservation.Status = reporting.ReportStatusPending
@@ -49,14 +54,18 @@ func (s *ReportReservationStore) Reserve(ctx context.Context, reservation report
 		return apperr.Wrap(op, err)
 	}
 	now := time.Now().UTC()
+	if s.now != nil {
+		now = s.now().UTC()
+	}
 	var existingEvidenceID string
 	var existingKey string
 	var existingExpiresAt time.Time
+	var existingReportJSON string
 	err = s.db.Conn().QueryRowContext(ctx, `
-		SELECT evidence_id, idempotency_key, expires_at
+		SELECT evidence_id, idempotency_key, expires_at, report_json
 		FROM abuseipdb_report_outbox
 		WHERE ip = ? AND status = ?
-	`, reservation.IP, reporting.ReportStatusPending).Scan(&existingEvidenceID, &existingKey, &existingExpiresAt)
+	`, reservation.IP, reporting.ReportStatusPending).Scan(&existingEvidenceID, &existingKey, &existingExpiresAt, &existingReportJSON)
 	if err != nil && err != sql.ErrNoRows {
 		return apperr.Wrap(op, err)
 	}
@@ -65,7 +74,27 @@ func (s *ReportReservationStore) Reserve(ctx context.Context, reservation report
 			return nil
 		}
 		if now.Before(existingExpiresAt.UTC()) {
-			return apperr.Newf(op, "pending AbuseIPDB report reservation exists for ip %s", reservation.IP)
+			var existingReport abmodels.ExecutableReport
+			if err := json.Unmarshal([]byte(existingReportJSON), &existingReport); err != nil {
+				return apperr.Wrap(op, err)
+			}
+			merged := reporting.MergeExecutableReports(existingReport, reservation.Report)
+			mergedJSON, err := json.Marshal(merged)
+			if err != nil {
+				return apperr.Wrap(op, err)
+			}
+			nextAttempt := reservation.ExpiresAt.UTC()
+			if nextAttempt.Before(existingExpiresAt.UTC()) {
+				nextAttempt = existingExpiresAt.UTC()
+			}
+			if _, err := s.db.Conn().ExecContext(ctx, `
+				UPDATE abuseipdb_report_outbox
+				SET expires_at = ?, next_attempt_at = ?, report_json = ?, updated_at = CURRENT_TIMESTAMP
+				WHERE evidence_id = ?
+			`, nextAttempt, nextAttempt, string(mergedJSON), existingEvidenceID); err != nil {
+				return apperr.Wrap(op, err)
+			}
+			return nil
 		}
 		if _, err := s.db.Conn().ExecContext(ctx, `
 			UPDATE abuseipdb_report_outbox
@@ -77,9 +106,9 @@ func (s *ReportReservationStore) Reserve(ctx context.Context, reservation report
 	}
 	_, err = s.db.Conn().ExecContext(ctx, `
 		INSERT INTO abuseipdb_report_outbox (
-			evidence_id, ip, source, idempotency_key, status, expires_at, report_json, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-	`, reservation.EvidenceID, reservation.IP, reservation.Source, reservation.IdempotencyKey, reservation.Status, reservation.ExpiresAt.UTC(), string(reportJSON))
+			evidence_id, ip, source, idempotency_key, status, expires_at, next_attempt_at, report_json, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+	`, reservation.EvidenceID, reservation.IP, reservation.Source, reservation.IdempotencyKey, reservation.Status, reservation.ExpiresAt.UTC(), reservation.ExpiresAt.UTC(), string(reportJSON))
 	if err == nil {
 		s.noteWrite()
 		if cleanupErr := s.cleanup(ctx); cleanupErr != nil {

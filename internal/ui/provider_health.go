@@ -44,9 +44,21 @@ type providerHealthCenterEntry struct {
 func (s *Server) providerHealthCenterView() []providerHealthCenterEntry {
 	cloudflareConfigured := s.cfSentinelToken() != "" && s.cfZoneIDFromSetup(context.Background()) != ""
 	crowdSecConfigured := strings.TrimSpace(s.cfg.CrowdSec.APIKey) != "" || strings.TrimSpace(s.cfg.CrowdSec.DecisionsLog) != ""
-	abuseConfigured := strings.TrimSpace(providerConfiguredValue(s.cfg.AbuseIPDB.APIKey, s.secretProvider, "ABUSEIPDB_KEY")) != ""
-	spamhausConfigured := strings.TrimSpace(providerConfiguredValue(s.cfg.Spamhaus.APIKey, s.secretProvider, "SPAMHAUS_API_KEY")) != ""
-	virusTotalConfigured := strings.TrimSpace(providerConfiguredValue(s.cfg.VirusTotal.APIKey, s.secretProvider, "VIRUSTOTAL_API_KEY")) != ""
+	abuseConfigured := credentialConfigured(context.Background(), s.credentialStore, "abuseipdb.api_key")
+	spamhausConfigured := credentialConfigured(context.Background(), s.credentialStore, "spamhaus.api_key")
+	virusTotalConfigured := credentialConfigured(context.Background(), s.credentialStore, "virustotal.api_key")
+	abuseRuntime, abuseLoaded, _ := loadProviderRuntimeSnapshot(context.Background(), s.setupStore, "abuseipdb")
+	spamhausRuntime, spamLoaded, _ := loadProviderRuntimeSnapshot(context.Background(), s.setupStore, "spamhaus")
+	virusTotalRuntime, vtLoaded, _ := loadProviderRuntimeSnapshot(context.Background(), s.setupStore, "virustotal")
+	if !abuseLoaded {
+		abuseRuntime.Enabled = s.cfg.AbuseIPDB.Enabled
+	}
+	if !spamLoaded {
+		spamhausRuntime.Enabled = s.cfg.Spamhaus.Enabled
+	}
+	if !vtLoaded {
+		virusTotalRuntime.Enabled = s.cfg.VirusTotal.Enabled
+	}
 	dnsConfigured := s.cfg.Enrichment.Enabled && s.cfg.Enrichment.DNSEnabled
 	asnConfigured := s.cfg.Enrichment.Enabled && s.cfg.Enrichment.ASNEnabled
 	qr := quota.DefaultRegistry()
@@ -108,7 +120,7 @@ func (s *Server) providerHealthCenterView() []providerHealthCenterEntry {
 			Description:     "read-only reputation lookup",
 			Status:          quotaStateValue(qr, "abuseipdb"),
 			Mode:            "lookup",
-			EnabledState:    enabledText(s.cfg.AbuseIPDB.Enabled),
+			EnabledState:    enabledText(abuseRuntime.Enabled),
 			ConfiguredState: configuredText(abuseConfigured),
 			QuotaPlan:       quotaPlanValue(qr, "abuseipdb"),
 			QuotaSource:     quotaSourceValue(qr, "abuseipdb"),
@@ -133,7 +145,7 @@ func (s *Server) providerHealthCenterView() []providerHealthCenterEntry {
 			Description:     "read-only reputation lookup",
 			Status:          quotaStateValue(qr, "spamhaus"),
 			Mode:            "lookup",
-			EnabledState:    enabledText(s.cfg.Spamhaus.Enabled),
+			EnabledState:    enabledText(spamhausRuntime.Enabled),
 			ConfiguredState: configuredText(spamhausConfigured),
 			QuotaPlan:       quotaPlanValue(qr, "spamhaus"),
 			QuotaSource:     quotaSourceValue(qr, "spamhaus"),
@@ -158,7 +170,7 @@ func (s *Server) providerHealthCenterView() []providerHealthCenterEntry {
 			Description:     "read-only reputation lookup",
 			Status:          quotaStateValue(qr, "virustotal"),
 			Mode:            "manual-forensics",
-			EnabledState:    enabledText(s.cfg.VirusTotal.Enabled),
+			EnabledState:    enabledText(virusTotalRuntime.Enabled),
 			ConfiguredState: configuredText(virusTotalConfigured),
 			QuotaPlan:       quotaPlanValue(qr, "virustotal"),
 			QuotaSource:     quotaSourceValue(qr, "virustotal"),
@@ -320,7 +332,8 @@ func renderProviderHealthCard(w io.Writer, view providerHealthCenterEntry, csrfT
 }
 
 func renderProviderHealthRow(w io.Writer, label, value string) error {
-	_, err := fmt.Fprintf(w, `<div class="row"><span>%s</span><span>%s</span></div>`, html.EscapeString(label), html.EscapeString(valueOrUnknown(value)))
+	value = valueOrUnknown(value)
+	_, err := fmt.Fprintf(w, `<div class="row"><span>%s</span><span class="cell-clip" title="%s">%s</span></div>`, html.EscapeString(label), html.EscapeString(value), html.EscapeString(value))
 	return err
 }
 
@@ -337,6 +350,10 @@ func stateBadgeClass(state string) string {
 	switch state {
 	case "enabled", "configured", "ok", "healthy", "read-only", "lookup", "local", "manual-forensics":
 		return "healthy"
+	case "rate_limited", "quota_exceeded", "http_429":
+		return "warning"
+	case "auth_failed", "invalid_api_key", "timeout", "dns_failure", "tls_failure", "disabled_by_operator", "unsupported_model", "test_failed":
+		return "error"
 	case "disabled":
 		return "disabled"
 	case "missing":
@@ -344,6 +361,9 @@ func stateBadgeClass(state string) string {
 	case "dry-run", "dryrun":
 		return "dryrun"
 	default:
+		if strings.HasPrefix(state, "http_") {
+			return "error"
+		}
 		return "badge"
 	}
 }

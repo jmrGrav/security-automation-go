@@ -216,11 +216,14 @@ func (s *Server) routes() {
 	s.mux.Handle("POST /admin/providers/{name}/key", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleProviderReplaceKey)))))
 	s.mux.Handle("POST /admin/providers/import-legacy", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleLegacyCredentialImport)))))
 	s.mux.Handle("POST /admin/providers/{name}/test", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleProviderTest)))))
+	s.mux.Handle("POST /admin/providers/test-all", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleProvidersTestAll)))))
 	s.mux.Handle("POST /admin/providers/{name}/enable", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleProviderEnable)))))
 	s.mux.Handle("POST /admin/providers/{name}/disable", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleProviderDisable)))))
+	s.mux.Handle("POST /admin/providers/{name}/reset-diagnostics", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleProviderResetDiagnostics)))))
 	s.mux.Handle("GET /forensic", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleForensicPage)))))
 	s.mux.Handle("POST /forensic", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleForensicLookup)))))
 	s.mux.Handle("GET /evidence", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleEvidencePage)))))
+	s.mux.Handle("GET /evidence/{id}", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleEvidenceDetailPage)))))
 	s.mux.Handle("GET /pipeline", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handlePipelineHealthPage)))))
 	s.mux.Handle("GET /sync", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleCFSyncPage)))))
 	s.mux.Handle("GET /about", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleAboutPage)))))
@@ -241,6 +244,8 @@ func (s *Server) routes() {
 	s.mux.Handle("POST /actions/cloudflare/ban", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleCloudflareBanPreview)))))
 	s.mux.Handle("POST /ui/ai/explain", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleAIExplain)))))
 	s.mux.Handle("GET /static/ai-explain.js", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleAIExplainScript)))))
+	s.mux.Handle("GET /static/operator-live.js", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleOperatorLiveScript)))))
+	s.mux.Handle("GET /static/providers-live.js", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleProvidersLiveScript)))))
 	s.mux.Handle("GET /health", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleHealthPage)))))
 	s.mux.Handle("GET /health/json", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleHealthJSON)))))
 	s.mux.Handle("POST /health/diagnostic", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleRunDiagnostic)))))
@@ -267,15 +272,29 @@ func (s *Server) handleLogoutGET(w http.ResponseWriter, r *http.Request) {
 		s.mu.Unlock()
 	}
 	s.clearSessionCookie(w)
-	s.audit.Record("logout", map[string]string{"actor": "local", "method": "get"})
+	eventID := newUIEventID()
+	s.audit.Record("logout", map[string]string{
+		"actor":          "local",
+		"source":         "ui",
+		"target":         "ui_session",
+		"result":         "success",
+		"method":         "get",
+		"correlation_id": eventID,
+		"event_id":       eventID,
+	})
 	http.Redirect(w, r, "/login", http.StatusFound)
 }
 
 func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	if !s.validCSRF(r) {
+		eventID := newUIEventID()
 		s.audit.Record("logout", map[string]string{
-			"actor":  "local",
-			"result": "csrf_rejected",
+			"actor":          "local",
+			"source":         "ui",
+			"target":         "ui_session",
+			"result":         "csrf_rejected",
+			"correlation_id": eventID,
+			"event_id":       eventID,
 		})
 		http.Error(w, "csrf required", http.StatusForbidden)
 		return
@@ -287,12 +306,22 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 		s.mu.Unlock()
 	}
 	s.clearSessionCookie(w)
-	s.audit.Record("logout", map[string]string{"actor": "local"})
+	eventID := newUIEventID()
+	s.audit.Record("logout", map[string]string{
+		"actor":          "local",
+		"source":         "ui",
+		"target":         "ui_session",
+		"result":         "success",
+		"correlation_id": eventID,
+		"event_id":       eventID,
+	})
 	http.Redirect(w, r, "/login", http.StatusFound)
 }
 
 func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
-	_ = DashboardConsolePage(s.dashboardConsoleView(r.Context())).Render(r.Context(), w)
+	ctx, cancel := stableUIReadContext(r.Context())
+	defer cancel()
+	_ = DashboardConsolePage(s.dashboardConsoleView(ctx)).Render(ctx, w)
 }
 
 func (s *Server) handleProviders(w http.ResponseWriter, r *http.Request) {
@@ -305,10 +334,23 @@ func (s *Server) handleAboutPage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAuditTrailPage(w http.ResponseWriter, r *http.Request) {
-	_ = AuditTrailPage(s.auditTrailView(), s.csrfTokenFromRequest(r)).Render(r.Context(), w)
+	ctx, cancel := stableUIReadContext(r.Context())
+	defer cancel()
+	eventID := newUIEventID()
+	defer s.audit.Record("audit_view", map[string]string{
+		"actor":          "local",
+		"source":         "ui",
+		"target":         "audit",
+		"result":         "read-only",
+		"correlation_id": eventID,
+		"event_id":       eventID,
+	})
+	_ = AuditTrailPage(s.auditTrailView(r.URL.Query().Get("q"), r.URL.RequestURI()), s.csrfTokenFromRequest(r)).Render(ctx, w)
 }
 
 func (s *Server) handleTimelinePage(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := stableUIReadContext(r.Context())
+	defer cancel()
 	eventID := newUIEventID()
 	defer s.audit.Record("timeline_view", map[string]string{
 		"actor":          "local",
@@ -325,11 +367,13 @@ func (s *Server) handleTimelinePage(w http.ResponseWriter, r *http.Request) {
 	case "csv":
 		renderTimelineCSV(w, view)
 	default:
-		_ = TimelinePage(view, s.csrfTokenFromRequest(r)).Render(r.Context(), w)
+		_ = TimelinePage(view, s.csrfTokenFromRequest(r)).Render(ctx, w)
 	}
 }
 
 func (s *Server) handleCloudflareDiffPage(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := stableUIReadContext(r.Context())
+	defer cancel()
 	eventID := newUIEventID()
 	defer s.audit.Record("cloudflare_diff_view", map[string]string{
 		"actor":          "local",
@@ -339,10 +383,12 @@ func (s *Server) handleCloudflareDiffPage(w http.ResponseWriter, r *http.Request
 		"correlation_id": eventID,
 		"event_id":       eventID,
 	})
-	_ = workflowProjectionPage(s.cloudflareDiffView()).Render(r.Context(), w)
+	_ = workflowProjectionPage(s.cloudflareDiffView()).Render(ctx, w)
 }
 
 func (s *Server) handleReplayPage(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := stableUIReadContext(r.Context())
+	defer cancel()
 	eventID := newUIEventID()
 	defer s.audit.Record("replay_view", map[string]string{
 		"actor":          "local",
@@ -352,18 +398,22 @@ func (s *Server) handleReplayPage(w http.ResponseWriter, r *http.Request) {
 		"correlation_id": eventID,
 		"event_id":       eventID,
 	})
-	_ = workflowProjectionPage(s.replayView()).Render(r.Context(), w)
+	_ = workflowProjectionPage(s.replayView()).Render(ctx, w)
 }
 
 func (s *Server) handleDebanPage(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := stableUIReadContext(r.Context())
+	defer cancel()
 	_ = ComingSoonPage(ComingSoonView{
 		Title:       "Deban",
 		Description: "This route is reserved for preview, dry-run, and future execution of CrowdSec and Cloudflare deban workflows.",
 		Active:      r.URL.Path,
-	}).Render(r.Context(), w)
+	}).Render(ctx, w)
 }
 
 func (s *Server) handleRecoveryPage(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := stableUIReadContext(r.Context())
+	defer cancel()
 	eventID := newUIEventID()
 	defer s.audit.Record("recovery_view", map[string]string{
 		"actor":          "local",
@@ -373,10 +423,12 @@ func (s *Server) handleRecoveryPage(w http.ResponseWriter, r *http.Request) {
 		"correlation_id": eventID,
 		"event_id":       eventID,
 	})
-	_ = workflowProjectionPage(s.recoveryView()).Render(r.Context(), w)
+	_ = workflowProjectionPage(s.recoveryView()).Render(ctx, w)
 }
 
 func (s *Server) handleDriftPage(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := stableUIReadContext(r.Context())
+	defer cancel()
 	eventID := newUIEventID()
 	defer s.audit.Record("drift_view", map[string]string{
 		"actor":          "local",
@@ -386,7 +438,7 @@ func (s *Server) handleDriftPage(w http.ResponseWriter, r *http.Request) {
 		"correlation_id": eventID,
 		"event_id":       eventID,
 	})
-	_ = workflowProjectionPage(s.driftView()).Render(r.Context(), w)
+	_ = workflowProjectionPage(s.driftView()).Render(ctx, w)
 }
 
 func (s *Server) handleCloudflareBanPreview(w http.ResponseWriter, r *http.Request) {
@@ -433,37 +485,56 @@ func (s *Server) handleAIExplain(w http.ResponseWriter, r *http.Request) {
 	dec.DisallowUnknownFields()
 	var req aiExplainRequest
 	if err := dec.Decode(&req); err != nil {
+		eventID := newUIEventID()
 		s.audit.Record("ai_explain_failed", map[string]string{
+			"target":         "ai_explain",
 			"source":         "ui",
 			"result":         "bad_json",
-			"correlation_id": newUIEventID(),
+			"correlation_id": eventID,
+			"event_id":       eventID,
 		})
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
 	subjectType := normalizeAISubjectType(req.SubjectType)
 	if subjectType == "" {
+		eventID := newUIEventID()
 		s.audit.Record("ai_explain_failed", map[string]string{
 			"source":         "ui",
+			"target":         strings.TrimSpace(req.SubjectID),
 			"subject_type":   req.SubjectType,
 			"subject_id":     req.SubjectID,
 			"result":         "invalid_subject_type",
-			"correlation_id": newUIEventID(),
+			"correlation_id": eventID,
+			"event_id":       eventID,
 		})
 		http.Error(w, "invalid subject_type", http.StatusBadRequest)
 		return
 	}
 	providerPreference := normalizeAIProviderPreference(req.ProviderPreference)
 	if providerPreference == "" {
+		eventID := newUIEventID()
+		s.audit.Record("ai_explain_failed", map[string]string{
+			"source":         "ui",
+			"target":         strings.TrimSpace(req.SubjectID),
+			"subject_type":   subjectType,
+			"subject_id":     req.SubjectID,
+			"provider":       strings.TrimSpace(req.ProviderPreference),
+			"result":         "invalid_provider_preference",
+			"correlation_id": eventID,
+			"event_id":       eventID,
+		})
 		http.Error(w, "invalid provider_preference", http.StatusBadRequest)
 		return
 	}
 	eventID := newUIEventID()
 	s.audit.Record("ai_explain_requested", map[string]string{
 		"source":         "ui",
+		"target":         strings.TrimSpace(req.SubjectID),
 		"subject_type":   subjectType,
 		"subject_id":     req.SubjectID,
 		"provider":       providerPreference,
+		"result":         "requested",
 		"correlation_id": eventID,
 		"event_id":       eventID,
 	})
@@ -492,6 +563,7 @@ func (s *Server) handleAIExplain(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			s.audit.Record("ai_explain_failed", map[string]string{
 				"source":         "ui",
+				"target":         strings.TrimSpace(req.SubjectID),
 				"subject_type":   subjectType,
 				"subject_id":     req.SubjectID,
 				"provider":       providerPreference,
@@ -510,6 +582,7 @@ func (s *Server) handleAIExplain(w http.ResponseWriter, r *http.Request) {
 	case "", "none":
 		s.audit.Record("ai_provider_skipped", map[string]string{
 			"source":         "ui",
+			"target":         strings.TrimSpace(req.SubjectID),
 			"subject_type":   subjectType,
 			"subject_id":     req.SubjectID,
 			"provider":       providerPreference,
@@ -519,6 +592,7 @@ func (s *Server) handleAIExplain(w http.ResponseWriter, r *http.Request) {
 		})
 		s.audit.Record("ai_explain_unavailable", map[string]string{
 			"source":         "ui",
+			"target":         strings.TrimSpace(req.SubjectID),
 			"subject_type":   subjectType,
 			"subject_id":     req.SubjectID,
 			"provider":       providerPreference,
@@ -529,17 +603,20 @@ func (s *Server) handleAIExplain(w http.ResponseWriter, r *http.Request) {
 	default:
 		s.audit.Record("ai_provider_selected", map[string]string{
 			"source":         "ui",
+			"target":         strings.TrimSpace(req.SubjectID),
 			"subject_type":   subjectType,
 			"subject_id":     req.SubjectID,
 			"provider":       response.Provider,
 			"quota_state":    response.QuotaState,
 			"context_hash":   response.ContextHash,
+			"result":         "selected",
 			"correlation_id": eventID,
 			"event_id":       eventID,
 		})
 		if strings.Contains(strings.ToLower(response.Explanation), "unavailable") {
 			s.audit.Record("ai_explain_unavailable", map[string]string{
 				"source":         "ui",
+				"target":         strings.TrimSpace(req.SubjectID),
 				"subject_type":   subjectType,
 				"subject_id":     req.SubjectID,
 				"provider":       response.Provider,
@@ -550,6 +627,7 @@ func (s *Server) handleAIExplain(w http.ResponseWriter, r *http.Request) {
 		} else {
 			s.audit.Record("ai_explain_completed", map[string]string{
 				"source":         "ui",
+				"target":         strings.TrimSpace(req.SubjectID),
 				"subject_type":   subjectType,
 				"subject_id":     req.SubjectID,
 				"provider":       response.Provider,
@@ -573,17 +651,31 @@ func (s *Server) handleAIExplainScript(w http.ResponseWriter, r *http.Request) {
 	_, _ = io.WriteString(w, aiExplainScript())
 }
 
+func (s *Server) handleOperatorLiveScript(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	_, _ = io.WriteString(w, operatorLiveScript())
+}
+
+func (s *Server) handleProvidersLiveScript(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	_, _ = io.WriteString(w, providersLiveScript())
+}
+
 func (s *Server) handleForensicPage(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := stableUIReadContext(r.Context())
+	defer cancel()
 	if ipStr := strings.TrimSpace(r.URL.Query().Get("ip")); ipStr != "" {
 		// Deep-link: /forensic?ip=X performs the lookup inline.
 		ip, err := netip.ParseAddr(ipStr)
 		if err != nil || !ip.IsValid() {
-			renderForensicPage(r.Context(), w, ForensicView{IP: ipStr, Error: "invalid IP address"})
+			renderForensicPage(ctx, w, ForensicView{IP: ipStr, Error: "invalid IP address"}, s.csrfTokenFromRequest(r))
 			return
 		}
 		view := ForensicView{IP: ipStr}
 		if s.enrichment != nil {
-			summary, err := s.enrichment.Enrich(r.Context(), ip, enrichment.LookupOptions{ManualForensics: true})
+			summary, err := s.enrichment.Enrich(ctx, ip, enrichment.LookupOptions{ManualForensics: true})
 			if err == nil {
 				view.Summary = summary
 				view.Assess = s.enrichment.Assess(summary)
@@ -593,19 +685,21 @@ func (s *Server) handleForensicPage(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if s.evidence != nil {
-			local, err := s.evidence.Search(r.Context(), reporting.EvidenceSearchOptions{IP: ipStr, Limit: 20})
+			local, err := s.evidence.Search(ctx, reporting.EvidenceSearchOptions{IP: ipStr, Limit: 20})
 			if err == nil {
 				view.LocalEvidence = local
 			}
 		}
 		view.HasData = view.HasEnrichment || len(view.LocalEvidence) > 0
-		renderForensicPage(r.Context(), w, view)
+		renderForensicPage(ctx, w, view, s.csrfTokenFromRequest(r))
 		return
 	}
-	renderForensicPage(r.Context(), w, ForensicView{})
+	renderForensicPage(ctx, w, ForensicView{}, s.csrfTokenFromRequest(r))
 }
 
 func (s *Server) handleForensicLookup(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := stableUIReadContext(r.Context())
+	defer cancel()
 	if !s.validCSRF(r) {
 		s.audit.Record("forensic_lookup", map[string]string{
 			"result": "csrf_rejected",
@@ -614,7 +708,7 @@ func (s *Server) handleForensicLookup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := r.ParseForm(); err != nil {
-		renderForensicPage(r.Context(), w, ForensicView{Error: "bad request"})
+		renderForensicPage(ctx, w, ForensicView{Error: "bad request"}, s.csrfTokenFromRequest(r))
 		return
 	}
 	ipStr := strings.TrimSpace(r.PostForm.Get("ip"))
@@ -623,14 +717,14 @@ func (s *Server) handleForensicLookup(w http.ResponseWriter, r *http.Request) {
 	ip, err := netip.ParseAddr(ipStr)
 	if err != nil || !ip.IsValid() {
 		view.Error = "invalid IP address"
-		renderForensicPage(r.Context(), w, view)
+		renderForensicPage(ctx, w, view, s.csrfTokenFromRequest(r))
 		return
 	}
 
 	s.audit.Record("forensic_lookup", map[string]string{"ip": ipStr})
 
 	if s.enrichment != nil {
-		summary, err := s.enrichment.Enrich(r.Context(), ip, enrichment.LookupOptions{ManualForensics: true})
+		summary, err := s.enrichment.Enrich(ctx, ip, enrichment.LookupOptions{ManualForensics: true})
 		if err == nil {
 			view.Summary = summary
 			view.Assess = s.enrichment.Assess(summary)
@@ -641,7 +735,7 @@ func (s *Server) handleForensicLookup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if s.evidence != nil {
-		local, err := s.evidence.Search(r.Context(), reporting.EvidenceSearchOptions{
+		local, err := s.evidence.Search(ctx, reporting.EvidenceSearchOptions{
 			IP:    ipStr,
 			Limit: 20,
 		})
@@ -651,7 +745,7 @@ func (s *Server) handleForensicLookup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	view.HasData = view.HasEnrichment || len(view.LocalEvidence) > 0
-	renderForensicPage(r.Context(), w, view)
+	renderForensicPage(ctx, w, view, s.csrfTokenFromRequest(r))
 }
 
 func (s *Server) requireAuth(next http.HandlerFunc) http.HandlerFunc {
@@ -830,31 +924,58 @@ func (s *Server) providerViews() []ProviderView {
 
 func (s *Server) providerHealthViews() []ProviderHealth {
 	ctx := context.Background()
+	abState, abLoaded, _ := loadProviderRuntimeSnapshot(ctx, s.setupStore, "abuseipdb")
+	shState, shLoaded, _ := loadProviderRuntimeSnapshot(ctx, s.setupStore, "spamhaus")
+	vtState, vtLoaded, _ := loadProviderRuntimeSnapshot(ctx, s.setupStore, "virustotal")
+	if !abLoaded {
+		abState.Enabled = s.cfg.AbuseIPDB.Enabled
+	}
+	if !shLoaded {
+		shState.Enabled = s.cfg.Spamhaus.Enabled
+	}
+	if !vtLoaded {
+		vtState.Enabled = s.cfg.VirusTotal.Enabled
+	}
 	views := []ProviderHealth{
 		{
 			Name:           "AbuseIPDB",
-			Enabled:        s.cfg.AbuseIPDB.Enabled,
+			Enabled:        abState.Enabled,
 			Configured:     credentialConfigured(ctx, s.credentialStore, "abuseipdb.api_key"),
 			MaskedKey:      maskedCredentialStoreValue(ctx, s.credentialStore, "abuseipdb.api_key"),
-			Status:         providerStatus(s.cfg.AbuseIPDB.Enabled, credentialConfigured(ctx, s.credentialStore, "abuseipdb.api_key")),
+			Status:         providerStatus(abState.Enabled, credentialConfigured(ctx, s.credentialStore, "abuseipdb.api_key")),
+			Mode:           providerHealthModeText(abState.Healthy, abState.Enabled),
+			LastValidation: providerHealthValidationText(abState.LastTestAt),
+			LastSuccess:    providerLastSuccessText(abState.Enabled, abState.Healthy, abState.LastTestAt, abState.LastSuccessAt),
+			LastError:      providerLastErrorText(abState.Enabled, abState.Healthy, abState.LastErrorCode),
+			LastLatency:    formatLatencyMS(abState.LastLatencyMS),
 			QuotaRemaining: "quota not exposed",
 			Notes:          []string{"lookup/report split remains explicit"},
 		},
 		{
 			Name:           "Spamhaus",
-			Enabled:        s.cfg.Spamhaus.Enabled,
+			Enabled:        shState.Enabled,
 			Configured:     credentialConfigured(ctx, s.credentialStore, "spamhaus.api_key"),
 			MaskedKey:      maskedCredentialStoreValue(ctx, s.credentialStore, "spamhaus.api_key"),
-			Status:         providerStatus(s.cfg.Spamhaus.Enabled, credentialConfigured(ctx, s.credentialStore, "spamhaus.api_key")),
+			Status:         providerStatus(shState.Enabled, credentialConfigured(ctx, s.credentialStore, "spamhaus.api_key")),
+			Mode:           providerHealthModeText(shState.Healthy, shState.Enabled),
+			LastValidation: providerHealthValidationText(shState.LastTestAt),
+			LastSuccess:    providerLastSuccessText(shState.Enabled, shState.Healthy, shState.LastTestAt, shState.LastSuccessAt),
+			LastError:      providerLastErrorText(shState.Enabled, shState.Healthy, shState.LastErrorCode),
+			LastLatency:    formatLatencyMS(shState.LastLatencyMS),
 			QuotaRemaining: "quota not exposed",
 			Notes:          []string{"lookup/report split remains explicit"},
 		},
 		{
 			Name:           "VirusTotal",
-			Enabled:        s.cfg.VirusTotal.Enabled,
+			Enabled:        vtState.Enabled,
 			Configured:     credentialConfigured(ctx, s.credentialStore, "virustotal.api_key"),
 			MaskedKey:      maskedCredentialStoreValue(ctx, s.credentialStore, "virustotal.api_key"),
-			Status:         providerStatus(s.cfg.VirusTotal.Enabled, credentialConfigured(ctx, s.credentialStore, "virustotal.api_key")),
+			Status:         providerStatus(vtState.Enabled, credentialConfigured(ctx, s.credentialStore, "virustotal.api_key")),
+			Mode:           providerHealthModeText(vtState.Healthy, vtState.Enabled),
+			LastValidation: providerHealthValidationText(vtState.LastTestAt),
+			LastSuccess:    providerLastSuccessText(vtState.Enabled, vtState.Healthy, vtState.LastTestAt, vtState.LastSuccessAt),
+			LastError:      providerLastErrorText(vtState.Enabled, vtState.Healthy, vtState.LastErrorCode),
+			LastLatency:    formatLatencyMS(vtState.LastLatencyMS),
 			QuotaRemaining: "quota not exposed",
 			Notes:          []string{"manual forensic only"},
 		},
@@ -906,6 +1027,22 @@ func (s *Server) providerHealthViews() []ProviderHealth {
 func (s *Server) dashboardConsoleView(ctx context.Context) DashboardConsoleView {
 	checks := health.RunAll(s.buildHealthConfig())
 	detectors := detect.RunAll(s.buildDetectConfig())
+	statuses := []StatusItem{
+		{Label: "Runtime", Level: "healthy", Detail: "UI mode active"},
+		{Label: "CrowdSec", Level: statusLevelFromText(crowdSecHealthStatus(s.cfg.CrowdSec.DecisionsLog)), Detail: crowdSecHealthStatus(s.cfg.CrowdSec.DecisionsLog)},
+		{Label: "Cloudflare", Level: statusLevelFromText(cloudflareHealthStatus(s.cfSentinelToken(), s.cfZoneIDFromSetup(ctx), s.cfg.Cloudflare.MutationsEnabled)), Detail: cloudflareHealthStatus(s.cfSentinelToken(), s.cfZoneIDFromSetup(ctx), s.cfg.Cloudflare.MutationsEnabled)},
+		{Label: "OpenResty", Level: openRestyDashboardLevel(detectors), Detail: openRestyDashboardDetail(detectors, s.cfg.OpenResty.EventsFile)},
+		{Label: "Nginx", Level: statusLevelFromText(nginxStatus(s.cfg.CrowdSec.NginxLogDir)), Detail: nginxStatus(s.cfg.CrowdSec.NginxLogDir)},
+		{Label: "SQLite WAL", Level: statusLevelFromText(sqliteWALStatus(s.cfg.StateDir)), Detail: sqliteWALStatus(s.cfg.StateDir)},
+		{Label: "UI", Level: boolStatus(s.cfg.UI.Enabled), Detail: uiStatus(s.cfg.UI.Enabled, s.cfg.UI.Addr)},
+		{Label: "HA / fencing", Level: "disabled", Detail: "read-only UI shell"},
+		{Label: "Replay", Level: "disabled", Detail: "not wired"},
+		{Label: "Recovery", Level: "disabled", Detail: "not wired"},
+		{Label: "Ownership", Level: "healthy", Detail: "lineage preserved in runtime"},
+		{Label: "UI mutations", Level: boolStatus(s.cfg.UI.MutationsEnabled), Detail: boolDetail(s.cfg.UI.MutationsEnabled, "enabled", "disabled")},
+		{Label: "Cloudflare mutations", Level: cloudflareLevel(s.cfSentinelToken(), s.cfZoneIDFromSetup(ctx), s.cfg.Cloudflare.MutationsEnabled), Detail: cloudflareHealthStatus(s.cfSentinelToken(), s.cfZoneIDFromSetup(ctx), s.cfg.Cloudflare.MutationsEnabled)},
+		{Label: "Shadow / cutover", Level: "disabled", Detail: "not wired in UI shell"},
+	}
 	env := EnvironmentWidget{Total: len(detectors)}
 	for _, c := range checks {
 		switch c.Status {
@@ -922,6 +1059,19 @@ func (s *Server) dashboardConsoleView(ctx context.Context) DashboardConsoleView 
 			env.Healthy++
 		}
 	}
+	healthyCount, warningCount, errorCount, disabledCount := 0, 0, 0, 0
+	for _, status := range statuses {
+		switch strings.ToLower(strings.TrimSpace(status.Level)) {
+		case "healthy", "live":
+			healthyCount++
+		case "warning", "degraded":
+			warningCount++
+		case "error":
+			errorCount++
+		case "disabled":
+			disabledCount++
+		}
+	}
 
 	reportedTotal := 0
 	if s.evidence != nil {
@@ -931,35 +1081,33 @@ func (s *Server) dashboardConsoleView(ctx context.Context) DashboardConsoleView 
 	}
 
 	return DashboardConsoleView{
-		Statuses: []StatusItem{
-			{Label: "Runtime", Level: "healthy", Detail: "UI mode active"},
-			{Label: "CrowdSec", Level: statusLevelFromText(crowdSecHealthStatus(s.cfg.CrowdSec.DecisionsLog)), Detail: crowdSecHealthStatus(s.cfg.CrowdSec.DecisionsLog)},
-			{Label: "Cloudflare", Level: statusLevelFromText(cloudflareHealthStatus(s.cfSentinelToken(), s.cfZoneIDFromSetup(ctx), s.cfg.Cloudflare.MutationsEnabled)), Detail: cloudflareHealthStatus(s.cfSentinelToken(), s.cfZoneIDFromSetup(ctx), s.cfg.Cloudflare.MutationsEnabled)},
-			{Label: "OpenResty", Level: openRestyDashboardLevel(detectors), Detail: openRestyDashboardDetail(detectors, s.cfg.OpenResty.EventsFile)},
-			{Label: "Nginx", Level: statusLevelFromText(nginxStatus(s.cfg.CrowdSec.NginxLogDir)), Detail: nginxStatus(s.cfg.CrowdSec.NginxLogDir)},
-			{Label: "SQLite WAL", Level: statusLevelFromText(sqliteWALStatus(s.cfg.StateDir)), Detail: sqliteWALStatus(s.cfg.StateDir)},
-			{Label: "UI", Level: boolStatus(s.cfg.UI.Enabled), Detail: uiStatus(s.cfg.UI.Enabled, s.cfg.UI.Addr)},
-			{Label: "HA / fencing", Level: "disabled", Detail: "read-only UI shell"},
-			{Label: "Replay", Level: "disabled", Detail: "not wired"},
-			{Label: "Recovery", Level: "disabled", Detail: "not wired"},
-			{Label: "Ownership", Level: "healthy", Detail: "lineage preserved in runtime"},
-			{Label: "UI mutations", Level: boolStatus(s.cfg.UI.MutationsEnabled), Detail: boolDetail(s.cfg.UI.MutationsEnabled, "enabled", "disabled")},
-			{Label: "Cloudflare mutations", Level: cloudflareLevel(s.cfSentinelToken(), s.cfZoneIDFromSetup(ctx), s.cfg.Cloudflare.MutationsEnabled), Detail: cloudflareHealthStatus(s.cfSentinelToken(), s.cfZoneIDFromSetup(ctx), s.cfg.Cloudflare.MutationsEnabled)},
-			{Label: "Shadow / cutover", Level: "disabled", Detail: "not wired in UI shell"},
-		},
+		Statuses:      statuses,
 		AIProviders:   s.providerDashboardEntries(),
 		Environment:   env,
 		ReportedTotal: reportedTotal,
 		EvidenceWired: s.evidence != nil,
+		UpdatedAt:     time.Now().UTC().Format(time.RFC3339),
+		HealthyCount:  healthyCount,
+		WarningCount:  warningCount,
+		ErrorCount:    errorCount,
+		DisabledCount: disabledCount,
 	}
 }
 
-func (s *Server) auditTrailView() AuditTrailView {
+func (s *Server) auditTrailView(query, refreshURL string) AuditTrailView {
 	reader, ok := s.audit.(AuditReader)
 	if !ok || reader == nil {
-		return AuditTrailView{}
+		return AuditTrailView{Query: strings.TrimSpace(query), RefreshURL: refreshURL}
 	}
-	return AuditTrailView{Entries: reader.Entries()}
+	entries := reader.Entries()
+	if q := strings.TrimSpace(strings.ToLower(query)); q != "" {
+		entries = filterAuditEntries(entries, q)
+	}
+	return AuditTrailView{
+		Entries:    entries,
+		Query:      strings.TrimSpace(query),
+		RefreshURL: refreshURL,
+	}
 }
 
 // maskedCredentialStoreValue looks up key from the credential store and returns a redacted
@@ -1159,10 +1307,12 @@ func uiStatus(enabled bool, addr string) string {
 
 func providerStatus(enabled bool, configured bool) string {
 	switch {
-	case !configured:
-		return "missing"
+	case !configured && !enabled:
+		return "disabled by operator"
 	case !enabled:
 		return "configured / disabled"
+	case !configured:
+		return "missing secret"
 	default:
 		return "configured / enabled"
 	}

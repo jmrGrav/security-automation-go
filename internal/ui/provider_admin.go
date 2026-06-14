@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"html"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -29,12 +30,17 @@ const (
 	providerStatusRateLimited   = "RATE_LIMITED"
 	providerStatusError         = "ERROR"
 
-	providerTestReady        = "READY"
-	providerTestAuthFailed   = "AUTH_FAILED"
-	providerTestRateLimited  = "RATE_LIMITED"
-	providerTestNetworkError = "NETWORK_ERROR"
-	providerTestTimeout      = "TIMEOUT"
-	providerTestUnknownError = "UNKNOWN_ERROR"
+	providerTestReady              = "READY"
+	providerTestAuthFailed         = "AUTH_FAILED"
+	providerTestInvalidKey         = "INVALID_API_KEY"
+	providerTestQuotaExceeded      = "QUOTA_EXCEEDED"
+	providerTestRateLimited        = "RATE_LIMITED"
+	providerTestTimeout            = "TIMEOUT"
+	providerTestDNSFailure         = "DNS_FAILURE"
+	providerTestTLSFailure         = "TLS_FAILURE"
+	providerTestDisabledByOperator = "DISABLED_BY_OPERATOR"
+	providerTestUnsupportedModel   = "UNSUPPORTED_MODEL"
+	providerTestUnknownError       = "TEST_FAILED"
 
 	providerTestPrompt = "provider readiness check"
 )
@@ -52,7 +58,10 @@ const (
 type AIProviderRecord struct {
 	Enabled           bool
 	Model             string
+	Healthy           bool
 	LastTestAt        time.Time
+	LastSuccessAt     time.Time
+	LastFailureAt     time.Time
 	LastTestStatus    string
 	LastTestLatencyMS int
 	LastErrorCode     string
@@ -62,6 +71,41 @@ type AIProviderState struct {
 	OpenAI    AIProviderRecord
 	Anthropic AIProviderRecord
 	Gemini    AIProviderRecord
+}
+
+func clearAIProviderDiagnostics(record *AIProviderRecord) {
+	if record == nil {
+		return
+	}
+	record.Healthy = false
+	record.LastTestAt = time.Time{}
+	record.LastSuccessAt = time.Time{}
+	record.LastFailureAt = time.Time{}
+	record.LastTestStatus = ""
+	record.LastTestLatencyMS = 0
+	record.LastErrorCode = ""
+}
+
+func providerDisplayRecord(record AIProviderRecord) AIProviderRecord {
+	display := record
+	switch {
+	case !display.Enabled:
+		display.Healthy = false
+		display.LastTestAt = time.Time{}
+		display.LastSuccessAt = time.Time{}
+		display.LastFailureAt = time.Time{}
+		display.LastTestLatencyMS = 0
+		display.LastTestStatus = providerTestDisabledByOperator
+		display.LastErrorCode = ""
+	case display.Healthy:
+		display.LastTestStatus = providerTestReady
+		display.LastErrorCode = ""
+		display.LastFailureAt = time.Time{}
+		if display.LastSuccessAt.IsZero() {
+			display.LastSuccessAt = display.LastTestAt
+		}
+	}
+	return display
 }
 
 func providerSpec(name AIProviderName) (display string, prefix string) {
@@ -159,6 +203,12 @@ func parseAIProviderState(raw []byte) (AIProviderState, bool, error) {
 			state.OpenAI.Model = value
 		case "OPENAI_LAST_TEST_AT", "AI_PROVIDER_OPENAI_LAST_TEST_AT":
 			state.OpenAI.LastTestAt, _ = time.Parse(time.RFC3339, value)
+		case "OPENAI_LAST_SUCCESS_AT", "AI_PROVIDER_OPENAI_LAST_SUCCESS_AT":
+			state.OpenAI.LastSuccessAt, _ = time.Parse(time.RFC3339, value)
+		case "OPENAI_LAST_FAILURE_AT", "AI_PROVIDER_OPENAI_LAST_FAILURE_AT":
+			state.OpenAI.LastFailureAt, _ = time.Parse(time.RFC3339, value)
+		case "OPENAI_HEALTHY", "AI_PROVIDER_OPENAI_HEALTHY":
+			state.OpenAI.Healthy, _ = strconv.ParseBool(value)
 		case "OPENAI_LAST_TEST_STATUS", "AI_PROVIDER_OPENAI_LAST_TEST_STATUS":
 			state.OpenAI.LastTestStatus = value
 		case "OPENAI_LAST_TEST_LATENCY_MS", "AI_PROVIDER_OPENAI_LAST_TEST_LATENCY_MS":
@@ -173,6 +223,12 @@ func parseAIProviderState(raw []byte) (AIProviderState, bool, error) {
 			state.Anthropic.Model = value
 		case "ANTHROPIC_LAST_TEST_AT", "AI_PROVIDER_ANTHROPIC_LAST_TEST_AT":
 			state.Anthropic.LastTestAt, _ = time.Parse(time.RFC3339, value)
+		case "ANTHROPIC_LAST_SUCCESS_AT", "AI_PROVIDER_ANTHROPIC_LAST_SUCCESS_AT":
+			state.Anthropic.LastSuccessAt, _ = time.Parse(time.RFC3339, value)
+		case "ANTHROPIC_LAST_FAILURE_AT", "AI_PROVIDER_ANTHROPIC_LAST_FAILURE_AT":
+			state.Anthropic.LastFailureAt, _ = time.Parse(time.RFC3339, value)
+		case "ANTHROPIC_HEALTHY", "AI_PROVIDER_ANTHROPIC_HEALTHY":
+			state.Anthropic.Healthy, _ = strconv.ParseBool(value)
 		case "ANTHROPIC_LAST_TEST_STATUS", "AI_PROVIDER_ANTHROPIC_LAST_TEST_STATUS":
 			state.Anthropic.LastTestStatus = value
 		case "ANTHROPIC_LAST_TEST_LATENCY_MS", "AI_PROVIDER_ANTHROPIC_LAST_TEST_LATENCY_MS":
@@ -187,6 +243,12 @@ func parseAIProviderState(raw []byte) (AIProviderState, bool, error) {
 			state.Gemini.Model = value
 		case "GEMINI_LAST_TEST_AT", "AI_PROVIDER_GEMINI_LAST_TEST_AT":
 			state.Gemini.LastTestAt, _ = time.Parse(time.RFC3339, value)
+		case "GEMINI_LAST_SUCCESS_AT", "AI_PROVIDER_GEMINI_LAST_SUCCESS_AT":
+			state.Gemini.LastSuccessAt, _ = time.Parse(time.RFC3339, value)
+		case "GEMINI_LAST_FAILURE_AT", "AI_PROVIDER_GEMINI_LAST_FAILURE_AT":
+			state.Gemini.LastFailureAt, _ = time.Parse(time.RFC3339, value)
+		case "GEMINI_HEALTHY", "AI_PROVIDER_GEMINI_HEALTHY":
+			state.Gemini.Healthy, _ = strconv.ParseBool(value)
 		case "GEMINI_LAST_TEST_STATUS", "AI_PROVIDER_GEMINI_LAST_TEST_STATUS":
 			state.Gemini.LastTestStatus = value
 		case "GEMINI_LAST_TEST_LATENCY_MS", "AI_PROVIDER_GEMINI_LAST_TEST_LATENCY_MS":
@@ -219,6 +281,17 @@ func saveAIProviderState(path string, state AIProviderState) error {
 		} else {
 			fmt.Fprintf(&buf, "%s_LAST_TEST_AT=\n", prefix)
 		}
+		if !record.LastSuccessAt.IsZero() {
+			fmt.Fprintf(&buf, "%s_LAST_SUCCESS_AT=%s\n", prefix, record.LastSuccessAt.UTC().Format(time.RFC3339))
+		} else {
+			fmt.Fprintf(&buf, "%s_LAST_SUCCESS_AT=\n", prefix)
+		}
+		if !record.LastFailureAt.IsZero() {
+			fmt.Fprintf(&buf, "%s_LAST_FAILURE_AT=%s\n", prefix, record.LastFailureAt.UTC().Format(time.RFC3339))
+		} else {
+			fmt.Fprintf(&buf, "%s_LAST_FAILURE_AT=\n", prefix)
+		}
+		fmt.Fprintf(&buf, "%s_HEALTHY=%t\n", prefix, record.Healthy)
 		fmt.Fprintf(&buf, "%s_LAST_TEST_STATUS=%s\n", prefix, record.LastTestStatus)
 		fmt.Fprintf(&buf, "%s_LAST_TEST_LATENCY_MS=%d\n", prefix, record.LastTestLatencyMS)
 		fmt.Fprintf(&buf, "%s_LAST_ERROR_CODE=%s\n", prefix, record.LastErrorCode)
@@ -349,6 +422,24 @@ func loadAIProviderStateFromStore(ctx context.Context, store SetupStorer) (AIPro
 			rec.LastTestAt, _ = time.Parse(time.RFC3339, v)
 			seen = true
 		}
+		if v, ok, err := store.GetSetting(ctx, aiProviderSettingKey(name, "last_success_at")); err != nil {
+			return AIProviderState{}, false, err
+		} else if ok && v != "" {
+			rec.LastSuccessAt, _ = time.Parse(time.RFC3339, v)
+			seen = true
+		}
+		if v, ok, err := store.GetSetting(ctx, aiProviderSettingKey(name, "last_failure_at")); err != nil {
+			return AIProviderState{}, false, err
+		} else if ok && v != "" {
+			rec.LastFailureAt, _ = time.Parse(time.RFC3339, v)
+			seen = true
+		}
+		if v, ok, err := store.GetSetting(ctx, aiProviderSettingKey(name, "healthy")); err != nil {
+			return AIProviderState{}, false, err
+		} else if ok {
+			rec.Healthy, _ = strconv.ParseBool(v)
+			seen = true
+		}
 		if v, ok, err := store.GetSetting(ctx, aiProviderSettingKey(name, "last_test_status")); err != nil {
 			return AIProviderState{}, false, err
 		} else if ok {
@@ -388,6 +479,23 @@ func saveAIProviderStateToStore(ctx context.Context, store SetupStorer, state AI
 			testAt = rec.LastTestAt.UTC().Format(time.RFC3339)
 		}
 		if err := store.SetSetting(ctx, aiProviderSettingKey(name, "last_test_at"), testAt); err != nil {
+			return err
+		}
+		lastSuccess := ""
+		if !rec.LastSuccessAt.IsZero() {
+			lastSuccess = rec.LastSuccessAt.UTC().Format(time.RFC3339)
+		}
+		if err := store.SetSetting(ctx, aiProviderSettingKey(name, "last_success_at"), lastSuccess); err != nil {
+			return err
+		}
+		lastFailure := ""
+		if !rec.LastFailureAt.IsZero() {
+			lastFailure = rec.LastFailureAt.UTC().Format(time.RFC3339)
+		}
+		if err := store.SetSetting(ctx, aiProviderSettingKey(name, "last_failure_at"), lastFailure); err != nil {
+			return err
+		}
+		if err := store.SetSetting(ctx, aiProviderSettingKey(name, "healthy"), strconv.FormatBool(rec.Healthy)); err != nil {
 			return err
 		}
 		if err := store.SetSetting(ctx, aiProviderSettingKey(name, "last_test_status"), rec.LastTestStatus); err != nil {
@@ -431,24 +539,45 @@ func providerStatePathHint(path string) string {
 
 func providerManagementEntry(name AIProviderName, cfg ai.ProviderConfig, configured bool, record AIProviderRecord) AIProviderManagementEntry {
 	display, _ := providerSpec(name)
-	secretState := providerStatusMissingSecret
-	if configured {
-		secretState = "configured"
+	displayRecord := providerDisplayRecord(record)
+	secretState := providerSecretState(displayRecord.Enabled, configured)
+	status := providerManagementStatus(displayRecord.Enabled, secretState, displayRecord.LastTestStatus)
+	healthyState := "unavailable"
+	if !displayRecord.Enabled {
+		healthyState = "disabled"
+	} else if displayRecord.Healthy {
+		healthyState = "healthy"
+	} else if displayRecord.LastTestStatus != "" {
+		healthyState = "warning"
 	}
-	status := providerManagementStatus(record.Enabled, secretState, record.LastTestStatus)
 	return AIProviderManagementEntry{
 		Name:              display,
 		Status:            status,
 		Model:             valueOrFallback(cfg.Model, "unconfigured"),
-		Enabled:           record.Enabled,
+		ConfiguredState:   configuredText(configured),
+		EnabledState:      enabledText(displayRecord.Enabled),
+		Enabled:           displayRecord.Enabled,
 		SecretState:       secretState,
+		HealthyState:      healthyState,
 		SecretPathDisplay: "SQLite credential store",
-		LastTestAt:        formatProviderTime(record.LastTestAt),
-		LastTestStatus:    displayProviderTestStatus(valueOrFallback(record.LastTestStatus, "never")),
-		LastTestLatencyMS: formatLatencyMS(record.LastTestLatencyMS),
-		LastErrorCode:     displayProviderErrorCode(valueOrFallback(record.LastErrorCode, "none")),
-		ValidationMessage: providerValidationMessage(status, secretState, record),
+		LastTestAt:        formatProviderTime(displayRecord.LastTestAt),
+		LastSuccessAt:     providerLastSuccessText(displayRecord.Enabled, displayRecord.Healthy, displayRecord.LastTestAt, displayRecord.LastSuccessAt),
+		LastFailureAt:     providerLastFailureText(displayRecord.Enabled, displayRecord.Healthy, displayRecord.LastTestAt, displayRecord.LastFailureAt),
+		LastTestStatus:    providerLastTestStatusText(displayRecord.Enabled, displayRecord.Healthy, displayRecord.LastTestStatus),
+		LastTestLatencyMS: formatLatencyMS(displayRecord.LastTestLatencyMS),
+		LastErrorCode:     providerLastErrorText(displayRecord.Enabled, displayRecord.Healthy, displayRecord.LastErrorCode),
+		ValidationMessage: providerValidationMessage(status, secretState, displayRecord),
 	}
+}
+
+func providerSecretState(enabled, configured bool) string {
+	if configured {
+		return "configured"
+	}
+	if enabled {
+		return providerStatusMissingSecret
+	}
+	return "not configured"
 }
 
 func providerManagementStatus(enabled bool, secretState string, lastTest string) string {
@@ -461,35 +590,204 @@ func providerManagementStatus(enabled bool, secretState string, lastTest string)
 	case providerStatusInvalidSecret:
 		return providerStatusInvalidSecret
 	}
-	switch strings.ToUpper(strings.TrimSpace(lastTest)) {
+	switch code := providerDiagnosticCode(lastTest); code {
 	case "", providerTestReady:
 		return providerStatusReady
-	case providerTestRateLimited:
-		return providerStatusRateLimited
+	case providerTestAuthFailed,
+		providerTestInvalidKey,
+		providerTestQuotaExceeded,
+		providerTestRateLimited,
+		providerTestTimeout,
+		providerTestDNSFailure,
+		providerTestTLSFailure,
+		providerTestDisabledByOperator,
+		providerTestUnsupportedModel,
+		providerTestUnknownError:
+		return code
 	default:
-		return providerStatusError
+		if strings.HasPrefix(code, "HTTP_") {
+			return code
+		}
+		return providerTestUnknownError
 	}
+}
+
+func providerDiagnosticCode(raw string) string {
+	normalized := strings.ToUpper(strings.TrimSpace(raw))
+	if normalized == "" {
+		return ""
+	}
+	switch normalized {
+	case providerTestReady,
+		providerTestAuthFailed,
+		providerTestInvalidKey,
+		providerTestQuotaExceeded,
+		providerTestRateLimited,
+		providerTestTimeout,
+		providerTestDNSFailure,
+		providerTestTLSFailure,
+		providerTestDisabledByOperator,
+		providerTestUnsupportedModel,
+		providerTestUnknownError:
+		return normalized
+	default:
+		if strings.HasPrefix(normalized, "HTTP_") && len(normalized) > len("HTTP_") {
+			return normalized
+		}
+		return normalized
+	}
+}
+
+func providerDiagnosticLabel(raw string) string {
+	normalized := strings.ToUpper(strings.TrimSpace(raw))
+	switch normalized {
+	case providerTestReady:
+		return "ready"
+	case providerTestAuthFailed:
+		return "authentication failed"
+	case providerTestInvalidKey:
+		return "invalid API key"
+	case providerTestQuotaExceeded:
+		return "quota exceeded"
+	case providerTestRateLimited:
+		return "rate limited"
+	case providerTestTimeout:
+		return "timeout"
+	case providerTestDNSFailure:
+		return "DNS failure"
+	case providerTestTLSFailure:
+		return "TLS failure"
+	case providerTestDisabledByOperator:
+		return "provider disabled by operator"
+	case providerTestUnsupportedModel:
+		return "unsupported model"
+	case providerTestUnknownError, "UNKNOWN_ERROR":
+		return "provider returned empty error"
+	default:
+		if strings.HasPrefix(normalized, "HTTP_") {
+			return "http " + strings.TrimPrefix(normalized, "HTTP_")
+		}
+		if normalized == "" {
+			return "provider returned empty error"
+		}
+		return strings.ToLower(strings.TrimSpace(raw))
+	}
+}
+
+func providerDiagnosticText(err error) string {
+	if err == nil {
+		return providerTestReady
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return providerTestTimeout
+	}
+	if errors.Is(err, context.Canceled) {
+		return providerTestUnknownError
+	}
+
+	text := strings.ToLower(strings.TrimSpace(err.Error()))
+	if code := providerDiagnosticTextFromText(text); code != "" {
+		return code
+	}
+
+	var dnsErr *net.DNSError
+	if errors.As(err, &dnsErr) {
+		return providerTestDNSFailure
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return providerTestTimeout
+	}
+	var perr *providers.Error
+	if errors.As(err, &perr) {
+		if code := providerDiagnosticTextFromProviderError(perr, text); code != "" {
+			return code
+		}
+	}
+
+	return providerTestUnknownError
+}
+
+func providerDiagnosticTextFromProviderError(perr *providers.Error, text string) string {
+	if perr == nil {
+		return ""
+	}
+	switch perr.StatusCode {
+	case http.StatusUnauthorized:
+		if strings.Contains(text, "api key") || strings.Contains(text, "invalid") || strings.Contains(text, "key ") {
+			return providerTestInvalidKey
+		}
+		return providerTestAuthFailed
+	case http.StatusForbidden:
+		if strings.Contains(text, "api key") || strings.Contains(text, "invalid") || strings.Contains(text, "key ") {
+			return providerTestInvalidKey
+		}
+		return providerTestAuthFailed
+	case http.StatusTooManyRequests:
+		if strings.Contains(text, "quota") || strings.Contains(text, "exhaust") || strings.Contains(text, "billing") || strings.Contains(text, "limit exceeded") {
+			return providerTestQuotaExceeded
+		}
+		return providerTestRateLimited
+	case http.StatusBadRequest, http.StatusNotFound:
+		if strings.Contains(text, "model") {
+			return providerTestUnsupportedModel
+		}
+	case http.StatusGatewayTimeout, http.StatusRequestTimeout:
+		return providerTestTimeout
+	}
+	if perr.StatusCode > 0 {
+		return fmt.Sprintf("HTTP_%d", perr.StatusCode)
+	}
+	return ""
+}
+
+func providerDiagnosticTextFromText(text string) string {
+	if text == "" {
+		return ""
+	}
+	switch {
+	case strings.Contains(text, "provider disabled"):
+		return providerTestDisabledByOperator
+	case strings.Contains(text, "no detailed provider error returned") || strings.Contains(text, "provider returned empty error"):
+		return providerTestUnknownError
+	case strings.Contains(text, "invalid api key") || strings.Contains(text, "api key invalid") || strings.Contains(text, "invalid key"):
+		return providerTestInvalidKey
+	case strings.Contains(text, "authentication failed") || strings.Contains(text, "auth failed") || strings.Contains(text, "unauthorized"):
+		return providerTestAuthFailed
+	case strings.Contains(text, "quota exceeded") || strings.Contains(text, "quota exhausted") || strings.Contains(text, "exhausted") || strings.Contains(text, "insufficient quota"):
+		return providerTestQuotaExceeded
+	case strings.Contains(text, "rate limited") || strings.Contains(text, "too many requests") || strings.Contains(text, "rate limit"):
+		return providerTestRateLimited
+	case strings.Contains(text, "timeout") || strings.Contains(text, "deadline exceeded") || strings.Contains(text, "context deadline exceeded"):
+		return providerTestTimeout
+	case strings.Contains(text, "no such host") || strings.Contains(text, "dns") || strings.Contains(text, "server misbehaving") || strings.Contains(text, "lookup"):
+		return providerTestDNSFailure
+	case strings.Contains(text, "x509") || strings.Contains(text, "tls") || strings.Contains(text, "certificate") || strings.Contains(text, "handshake failure") || strings.Contains(text, "unknown authority"):
+		return providerTestTLSFailure
+	case strings.Contains(text, "unsupported model") || strings.Contains(text, "model not found") || strings.Contains(text, "invalid model") || strings.Contains(text, "model is not available"):
+		return providerTestUnsupportedModel
+	}
+	return ""
 }
 
 func providerValidationMessage(status, secretState string, record AIProviderRecord) string {
 	switch status {
+	case providerStatusDisabled:
+		return "provider disabled by operator"
 	case providerStatusMissingSecret:
 		return "credential missing from SQLite"
 	case providerStatusInvalidSecret:
 		return "credential unreadable from SQLite"
-	case providerStatusDisabled:
-		return "provider disabled by operator"
-	case providerStatusRateLimited:
-		return "last test reported rate limiting"
-	case providerStatusError:
-		if strings.TrimSpace(record.LastErrorCode) != "" {
-			return "last test error code: " + record.LastErrorCode
-		}
-		return "last test reported an error"
 	case providerStatusReady:
 		return "credential present and configuration valid"
 	default:
-		return providerStatusError
+		if code := strings.TrimSpace(record.LastErrorCode); code != "" {
+			return "last test: " + providerDiagnosticLabel(code)
+		}
+		if code := strings.TrimSpace(record.LastTestStatus); code != "" {
+			return "last test: " + providerDiagnosticLabel(code)
+		}
+		return "provider returned empty error"
 	}
 }
 
@@ -497,43 +795,40 @@ func providerDashboardEntry(name AIProviderName, cfg ai.ProviderConfig, credenti
 	_ = credentialKey
 	entry := providerManagementEntry(name, cfg, strings.TrimSpace(cfg.APIKey) != "", record)
 	return AIProviderDashboardView{
-		Name:         entry.Name,
-		Status:       entry.Status,
-		Model:        entry.Model,
-		LastTestAt:   entry.LastTestAt,
-		LastLatency:  entry.LastTestLatencyMS,
-		SecretState:  entry.SecretState,
-		EnabledState: enabledText(record.Enabled),
+		Name:            entry.Name,
+		Status:          entry.Status,
+		Model:           entry.Model,
+		Configured:      entry.ConfiguredState,
+		Enabled:         entry.EnabledState,
+		Healthy:         entry.HealthyState,
+		ConfiguredState: entry.ConfiguredState,
+		EnabledState:    entry.EnabledState,
+		HealthyState:    entry.HealthyState,
+		LastTestAt:      entry.LastTestAt,
+		LastSuccessAt:   entry.LastSuccessAt,
+		LastFailureAt:   entry.LastFailureAt,
+		LastLatency:     entry.LastTestLatencyMS,
+		LastError:       entry.LastErrorCode,
+		SecretState:     entry.SecretState,
 	}
 }
 
 func displayProviderTestStatus(raw string) string {
-	switch raw {
-	case "READY":
-		return "ready"
-	case "AUTH_FAILED":
-		return "authentication failed"
-	case "RATE_LIMITED":
-		return "rate limited"
-	case "NETWORK_ERROR":
-		return "network error"
-	case "TIMEOUT":
-		return "timeout"
-	case "UNKNOWN_ERROR":
-		return "test failed"
-	default:
-		return raw
-	}
+	return providerDiagnosticLabel(raw)
 }
 
 func displayProviderErrorCode(raw string) string {
-	switch raw {
-	case "UNKNOWN_ERROR":
-		return "unknown failure"
-	case "MISSING_SECRET":
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" || strings.EqualFold(trimmed, "none") {
+		return "no error"
+	}
+	switch providerDiagnosticCode(raw) {
+	case providerStatusMissingSecret:
 		return "key not configured"
+	case providerStatusInvalidSecret:
+		return "credential unreadable from SQLite"
 	default:
-		return raw
+		return providerDiagnosticLabel(raw)
 	}
 }
 
@@ -555,29 +850,14 @@ func providerTestOutcome(err error) (status string, errorCode string) {
 	if err == nil {
 		return providerTestReady, ""
 	}
-	if errors.Is(err, context.DeadlineExceeded) {
-		return providerTestTimeout, providerTestTimeout
+	code := providerDiagnosticText(err)
+	if code == "" {
+		code = providerTestUnknownError
 	}
-	var perr *providers.Error
-	if errors.As(err, &perr) {
-		reason := strings.ToLower(strings.TrimSpace(perr.Reason))
-		switch {
-		case perr.StatusCode == http.StatusUnauthorized || perr.StatusCode == http.StatusForbidden:
-			return providerTestAuthFailed, providerTestAuthFailed
-		case perr.StatusCode == http.StatusTooManyRequests:
-			return providerTestRateLimited, providerTestRateLimited
-		case strings.Contains(reason, "timeout"):
-			return providerTestTimeout, providerTestTimeout
-		case perr.Retryable:
-			return providerTestNetworkError, providerTestNetworkError
-		default:
-			return providerTestUnknownError, providerTestUnknownError
-		}
+	if code == providerTestReady {
+		return providerTestReady, ""
 	}
-	if strings.Contains(strings.ToLower(err.Error()), "timeout") {
-		return providerTestTimeout, providerTestTimeout
-	}
-	return providerTestUnknownError, providerTestUnknownError
+	return code, code
 }
 
 func providerKeySelection(name string) (AIProviderName, bool) {
@@ -610,10 +890,7 @@ func providerRecordForName(state *AIProviderState, name AIProviderName) *AIProvi
 }
 
 func providerStatusFromRecordAndConfig(record AIProviderRecord, cfg ai.ProviderConfig) string {
-	secretState := providerStatusMissingSecret
-	if strings.TrimSpace(cfg.APIKey) != "" {
-		secretState = "configured"
-	}
+	secretState := providerSecretState(record.Enabled, strings.TrimSpace(cfg.APIKey) != "")
 	return providerManagementStatus(record.Enabled, secretState, record.LastTestStatus)
 }
 
@@ -703,20 +980,32 @@ func ProviderManagementPage(view AIProviderManagementView, csrfToken string) tem
 }
 
 func renderProviderManagementCard(w io.Writer, p AIProviderManagementEntry, csrfToken string) error {
-	if _, err := fmt.Fprint(w, `<div class="panel">`); err != nil {
+	if _, err := fmt.Fprint(w, `<div class="panel provider-card">`); err != nil {
 		return err
 	}
-	if _, err := fmt.Fprintf(w, `<h2>%s</h2>`, html.EscapeString(p.Name)); err != nil {
+	if _, err := fmt.Fprint(w, `<div class="provider-head">`); err != nil {
 		return err
 	}
-	if _, err := fmt.Fprintf(w, `<div class="badges"><span class="badge %s">%s</span><span class="badge %s">%s</span><span class="badge %s">%s</span></div>`,
-		html.EscapeString(stateBadgeClass(strings.ToLower(p.Status))),
-		html.EscapeString(strings.ToUpper(p.Status)),
-		html.EscapeString(stateBadgeClass(enabledBadgeState(p.Enabled))),
-		html.EscapeString(strings.ToUpper(enabledBadgeState(p.Enabled))),
-		html.EscapeString(stateBadgeClass(strings.ToLower(p.SecretState))),
-		html.EscapeString(strings.ToUpper(p.SecretState)),
+	if _, err := fmt.Fprintf(w, `<div class="provider-summary"><h2>%s</h2><p class="muted">credential store: %s · %s</p></div>`,
+		html.EscapeString(p.Name),
+		html.EscapeString(p.SecretPathDisplay),
+		html.EscapeString(p.ValidationMessage),
 	); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(w, `<div class="badges"><span class="badge %s">%s</span><span class="badge %s">%s</span><span class="badge %s">%s</span><span class="badge %s">%s</span></div>`,
+		html.EscapeString(stateBadgeClass(strings.ToLower(p.ConfiguredState))),
+		html.EscapeString(strings.ToUpper(valueOrFallback(p.ConfiguredState, "missing"))),
+		html.EscapeString(stateBadgeClass(strings.ToLower(p.EnabledState))),
+		html.EscapeString(strings.ToUpper(valueOrFallback(p.EnabledState, "disabled"))),
+		html.EscapeString(stateBadgeClass(strings.ToLower(p.HealthyState))),
+		html.EscapeString(strings.ToUpper(valueOrFallback(p.HealthyState, "warning"))),
+		html.EscapeString(stateBadgeClass(strings.ToLower(p.SecretState))),
+		html.EscapeString(strings.ToUpper(valueOrFallback(p.SecretState, "none"))),
+	); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprint(w, `</div>`); err != nil {
 		return err
 	}
 	rows := []struct {
@@ -724,14 +1013,17 @@ func renderProviderManagementCard(w io.Writer, p AIProviderManagementEntry, csrf
 		value string
 	}{
 		{label: "model", value: p.Model},
-		{label: "credential store", value: p.SecretPathDisplay},
+		{label: "configured", value: p.ConfiguredState},
+		{label: "enabled", value: p.EnabledState},
+		{label: "healthy", value: p.HealthyState},
 		{label: "last test at", value: p.LastTestAt},
-		{label: "last test status", value: p.LastTestStatus},
+		{label: "last success at", value: p.LastSuccessAt},
+		{label: "last failure at", value: p.LastFailureAt},
+		{label: "last test status", value: displayProviderTestStatus(p.LastTestStatus)},
 		{label: "last test latency", value: p.LastTestLatencyMS},
-		{label: "last error code", value: p.LastErrorCode},
-		{label: "validation", value: p.ValidationMessage},
+		{label: "last error code", value: displayProviderErrorCode(p.LastErrorCode)},
 	}
-	if _, err := fmt.Fprint(w, `<div class="kv">`); err != nil {
+	if _, err := fmt.Fprint(w, `<div class="kv provider-meta">`); err != nil {
 		return err
 	}
 	for _, row := range rows {
@@ -739,22 +1031,33 @@ func renderProviderManagementCard(w io.Writer, p AIProviderManagementEntry, csrf
 			return err
 		}
 	}
-	if _, err := fmt.Fprintf(w, `<form action="/admin/providers/%s/key" method="post"><input type="hidden" name="csrf_token" value="%s"/><input type="hidden" name="confirm_replace" value="yes"/><label>new api key</label><input type="password" name="new_api_key" autocomplete="new-password" spellcheck="false"/><button type="submit">Replace Key</button></form>`, strings.ToLower(p.Name), html.EscapeString(csrfToken)); err != nil {
+	if _, err := fmt.Fprint(w, `</div>`); err != nil {
 		return err
 	}
-	if _, err := fmt.Fprintf(w, `<form action="/admin/providers/%s/test" method="post"><input type="hidden" name="csrf_token" value="%s"/><button type="submit">Test Provider</button></form>`, strings.ToLower(p.Name), html.EscapeString(csrfToken)); err != nil {
+	if _, err := fmt.Fprint(w, `<div class="provider-actions">`); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(w, `<form class="provider-key-form" data-live-provider-form="true" action="/admin/providers/%s/key" method="post"><input type="hidden" name="csrf_token" value="%s"/><input type="hidden" name="confirm_replace" value="yes"/><label>new api key</label><input type="password" name="new_api_key" autocomplete="new-password" spellcheck="false"/><button type="submit" class="action-button primary">Update Key</button></form>`, strings.ToLower(p.Name), html.EscapeString(csrfToken)); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(w, `<form data-live-provider-form="true" action="/admin/providers/%s/test" method="post"><input type="hidden" name="csrf_token" value="%s"/><button type="submit" class="action-button secondary">Test Now</button></form>`, strings.ToLower(p.Name), html.EscapeString(csrfToken)); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(w, `<form data-live-provider-form="true" action="/admin/providers/%s/reset-diagnostics" method="post"><input type="hidden" name="csrf_token" value="%s"/><button type="submit" class="action-button secondary">Reset diagnostics</button></form>`, strings.ToLower(p.Name), html.EscapeString(csrfToken)); err != nil {
 		return err
 	}
 	toggleAction := "enable"
-	toggleLabel := "Enable"
+	toggleLabel := "Enable Provider"
+	toggleClass := "action-button primary"
 	if p.Enabled {
 		toggleAction = "disable"
-		toggleLabel = "Disable"
+		toggleLabel = "Disable Provider"
+		toggleClass = "action-button secondary"
 	}
-	if _, err := fmt.Fprintf(w, `<form action="/admin/providers/%s/%s" method="post"><input type="hidden" name="csrf_token" value="%s"/><button type="submit">%s Provider</button></form>`, strings.ToLower(p.Name), toggleAction, html.EscapeString(csrfToken), toggleLabel); err != nil {
+	if _, err := fmt.Fprintf(w, `<form data-live-provider-form="true" action="/admin/providers/%s/%s" method="post"><input type="hidden" name="csrf_token" value="%s"/><button type="submit" class="%s">%s</button></form>`, strings.ToLower(p.Name), toggleAction, html.EscapeString(csrfToken), toggleClass, toggleLabel); err != nil {
 		return err
 	}
-	_, err := fmt.Fprint(w, `</div>`)
+	_, err := fmt.Fprint(w, `</div></div>`)
 	return err
 }
 
@@ -827,6 +1130,17 @@ func UnifiedProvidersPage(view UnifiedProvidersView, csrfToken string) templ.Com
 		Subtitle: "All provider credentials and health. AI providers support full key/enable/test management. Enrichment/reporting providers support key rotation. Infrastructure providers are config-managed.",
 		Active:   "/providers",
 		Body: templ.ComponentFunc(func(ctx context.Context, w io.Writer) error {
+			if _, err := fmt.Fprint(w, `<div id="providers-live-shell" data-live-shell="providers">`); err != nil {
+				return err
+			}
+			summary := summarizeProviderOverview(view)
+			if _, err := fmt.Fprintf(w, `<div class="panel"><h2>Providers Overview <span class="live-chip">Live</span></h2><div class="badges"><span class="badge healthy">%d healthy</span><span class="badge warning">%d warning</span><span class="badge error">%d error</span><span class="badge disabled">%d disabled</span></div><p class="muted" style="margin:.75rem 0 0">Status updates refresh in place without a full page reload.</p></div>`,
+				summary.Healthy, summary.Warning, summary.Error, summary.Disabled); err != nil {
+				return err
+			}
+			if _, err := fmt.Fprintf(w, `<div class="panel"><div class="provider-actions"><form data-live-provider-form="true" action="/admin/providers/test-all" method="post"><input type="hidden" name="csrf_token" value="%s"/><button type="submit" class="action-button primary">Test All</button></form></div><p class="muted" style="margin:.75rem 0 0">Runs the same live test path used by each provider card, then refreshes badges in place.</p></div>`, html.EscapeString(csrfToken)); err != nil {
+				return err
+			}
 			if _, err := fmt.Fprint(w, `<div class="panel"><p class="muted">Keys are never rendered or prefilled. Credential store keys are encrypted in SQLite. Infrastructure providers (Cloudflare, CrowdSec, BetterStack) require config-file changes — no mutation endpoints are exposed here.</p></div>`); err != nil {
 				return err
 			}
@@ -897,38 +1211,109 @@ func UnifiedProvidersPage(view UnifiedProvidersView, csrfToken string) templ.Com
 					return err
 				}
 			}
+			if _, err := fmt.Fprint(w, `<script src="/static/providers-live.js" defer></script></div>`); err != nil {
+				return err
+			}
 			return nil
 		}),
 	})
 }
 
+type providerOverviewSummary struct {
+	Healthy  int
+	Warning  int
+	Error    int
+	Disabled int
+}
+
+func summarizeProviderOverview(view UnifiedProvidersView) providerOverviewSummary {
+	var out providerOverviewSummary
+	for _, p := range view.NonAI {
+		if !p.Enabled {
+			out.Disabled++
+			continue
+		}
+		if p.Healthy {
+			out.Healthy++
+			continue
+		}
+		if p.Configured {
+			out.Warning++
+		} else {
+			out.Error++
+		}
+	}
+	for _, p := range view.AI.Providers {
+		if !p.Enabled {
+			out.Disabled++
+			continue
+		}
+		switch {
+		case strings.EqualFold(p.HealthyState, "healthy"), strings.EqualFold(p.Status, providerStatusReady):
+			out.Healthy++
+		case strings.EqualFold(p.Status, providerStatusMissingSecret), strings.EqualFold(p.SecretState, providerStatusMissingSecret):
+			out.Error++
+		default:
+			out.Warning++
+		}
+	}
+	return out
+}
+
 func renderNonAIProviderCard(w io.Writer, e NonAIProviderEntry, csrfToken string) error {
-	if _, err := fmt.Fprint(w, `<div class="panel">`); err != nil {
+	if _, err := fmt.Fprint(w, `<div class="panel provider-card">`); err != nil {
 		return err
 	}
-	if _, err := fmt.Fprintf(w, `<h2>%s</h2>`, html.EscapeString(e.Name)); err != nil {
+	if _, err := fmt.Fprint(w, `<div class="provider-head">`); err != nil {
 		return err
 	}
-	if _, err := fmt.Fprintf(w, `<div class="badges"><span class="badge %s">%s</span><span class="badge %s">%s</span><span class="badge info">%s</span></div>`,
-		html.EscapeString(stateBadgeClass(enabledBadgeState(e.Enabled))),
-		html.EscapeString(strings.ToUpper(enabledBadgeState(e.Enabled))),
-		html.EscapeString(stateBadgeClass(providerManagementStatus(e.Enabled, func() string {
-			if e.Configured {
-				return "configured"
-			}
-			return providerStatusMissingSecret
-		}(), ""))),
-		func() string {
-			if e.Configured {
-				return "CONFIGURED"
-			}
-			return "MISSING KEY"
-		}(),
+	if _, err := fmt.Fprintf(w, `<div class="provider-summary"><h2>%s</h2><p class="muted">credential store: SQLite (encrypted) · %s</p></div>`, html.EscapeString(e.Name), html.EscapeString(e.Category)); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(w, `<div class="badges"><span class="badge %s">%s</span><span class="badge %s">%s</span><span class="badge %s">%s</span><span class="badge info">%s</span></div>`,
+		html.EscapeString(stateBadgeClass(strings.ToLower(e.ConfiguredState))),
+		html.EscapeString(strings.ToUpper(valueOrFallback(e.ConfiguredState, "missing"))),
+		html.EscapeString(stateBadgeClass(strings.ToLower(e.EnabledState))),
+		html.EscapeString(strings.ToUpper(valueOrFallback(e.EnabledState, "disabled"))),
+		html.EscapeString(stateBadgeClass(strings.ToLower(e.HealthyState))),
+		html.EscapeString(strings.ToUpper(valueOrFallback(e.HealthyState, "warning"))),
 		html.EscapeString(e.Category),
 	); err != nil {
 		return err
 	}
-	if _, err := fmt.Fprint(w, `<div class="kv">`); err != nil {
+	if _, err := fmt.Fprint(w, `</div><div class="kv provider-meta">`); err != nil {
+		return err
+	}
+	if err := renderProviderHealthRow(w, "status", func() string {
+		if e.Configured {
+			return "configured"
+		}
+		return "missing key"
+	}()); err != nil {
+		return err
+	}
+	if err := renderProviderHealthRow(w, "category", e.Category); err != nil {
+		return err
+	}
+	if err := renderProviderHealthRow(w, "enabled", e.EnabledState); err != nil {
+		return err
+	}
+	if err := renderProviderHealthRow(w, "healthy", e.HealthyState); err != nil {
+		return err
+	}
+	if err := renderProviderHealthRow(w, "last test at", e.LastTestAt); err != nil {
+		return err
+	}
+	if err := renderProviderHealthRow(w, "last success at", e.LastSuccessAt); err != nil {
+		return err
+	}
+	if err := renderProviderHealthRow(w, "last failure at", e.LastFailureAt); err != nil {
+		return err
+	}
+	if err := renderProviderHealthRow(w, "last latency", e.LastLatencyMS); err != nil {
+		return err
+	}
+	if err := renderProviderHealthRow(w, "last error code", displayProviderErrorCode(e.LastErrorCode)); err != nil {
 		return err
 	}
 	if err := renderProviderHealthRow(w, "credential store", "SQLite (encrypted)"); err != nil {
@@ -944,11 +1329,27 @@ func renderNonAIProviderCard(w io.Writer, e NonAIProviderEntry, csrfToken string
 			return err
 		}
 	}
-	if _, err := fmt.Fprintf(w,
-		`<form action="/admin/providers/%s/key" method="post"><input type="hidden" name="csrf_token" value="%s"/><input type="hidden" name="confirm_replace" value="yes"/><label>new api key</label><input type="password" name="new_api_key" autocomplete="new-password" spellcheck="false"/><button type="submit">Replace Key</button></form>`,
-		html.EscapeString(strings.ToLower(e.Name)),
-		html.EscapeString(csrfToken),
-	); err != nil {
+	if _, err := fmt.Fprint(w, `</div><div class="provider-actions">`); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(w, `<form class="provider-key-form" data-live-provider-form="true" action="/admin/providers/%s/key" method="post"><input type="hidden" name="csrf_token" value="%s"/><input type="hidden" name="confirm_replace" value="yes"/><label>new api key</label><input type="password" name="new_api_key" autocomplete="new-password" spellcheck="false"/><button type="submit" class="action-button primary">Update Key</button></form>`, html.EscapeString(strings.ToLower(e.Name)), html.EscapeString(csrfToken)); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(w, `<form data-live-provider-form="true" action="/admin/providers/%s/test" method="post"><input type="hidden" name="csrf_token" value="%s"/><button type="submit" class="action-button secondary">Test Now</button></form>`, html.EscapeString(strings.ToLower(e.Name)), html.EscapeString(csrfToken)); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(w, `<form data-live-provider-form="true" action="/admin/providers/%s/reset-diagnostics" method="post"><input type="hidden" name="csrf_token" value="%s"/><button type="submit" class="action-button secondary">Reset diagnostics</button></form>`, html.EscapeString(strings.ToLower(e.Name)), html.EscapeString(csrfToken)); err != nil {
+		return err
+	}
+	toggleAction := "enable"
+	toggleLabel := "Enable"
+	toggleClass := "action-button primary"
+	if e.Enabled {
+		toggleAction = "disable"
+		toggleLabel = "Disable"
+		toggleClass = "action-button secondary"
+	}
+	if _, err := fmt.Fprintf(w, `<form data-live-provider-form="true" action="/admin/providers/%s/%s" method="post"><input type="hidden" name="csrf_token" value="%s"/><button type="submit" class="%s">%s</button></form>`, html.EscapeString(strings.ToLower(e.Name)), toggleAction, html.EscapeString(csrfToken), toggleClass, toggleLabel); err != nil {
 		return err
 	}
 	_, err := fmt.Fprint(w, `</div></div>`)
@@ -956,10 +1357,18 @@ func renderNonAIProviderCard(w io.Writer, e NonAIProviderEntry, csrfToken string
 }
 
 func renderInfraProviderCard(w io.Writer, e NonAIProviderEntry) error {
-	if _, err := fmt.Fprint(w, `<div class="panel">`); err != nil {
+	if _, err := fmt.Fprint(w, `<div class="panel provider-card">`); err != nil {
 		return err
 	}
-	if _, err := fmt.Fprintf(w, `<h2>%s</h2>`, html.EscapeString(e.Name)); err != nil {
+	if _, err := fmt.Fprint(w, `<div class="provider-head">`); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(w, `<div class="provider-summary"><h2>%s</h2><p class="muted">config-managed provider%s</p></div>`, html.EscapeString(e.Name), func() string {
+		if strings.TrimSpace(e.Notes) != "" {
+			return " · " + e.Notes
+		}
+		return ""
+	}()); err != nil {
 		return err
 	}
 	if _, err := fmt.Fprintf(w, `<div class="badges"><span class="badge %s">%s</span><span class="badge %s">%s</span><span class="badge info">%s</span><span class="badge muted">config-managed</span></div>`,
@@ -979,6 +1388,9 @@ func renderInfraProviderCard(w io.Writer, e NonAIProviderEntry) error {
 		}(),
 		html.EscapeString(e.Category),
 	); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprint(w, `</div>`); err != nil {
 		return err
 	}
 	if e.Notes != "" {

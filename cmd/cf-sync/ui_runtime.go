@@ -153,12 +153,13 @@ func runUIWithLocker(ctx context.Context, logger *slog.Logger, cfg *config.Confi
 		evidenceStore = evidenceHolder
 	}
 	server, err := ui.NewServer(cfg, ui.Options{
-		SetupStore:      setupStore,
-		CredentialStore: credentialStore,
-		SecretProvider:  ui.NewFileSecretProvider(cfg.UI.SecretFile),
-		AuditSink:       auditSink,
-		Logger:          logger,
-		EvidenceStore:   evidenceStore,
+		SetupStore:        setupStore,
+		CredentialStore:   credentialStore,
+		SecretProvider:    ui.NewFileSecretProvider(cfg.UI.SecretFile),
+		AuditSink:         auditSink,
+		Logger:            logger,
+		EvidenceStore:     evidenceStore,
+		ValidateAbuseIPDB: ui.ValidateAbuseIPDB,
 		AIExplainBuilder: func(effective ai.Config) aigateway.Gateway {
 			return aigateway.NewService(effective, buildAIProviders(effective, logger), nil, auditSink)
 		},
@@ -172,6 +173,7 @@ func runUIWithLocker(ctx context.Context, logger *slog.Logger, cfg *config.Confi
 	if err != nil {
 		return err
 	}
+	server.StartProviderHealthRefreshers(ctx, time.Hour)
 
 	if host, _, err := net.SplitHostPort(cfg.UI.Addr); err == nil {
 		if ip := net.ParseIP(host); ip != nil && !ip.IsLoopback() {

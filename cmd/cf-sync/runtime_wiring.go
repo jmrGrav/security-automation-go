@@ -1,10 +1,15 @@
 package main
 
 import (
+	"context"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jm/security-automation-go/internal/abuseipdb"
+	abexec "github.com/jm/security-automation-go/internal/abuseipdb/executor"
+	abmodels "github.com/jm/security-automation-go/internal/abuseipdb/models"
+	abtransport "github.com/jm/security-automation-go/internal/abuseipdb/transport"
 	"github.com/jm/security-automation-go/internal/adapters/cloudflareevent"
 	crowdsecevent "github.com/jm/security-automation-go/internal/adapters/crowdsecevent"
 	openrestyevent "github.com/jm/security-automation-go/internal/adapters/openrestyevent"
@@ -12,6 +17,8 @@ import (
 	"github.com/jm/security-automation-go/internal/cloudflare/client"
 	"github.com/jm/security-automation-go/internal/config"
 	"github.com/jm/security-automation-go/internal/execution"
+	"github.com/jm/security-automation-go/internal/httpclient"
+	"github.com/jm/security-automation-go/internal/runtime/providerstate"
 	fp_memory "github.com/jm/security-automation-go/internal/security/fp_memory"
 	"github.com/jm/security-automation-go/internal/security/reputation"
 	sectrust "github.com/jm/security-automation-go/internal/security/trust"
@@ -82,12 +89,11 @@ type wafBundle struct {
 }
 
 // newWAFBundle creates all WAF event services sharing one reporting.Service.
-// Returns nil when AbuseIPDB is not configured (abuse == nil).
-func newWAFBundle(cf *client.Client, abuse *abuseipdb.Client, telemetry sinks.Sink, trustRegistry *sectrust.Registry, cfg *config.Config, stores *sqlite.ReportingStores) *wafBundle {
-	if abuse == nil {
-		return nil
-	}
-	svc := reporting.New(abuse.Executor, telemetry, trustRegistry, cfg.AbuseIPDB.CacheTTL)
+// The reporting executor is runtime-gated so AbuseIPDB can be enabled/disabled
+// and retested without restarting the binary.
+func newWAFBundle(cf *client.Client, abuse *abuseipdb.Client, hc httpclient.Client, creds credentialLooker, stateStore providerstate.Store, telemetry sinks.Sink, trustRegistry *sectrust.Registry, cfg *config.Config, stores *sqlite.ReportingStores) *wafBundle {
+	reportExecutor := newRuntimeAbuseExecutor(hc, creds, stateStore, cfg != nil && cfg.AbuseIPDB.Enabled, abuse)
+	svc := reporting.New(reportExecutor, telemetry, trustRegistry, cfg.AbuseIPDB.CacheTTL)
 	if stores != nil {
 		stores.Configure(svc)
 	}
@@ -98,6 +104,77 @@ func newWAFBundle(cf *client.Client, abuse *abuseipdb.Client, telemetry sinks.Si
 		orSource: openrestyevent.NewLiveSource(cfg.OpenResty.EventsFile),
 		or:       openrestyevent.NewService(svc),
 	}
+}
+
+func newRuntimeAbuseExecutor(hc httpclient.Client, creds credentialLooker, stateStore providerstate.Store, fallbackEnabled bool, initial *abuseipdb.Client) abexec.Executor {
+	executor := &runtimeAbuseExecutor{
+		hc:              hc,
+		credentialStore: creds,
+		stateStore:      stateStore,
+		fallbackEnabled: fallbackEnabled,
+	}
+	if initial != nil {
+		executor.executor = initial.Executor
+	}
+	return executor
+}
+
+type runtimeAbuseExecutor struct {
+	hc              httpclient.Client
+	credentialStore credentialLooker
+	stateStore      providerstate.Store
+	fallbackEnabled bool
+
+	mu       sync.Mutex
+	key      string
+	executor abexec.Executor
+}
+
+func (r *runtimeAbuseExecutor) Execute(ctx context.Context, reports []abmodels.ExecutableReport) error {
+	if r == nil {
+		return nil
+	}
+	if !runtimeProviderEnabled(ctx, r.stateStore, "abuseipdb", r.fallbackEnabled) {
+		return nil
+	}
+	key := r.currentKey(ctx)
+	if key == "" {
+		return nil
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.executor == nil || r.key != key {
+		r.key = key
+		if r.hc == nil {
+			return nil
+		}
+		r.executor = abexec.New(abtransport.New(r.hc, key))
+	}
+	if r.executor == nil {
+		return nil
+	}
+	return r.executor.Execute(ctx, reports)
+}
+
+func (r *runtimeAbuseExecutor) currentKey(ctx context.Context) string {
+	if r == nil || r.credentialStore == nil {
+		return ""
+	}
+	if v, ok, err := r.credentialStore.Lookup(ctx, "abuseipdb.api_key"); err == nil && ok {
+		return strings.TrimSpace(v)
+	}
+	return ""
+}
+
+func runtimeProviderEnabled(ctx context.Context, store providerstate.Store, slug string, fallback bool) bool {
+	if store == nil {
+		return fallback
+	}
+	state, ok, err := providerstate.Load(ctx, store, slug)
+	if err != nil || !ok {
+		return fallback
+	}
+	return state.Enabled
 }
 
 // cfWAFService returns the Cloudflare WAF service, or nil when the bundle is nil.

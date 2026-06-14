@@ -38,10 +38,19 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 // handleLoginJSON handles JSON-based admin password authentication.
 // The permanent admin password hash is stored in SQLite (ui_settings key "admin_password_hash").
 func (s *Server) handleLoginJSON(w http.ResponseWriter, r *http.Request) {
+	eventID := newUIEventID()
 	var req struct {
 		Password string `json:"password"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.auditRecord("login_error", map[string]string{
+			"actor":          "local",
+			"source":         "ui",
+			"target":         "ui_session",
+			"result":         "bad_json",
+			"correlation_id": eventID,
+			"event_id":       eventID,
+		})
 		http.Error(w, "invalid request", http.StatusBadRequest)
 		return
 	}
@@ -54,6 +63,14 @@ func (s *Server) handleLoginJSON(w http.ResponseWriter, r *http.Request) {
 	// Load permanent admin password hash from SQLite.
 	hash, ok, err := s.setupStore.GetSetting(r.Context(), "admin_password_hash")
 	if err != nil {
+		s.auditRecord("login_error", map[string]string{
+			"actor":          "local",
+			"source":         "ui",
+			"target":         "ui_session",
+			"result":         "db_error",
+			"correlation_id": eventID,
+			"event_id":       eventID,
+		})
 		if s.logger != nil {
 			s.logger.Error("load admin password hash", "err", err)
 		}
@@ -62,11 +79,27 @@ func (s *Server) handleLoginJSON(w http.ResponseWriter, r *http.Request) {
 	}
 	if !ok || hash == "" {
 		// No permanent password set yet — setup not complete.
+		s.auditRecord("login_failed", map[string]string{
+			"actor":          "local",
+			"source":         "ui",
+			"target":         "ui_session",
+			"result":         "setup_incomplete",
+			"correlation_id": eventID,
+			"event_id":       eventID,
+		})
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 
 	if !auth.VerifyPassword(hash, req.Password) {
+		s.auditRecord("login_failed", map[string]string{
+			"actor":          "local",
+			"source":         "ui",
+			"target":         "ui_session",
+			"result":         "invalid_password",
+			"correlation_id": eventID,
+			"event_id":       eventID,
+		})
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
@@ -86,12 +119,29 @@ func (s *Server) handleLoginJSON(w http.ResponseWriter, r *http.Request) {
 		"status":        "logged in",
 		"redirect":      "/",
 	})
+	s.auditRecord("login_success", map[string]string{
+		"actor":          "local",
+		"source":         "ui",
+		"target":         "ui_session",
+		"result":         "success",
+		"correlation_id": eventID,
+		"event_id":       eventID,
+	})
 }
 
 // handleLoginForm handles form-based admin password authentication.
 func (s *Server) handleLoginForm(w http.ResponseWriter, r *http.Request) {
+	eventID := newUIEventID()
 	if err := r.ParseForm(); err != nil {
-		s.audit.Record("login_error", map[string]string{"reason": "bad_form"})
+		s.auditRecord("login_error", map[string]string{
+			"actor":          "local",
+			"source":         "ui",
+			"target":         "ui_session",
+			"result":         "bad_form",
+			"reason":         "bad_form",
+			"correlation_id": eventID,
+			"event_id":       eventID,
+		})
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
@@ -109,18 +159,42 @@ func (s *Server) handleLoginForm(w http.ResponseWriter, r *http.Request) {
 	// Load permanent admin password hash from SQLite.
 	hash, ok, err := s.setupStore.GetSetting(r.Context(), "admin_password_hash")
 	if err != nil {
-		s.audit.Record("login_error", map[string]string{"reason": "db_error"})
+		s.auditRecord("login_error", map[string]string{
+			"actor":          "local",
+			"source":         "ui",
+			"target":         "ui_session",
+			"result":         "db_error",
+			"reason":         "db_error",
+			"correlation_id": eventID,
+			"event_id":       eventID,
+		})
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 	if !ok || hash == "" {
-		s.audit.Record("login_failed", map[string]string{"reason": "setup_incomplete"})
+		s.auditRecord("login_failed", map[string]string{
+			"actor":          "local",
+			"source":         "ui",
+			"target":         "ui_session",
+			"result":         "setup_incomplete",
+			"reason":         "setup_incomplete",
+			"correlation_id": eventID,
+			"event_id":       eventID,
+		})
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 
 	if !auth.VerifyPassword(hash, password) {
-		s.audit.Record("login_failed", map[string]string{"reason": "invalid_password"})
+		s.auditRecord("login_failed", map[string]string{
+			"actor":          "local",
+			"source":         "ui",
+			"target":         "ui_session",
+			"result":         "invalid_password",
+			"reason":         "invalid_password",
+			"correlation_id": eventID,
+			"event_id":       eventID,
+		})
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
@@ -131,7 +205,14 @@ func (s *Server) handleLoginForm(w http.ResponseWriter, r *http.Request) {
 	s.pruneSessionsLocked(time.Now().UTC())
 	s.mu.Unlock()
 	s.setSessionCookie(w, sessionToken)
-	s.audit.Record("login_success", map[string]string{"actor": "local"})
+	s.auditRecord("login_success", map[string]string{
+		"actor":          "local",
+		"source":         "ui",
+		"target":         "ui_session",
+		"result":         "success",
+		"correlation_id": eventID,
+		"event_id":       eventID,
+	})
 	http.Redirect(w, r, "/", http.StatusFound)
 }
 

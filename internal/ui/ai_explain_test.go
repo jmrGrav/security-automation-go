@@ -85,6 +85,58 @@ func TestAIExplainEndpointReturnsUnavailableJSON(t *testing.T) {
 	}
 }
 
+func TestAIExplainAuditEntriesIncludeUsefulMetadata(t *testing.T) {
+	srv, auditSink, _ := newTestServer(t, map[string]string{"UI_SECRET": "ui-secret-value"})
+	cookie := loginCookie(t, srv, "test-password-123!@#")
+	req := httptest.NewRequest(http.MethodPost, "/ui/ai/explain", strings.NewReader(`{"subject_type":"provider","subject_id":"cloudflare","provider_preference":"auto"}`))
+	req.AddCookie(cookie)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-CSRF-Token", srv.csrfTokenFor(cookie.Value))
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200 response, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var requested *audit.AuditEntry
+	var unavailable *audit.AuditEntry
+	for i := range auditSink.Entries() {
+		entry := auditSink.Entries()[i]
+		switch entry.Action {
+		case "ai_explain_requested":
+			requested = &entry
+		case "ai_explain_unavailable":
+			unavailable = &entry
+		}
+	}
+
+	if requested == nil {
+		t.Fatal("expected ai_explain_requested audit entry")
+	}
+	if requested.Target != "cloudflare" {
+		t.Fatalf("expected requested target to preserve subject id, got %+v", *requested)
+	}
+	if requested.Result != "requested" {
+		t.Fatalf("expected requested result, got %+v", *requested)
+	}
+	if requested.EventID == "" || requested.Correlation != requested.EventID {
+		t.Fatalf("expected requested event_id/correlation parity, got %+v", *requested)
+	}
+
+	if unavailable == nil {
+		t.Fatal("expected ai_explain_unavailable audit entry")
+	}
+	if unavailable.Target != "cloudflare" {
+		t.Fatalf("expected unavailable target to preserve subject id, got %+v", *unavailable)
+	}
+	if unavailable.Result != "unavailable" {
+		t.Fatalf("expected unavailable result, got %+v", *unavailable)
+	}
+	if unavailable.EventID == "" || unavailable.Correlation != unavailable.EventID {
+		t.Fatalf("expected unavailable event_id/correlation parity, got %+v", *unavailable)
+	}
+}
+
 func TestAIExplainWidgetsRenderOnReadOnlyPages(t *testing.T) {
 	var buf bytes.Buffer
 	if err := TimelinePage(TimelineView{

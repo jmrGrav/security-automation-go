@@ -45,4 +45,14 @@ test.describe('Health Center', () => {
       expect(dashboardResp ?? '', 'Dashboard must mention Cloudflare if Health does').toContain('Cloudflare');
     }
   });
+
+  test('pipeline health exposes state and last-event columns', async ({ page }) => {
+    const response = await page.goto('/pipeline');
+    expect(response?.status()).toBe(200);
+    const body = await page.content();
+    expect(body).toContain('Pipeline Health');
+    expect(body).toContain('State');
+    expect(body).toContain('Last event');
+    expect(body).toContain('Latest evidence');
+  });
 });

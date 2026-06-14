@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	ai "github.com/jm/security-automation-go/internal/ai"
 )
 
 func TestAIProviderStateRoundTrip(t *testing.T) {
@@ -93,5 +95,62 @@ func TestAtomicWriteFileSetsPermissionsAndDoesNotLeaveTempFile(t *testing.T) {
 	}
 	if matches, _ := filepath.Glob(filepath.Join(dir, "*.tmp")); len(matches) != 0 {
 		t.Fatalf("expected no temp files left behind, got %v", matches)
+	}
+}
+
+func TestProviderManagementEntry_DisabledNoKeyShowsNotConfigured(t *testing.T) {
+	entry := providerManagementEntry(
+		AIProviderOpenAI,
+		ai.ProviderConfig{Model: "gpt-4.1-mini"},
+		false,
+		AIProviderRecord{Enabled: false},
+	)
+
+	if entry.Status != providerStatusDisabled {
+		t.Fatalf("expected disabled status, got %q", entry.Status)
+	}
+	if entry.SecretState != "not configured" {
+		t.Fatalf("expected not configured secret state, got %q", entry.SecretState)
+	}
+	if entry.ValidationMessage != "provider disabled by operator" {
+		t.Fatalf("expected provider disabled by operator, got %q", entry.ValidationMessage)
+	}
+}
+
+func TestProviderManagementEntry_EnabledNoKeyShowsMissingSecret(t *testing.T) {
+	entry := providerManagementEntry(
+		AIProviderOpenAI,
+		ai.ProviderConfig{Enabled: true, Model: "gpt-4.1-mini"},
+		false,
+		AIProviderRecord{Enabled: true},
+	)
+
+	if entry.Status != providerStatusMissingSecret {
+		t.Fatalf("expected missing secret status, got %q", entry.Status)
+	}
+	if entry.SecretState != providerStatusMissingSecret {
+		t.Fatalf("expected missing secret state, got %q", entry.SecretState)
+	}
+	if entry.ValidationMessage != "credential missing from SQLite" {
+		t.Fatalf("expected credential missing validation message, got %q", entry.ValidationMessage)
+	}
+}
+
+func TestProviderManagementEntry_ConfiguredButDisabledStaysConfigured(t *testing.T) {
+	entry := providerManagementEntry(
+		AIProviderOpenAI,
+		ai.ProviderConfig{Model: "gpt-4.1-mini"},
+		true,
+		AIProviderRecord{Enabled: false},
+	)
+
+	if entry.Status != providerStatusDisabled {
+		t.Fatalf("expected disabled status, got %q", entry.Status)
+	}
+	if entry.SecretState != "configured" {
+		t.Fatalf("expected configured secret state, got %q", entry.SecretState)
+	}
+	if entry.ValidationMessage != "provider disabled by operator" {
+		t.Fatalf("expected provider disabled by operator, got %q", entry.ValidationMessage)
 	}
 }
