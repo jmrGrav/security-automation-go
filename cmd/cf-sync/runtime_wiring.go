@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"strings"
 	"sync"
@@ -15,6 +16,7 @@ import (
 	crowdsecevent "github.com/jm/security-automation-go/internal/adapters/crowdsecevent"
 	openrestyevent "github.com/jm/security-automation-go/internal/adapters/openrestyevent"
 	"github.com/jm/security-automation-go/internal/betterstack"
+	cfpkg "github.com/jm/security-automation-go/internal/cloudflare"
 	"github.com/jm/security-automation-go/internal/cloudflare/client"
 	"github.com/jm/security-automation-go/internal/config"
 	"github.com/jm/security-automation-go/internal/execution"
@@ -89,6 +91,7 @@ type wafBundle struct {
 	orSource  *openrestyevent.LiveSource
 	or        *openrestyevent.Service
 	banEval   *autoban.Evaluator
+	banExec   autoban.BanExecutor
 }
 
 // newWAFBundle creates all WAF event services sharing one reporting.Service.
@@ -108,13 +111,20 @@ func newWAFBundle(cf *client.Client, abuse *abuseipdb.Client, hc httpclient.Clie
 			abuseKey = k
 		}
 	}
+	banEval := buildAutoBanEvaluator(cfg, hc, trustRegistry, abuseKey, logger)
+	var banExec autoban.BanExecutor
+	if cfg != nil && cfg.Cloudflare.MutationsEnabled && cfg.Cloudflare.AutoBanEnabled {
+		cfEnforcer := cfpkg.NewClient(hc, cfg.Cloudflare.APIToken)
+		banExec = &cfBanExecutor{client: cfEnforcer, zoneID: cfg.Cloudflare.ZoneID, logger: logger}
+	}
 	return &wafBundle{
 		cfWAF:    cloudflareevent.NewService(cf, svc),
 		csSource: crowdsecevent.NewLiveSource(cfg.CrowdSec.DecisionsLog, cfg.CrowdSec.NginxLogDir, 24*time.Hour),
 		cs:       crowdsecevent.NewService(svc),
 		orSource: openrestyevent.NewLiveSource(cfg.OpenResty.EventsFile),
 		or:       openrestyevent.NewService(svc),
-		banEval:  buildAutoBanEvaluator(cfg, hc, trustRegistry, abuseKey, logger),
+		banEval:  banEval,
+		banExec:  banExec,
 	}
 }
 
@@ -205,6 +215,14 @@ func (b *wafBundle) banEvalService() *autoban.Evaluator {
 	return b.banEval
 }
 
+// banExecutorService returns the CF ban executor, or nil when in shadow mode.
+func (b *wafBundle) banExecutorService() autoban.BanExecutor {
+	if b == nil {
+		return nil
+	}
+	return b.banExec
+}
+
 // transportAbuseChecker wraps the AbuseIPDB transport to satisfy autoban.AbuseIPDBChecker.
 type transportAbuseChecker struct {
 	t *abtransport.Transport
@@ -231,4 +249,30 @@ func buildAutoBanEvaluator(cfg *config.Config, hc httpclient.Client, trustReg *s
 	// Live mode requires both Cloudflare mutations and the explicit auto-ban flag.
 	liveMode := cfg != nil && cfg.Cloudflare.MutationsEnabled && cfg.Cloudflare.AutoBanEnabled
 	return autoban.NewEvaluator(autoban.Config{LiveMode: liveMode}, trustReg, enricher, logger)
+}
+
+// cfBanExecutor enacts ban decisions by creating a Cloudflare IP access rule.
+// It is only instantiated when both mutations_enabled and auto_ban_enabled are set.
+type cfBanExecutor struct {
+	client cfpkg.EnforcementClient
+	zoneID string
+	logger *slog.Logger
+}
+
+func (e *cfBanExecutor) ExecuteBan(ctx context.Context, decision autoban.BanDecision) error {
+	if e == nil || e.client == nil {
+		return nil
+	}
+	tag := fmt.Sprintf("cf-sync:autoban:%s", decision.Reason)
+	id, err := e.client.AddIPAccessRule(ctx, e.zoneID, decision.IP, tag, "ip")
+	if err != nil {
+		if e.logger != nil {
+			e.logger.Error("autoban: CF ban failed", "ip", decision.IP, "reason", decision.Reason, "error", err)
+		}
+		return err
+	}
+	if e.logger != nil {
+		e.logger.Info("autoban: CF ban applied", "ip", decision.IP, "reason", decision.Reason, "rule_id", id)
+	}
+	return nil
 }

@@ -219,6 +219,9 @@ func runCFSync(configPath, mode string, dryRun bool, format string, metricsAddr 
 		if rflags.AbuseIPDBEnabled {
 			cfg.AbuseIPDB.Enabled = true
 		}
+		if rflags.AutoBanEnabled {
+			cfg.Cloudflare.AutoBanEnabled = true
+		}
 	} else {
 		logger.Warn("could not read runtime flags from SQLite — using config/env defaults", "error", err)
 	}

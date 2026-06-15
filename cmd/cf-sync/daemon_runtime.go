@@ -199,7 +199,7 @@ func processOpenRestyOnce(ctx context.Context, logger *slog.Logger, bundle *wafB
 	}
 }
 
-func startWAFReplayPoller(ctx context.Context, logger *slog.Logger, interval time.Duration, zoneID string, wafReplay *cloudflareevent.Service, cursorStore cursorStateStore, banEval *autoban.Evaluator) {
+func startWAFReplayPoller(ctx context.Context, logger *slog.Logger, interval time.Duration, zoneID string, wafReplay *cloudflareevent.Service, cursorStore cursorStateStore, banEval *autoban.Evaluator, banExec autoban.BanExecutor) {
 	if wafReplay == nil {
 		return
 	}
@@ -216,7 +216,7 @@ func startWAFReplayPoller(ctx context.Context, logger *slog.Logger, interval tim
 			default:
 			}
 
-			since = runWAFReplayIteration(ctx, logger, zoneID, wafReplay, cursorStore, since, time.Now().UTC(), banEval)
+			since = runWAFReplayIteration(ctx, logger, zoneID, wafReplay, cursorStore, since, time.Now().UTC(), banEval, banExec)
 
 			select {
 			case <-ctx.Done():
@@ -227,7 +227,7 @@ func startWAFReplayPoller(ctx context.Context, logger *slog.Logger, interval tim
 	}()
 }
 
-func runWAFReplayIteration(ctx context.Context, logger *slog.Logger, zoneID string, wafReplay *cloudflareevent.Service, cursorStore cursorStateStore, since time.Time, now time.Time, banEval *autoban.Evaluator) time.Time {
+func runWAFReplayIteration(ctx context.Context, logger *slog.Logger, zoneID string, wafReplay *cloudflareevent.Service, cursorStore cursorStateStore, since time.Time, now time.Time, banEval *autoban.Evaluator, banExec autoban.BanExecutor) time.Time {
 	querySince := replayQuerySince(since, cloudflareReplayOverlap)
 	report, err := wafReplay.ProcessSince(ctx, zoneID, querySince)
 	if err != nil {
@@ -290,13 +290,17 @@ func runWAFReplayIteration(ctx context.Context, logger *slog.Logger, zoneID stri
 			burstDecision := banEval.EvaluateBurst(ip)
 			banEval.Log(burstDecision)
 			if burstDecision.ShouldBan && !burstDecision.Shadow {
-				banEval.RecordBan(ip)
+				if banExec == nil || banExec.ExecuteBan(ctx, burstDecision) == nil {
+					banEval.RecordBan(ip)
+				}
 			}
 			// Evaluate confidence-100 rule (calls AbuseIPDB with 6h cache).
 			confDecision := banEval.EvaluateConfidence(ctx, ip)
 			banEval.Log(confDecision)
 			if confDecision.ShouldBan && !confDecision.Shadow {
-				banEval.RecordBan(ip)
+				if banExec == nil || banExec.ExecuteBan(ctx, confDecision) == nil {
+					banEval.RecordBan(ip)
+				}
 			}
 		}
 	}
@@ -385,7 +389,7 @@ func runDaemonWithLocker(ctx context.Context, logger *slog.Logger, orch *pipelin
 	defer s.Stop()
 	childCtx, cancel := newDaemonContext(ctx, logger, srv)
 	defer cancel()
-	startWAFReplayPoller(childCtx, logger, interval, zoneID, wafReplay, cursorStore, bundle.banEvalService())
+	startWAFReplayPoller(childCtx, logger, interval, zoneID, wafReplay, cursorStore, bundle.banEvalService(), bundle.banExecutorService())
 	startCrowdSecOpenRestyPoller(childCtx, logger, interval, bundle)
 	if quotaRefreshers != nil {
 		quotaRefreshers.start(childCtx, logger)

@@ -2,11 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
-## [v1.7.2] — unreleased (pending validation)
+## [v1.7.2] — 2026-06-15
 
 ### Summary
 
-Operability sprint. Fixes two root causes that had silenced AbuseIPDB reporting since June 13: an orchestrator checkpoint UNIQUE constraint crash loop and an unconditional LeaseGuard that blocked single-node outbox processing. Improves provider diagnostic clarity so HTTP 401/403/429 errors surface their specific status code instead of the generic "provider returned empty error" message. Adds Nginx 4xx/5xx access log view at `/nginx-access`.
+Operability sprint. Fixes two root causes that had silenced AbuseIPDB reporting since June 13: an orchestrator checkpoint UNIQUE constraint crash loop and an unconditional LeaseGuard that blocked single-node outbox processing. Improves provider diagnostic clarity so HTTP 401/403/429 errors surface their specific status code instead of the generic "provider returned empty error" message. Adds Nginx 4xx/5xx access log view at `/nginx-access`. Introduces live IP auto-banning via Cloudflare IP access rules, gated on local evidence corroboration and AbuseIPDB confidence=100.
 
 ### Fixes
 
@@ -22,19 +22,18 @@ Operability sprint. Fixes two root causes that had silenced AbuseIPDB reporting 
 
 - **FEAT-ABUSEIPDB-ENRICHMENT — AbuseIPDB IP enrichment in Forensic + Security Intelligence** — New `internal/security/enrichment/abuseipdb.LookupClient` wraps the existing `abuseipdb/transport.Check()` call and implements `enrichment.LookupProvider`. Mode is `Manual` (fires only when `ManualForensics=true` on Forensic and Security Intelligence pages, never on the per-event classification hot path). Returns a `ProviderVerdict` with `score`, ISP, usage type, and country. Fail-open: HTTP 429, timeouts, and network errors return an error that the enrichment service treats as a skip — the Forensic page renders without AbuseIPDB data rather than blocking. Wired at startup in `cmd/cf-sync/ui_runtime.go` using the same AbuseIPDB credential as reporting.
 
-- **FEAT-AUTOBAN-SHADOW — Auto-ban evaluator (shadow/dry-run mode only)** — New package `internal/services/autoban` implements two IP ban rules evaluated after each CF WAF replay batch:
-  - **Confidence-100 rule**: calls AbuseIPDB `/check` (via 6h in-memory cache) for each distinct malicious IP. If `abuseConfidenceScore == 100`, a ban decision is logged.
-  - **Burst rule**: counts malicious events per IP in a sliding 30s sub-window. If any 30s interval contains >30 distinct events (deduplicated by `ray_id`), a ban decision is logged. Sub-window detection operates on event timestamps so historical replayed events are detected correctly.
-  - **Safety guards**: only public/global-unicast IPs are eligible; `trust.DefaultRegistry()` (includes RFC1918, loopback, link-local, all Cloudflare CIDR ranges, operator-configured protected hosts) exempts matched IPs; 24h in-process dedup prevents repeated decisions for the same IP; AbuseIPDB quota guard skips `/check` when the registry reports EXHAUSTED or THROTTLED state.
-  - **No Cloudflare mutations**: the evaluator decides and logs (`autoban: ban decision shadow=true`). No code path calls the Cloudflare mutator — `RecordBan` only marks the in-process dedup map. Enabling `auto_ban_enabled: true` in config changes log output only; it does not wire a mutation path. A future sprint will add the governed CF firewall rule executor.
-  - Config: `cloudflare.auto_ban_enabled` (bool, default `false`). Evaluator always operates in shadow mode for v1.7.2.
+- **FEAT-AUTOBAN — Auto-ban evaluator with live CF enforcement** — New package `internal/services/autoban` implements two IP ban rules evaluated after each CF WAF replay batch:
+  - **Confidence-100 rule**: requires both a locally observed malicious event (burst counter ≥ 1 for that IP within the last 15 minutes) AND `abuseConfidenceScore == 100` from AbuseIPDB `/check` (via 6h in-memory cache). Score 100 alone (without local evidence) is rejected — guard prevents banning IPs that carry a high external reputation score but have never appeared in local CF WAF traffic. Only public, non-protected IPs are eligible.
+  - **Burst rule**: counts malicious events per IP in a sliding 30s sub-window. If any 30s interval contains >30 distinct events (deduplicated by `ray_id`), a ban decision is emitted. Sub-window detection operates on event timestamps so historical replayed events are detected correctly.
+  - **Safety guards**: only public/global-unicast IPs are eligible; `trust.DefaultRegistry()` (includes RFC1918, loopback, link-local, all Cloudflare CIDR ranges, operator-configured protected hosts) exempts matched IPs before any external call; 24h in-process dedup prevents repeated decisions for the same IP; AbuseIPDB quota guard skips `/check` when the registry reports EXHAUSTED or THROTTLED state.
+  - **CF enforcement path**: `cfBanExecutor` calls `AddIPAccessRule` (zone-level IP access rule, mode=block, notes=`cf-sync:autoban:<reason>`) on confirmed live-mode decisions. `RecordBan` (24h dedup) is only called after a successful CF API call — transient failures are retried on the next poll. Shadow mode (`auto_ban_enabled: false`) logs decisions without mutating Cloudflare.
+  - Config: `cloudflare.auto_ban_enabled` (bool, default `false`). Live enforcement requires both `mutations_enabled: true` and `auto_ban_enabled: true`. Test coverage: 22 unit tests covering all 7 decision scenarios.
 
 ### Known Debt (not fixed in v1.7.2)
 
 - **VirusTotal/Spamhaus enrichment not wired**: `enrichment.NewService` is called with `nil` lookup providers in production. VirusTotal defines a `Client` interface but has no concrete IP-lookup implementation. Spamhaus only has a reporter client (outbound). The Security Intelligence and Forensic enrichment pages only perform DNS + ASN lookups. This is structural work for a future sprint.
 - **Confidence gap (score 5–9)**: Scanner signatures like `nikto`, `sqlmap`, and `curl` produce confidence 0.65, below the 0.70 reporting threshold. These IPs are suppressed even though they represent real malicious activity.
 - **5.255.111.197 dual-result**: One entry received both `reported` and `failed|HTTP 400` statuses. Root cause is a dedup race between the evidence check and the executor call. No duplicate reports sent.
-- **Auto-ban: no CF mutation path wired**: The auto-ban evaluator decides and logs but does not call Cloudflare. The `auto_ban_enabled` config flag controls shadow vs. live log level only — it does not enable mutations. A governed CF firewall rule executor must be written and connected before any actual blocking can occur.
 - **Auto-ban burst rule covers CF WAF only**: CrowdSec and OpenResty events feed the same reporting service but their events are not currently wired into the burst counter. Only CF WAF replay events contribute to the burst evaluation.
 - **AbuseIPDB Check and Report share a daily quota**: The `/check` calls from the confidence-100 rule and the `/report` calls from the reporting pipeline use the same AbuseIPDB API key and daily limit. A quota guard (`quota.DefaultRegistry().State("abuseipdb")`) skips Check calls when THROTTLED or EXHAUSTED, but the budget must be monitored after enabling the evaluator at higher event rates.
 
