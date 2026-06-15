@@ -1,7 +1,6 @@
 package providers
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -63,28 +62,20 @@ func RedactPrompt(prompt string) string {
 	return airedaction.DefaultRedactor{}.Redact(strings.TrimSpace(prompt)).Text
 }
 
-// PromptForRequest renders a compact, read-only prompt from the explain request.
+// PromptForRequest renders a human-readable security analysis prompt from the explain request.
+// It includes the built evidence context (req.Context) so the AI receives actual forensic data.
 func PromptForRequest(req ai.ExplainRequest) string {
-	payload := struct {
-		SubjectType        ai.SubjectType `json:"subject_type"`
-		SubjectID          string         `json:"subject_id"`
-		ProviderPreference string         `json:"provider_preference"`
-		ContextHash        string         `json:"context_hash,omitempty"`
-		MaxContextBytes    int            `json:"max_context_bytes,omitempty"`
-		MaxOutputTokens    int            `json:"max_output_tokens,omitempty"`
-	}{
-		SubjectType:        req.SubjectType,
-		SubjectID:          req.SubjectID,
-		ProviderPreference: req.ProviderPreference,
-		ContextHash:        req.ContextHash,
-		MaxContextBytes:    req.MaxContextBytes,
-		MaxOutputTokens:    req.MaxOutputTokens,
+	var sb strings.Builder
+	sb.WriteString("# Security Analysis Request\n")
+	sb.WriteString(fmt.Sprintf("Subject Type: %s\n", req.SubjectType))
+	sb.WriteString(fmt.Sprintf("Subject: %s\n", strings.TrimSpace(req.SubjectID)))
+	if strings.TrimSpace(req.Context) != "" {
+		sb.WriteString("\n## Evidence Context\n")
+		sb.WriteString(strings.TrimSpace(req.Context))
+		sb.WriteString("\n")
 	}
-	raw, err := json.Marshal(payload)
-	if err != nil {
-		return fmt.Sprintf(`{"subject_type":%q,"subject_id":%q}`, req.SubjectType, req.SubjectID)
-	}
-	return string(raw)
+	sb.WriteString("\nPlease analyze the subject and evidence above. Provide: observed behavior, risk level, key indicators, and recommended action. Be concise.")
+	return sb.String()
 }
 
 // DefaultHTTPClient returns a client with a safe timeout for provider requests.

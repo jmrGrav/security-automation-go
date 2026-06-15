@@ -53,17 +53,23 @@ func (s *Service) ProcessSince(ctx context.Context, zoneID string, since time.Ti
 			report.HighWatermark = event.Datetime.UTC()
 		}
 		normalized, err := Normalize(RawEvent{
-			IP:        event.ClientIP,
-			URI:       joinPathAndQuery(event.ClientRequestPath, event.ClientRequestQuery),
-			Hostname:  event.Host,
-			UserAgent: event.UserAgent,
-			Action:    event.Action,
-			RuleID:    event.RuleID,
-			RuleName:  event.Description,
-			Source:    event.Source,
-			Timestamp: event.Datetime,
-			Hits:      1,
-			WindowSec: 300,
+			IP:                 event.ClientIP,
+			URI:                joinPathAndQuery(event.ClientRequestPath, event.ClientRequestQuery),
+			Hostname:           event.Host,
+			UserAgent:          event.UserAgent,
+			Action:             event.Action,
+			HTTPMethod:         event.HTTPMethod,
+			RuleID:             event.RuleID,
+			RulesetID:          event.RulesetID,
+			RuleName:           event.Description,
+			Source:             event.Source,
+			Timestamp:          event.Datetime,
+			RayID:              event.RayName,
+			CountryName:        event.CountryName,
+			ASNDescription:     event.ASNDescription,
+			EdgeResponseStatus: event.EdgeResponseStatus,
+			Hits:               1,
+			WindowSec:          300,
 		})
 		if err != nil {
 			report.Suppressed++

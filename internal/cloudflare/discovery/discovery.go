@@ -108,7 +108,7 @@ func (c *Client) ListWAFEventsSince(ctx context.Context, zoneID string, since, u
 		Viewer viewerData `json:"viewer"`
 	}
 
-	query := "query ListFirewallEvents($zoneTag: string, $filter: FirewallEventsAdaptiveFilter_InputObject, $limit: int) { viewer { zones(filter: { zoneTag: $zoneTag }) { firewallEventsAdaptive(filter: $filter, limit: $limit, orderBy: [datetime_DESC]) { action clientIP clientRequestPath clientRequestQuery host: clientRequestHTTPHost datetime source userAgent ruleId description } } } }"
+	query := "query ListFirewallEvents($zoneTag: string, $filter: FirewallEventsAdaptiveFilter_InputObject, $limit: int) { viewer { zones(filter: { zoneTag: $zoneTag }) { firewallEventsAdaptive(filter: $filter, limit: $limit, orderBy: [datetime_DESC]) { action clientIP clientRequestPath clientRequestQuery host: clientRequestHTTPHost datetime source userAgent ruleId description rayName rulesetId clientCountryName clientASNDescription clientRequestHTTPMethodName edgeResponseStatus } } } }"
 	variables := map[string]any{
 		"zoneTag": zoneID,
 		"limit":   limit,

@@ -215,7 +215,10 @@ func anthropicFailureReason(status int) string {
 }
 
 func anthropicSystemPrompt() string {
-	return "You are a read-only, explain-only assistant. Do not use tools or mutate anything."
+	return "You are a read-only security intelligence assistant for a network security operator console. " +
+		"Analyze the provided context and explain what is happening. Be concise and actionable. " +
+		"Do not use tools or mutate anything. Do not invent data not present in the context. " +
+		"Focus on: observed behavior, risk level, relevant indicators, and recommended action."
 }
 
 type anthropicRequest struct {
