@@ -160,7 +160,7 @@ func EvidencePage(view EvidenceView) templ.Component {
 				return writeEmptyState(w, view.EmptyText)
 			}
 
-			if _, err := fmt.Fprint(w, `<div class="table-wrap"><table><thead><tr><th>timestamp</th><th>evidence id</th><th>source</th><th>IP</th><th>type</th><th>score</th><th>confidence</th><th>decision</th><th>suppression</th><th>status</th></tr></thead><tbody>`); err != nil {
+			if _, err := fmt.Fprint(w, `<div class="table-wrap"><table><colgroup><col style="width:10rem"><col style="width:12rem"><col style="width:8rem"><col style="width:9rem"><col style="width:8rem"><col style="width:4rem"><col style="width:5rem"><col style="width:8rem"><col><col style="width:7rem"></colgroup><thead><tr><th>timestamp</th><th>evidence id</th><th>source</th><th>IP</th><th>type</th><th>score</th><th>confidence</th><th>decision</th><th>suppression</th><th>status</th></tr></thead><tbody>`); err != nil {
 				return err
 			}
 			for _, ev := range view.Entries {

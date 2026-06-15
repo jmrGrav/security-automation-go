@@ -674,11 +674,11 @@ func (s *Server) handleForensicPage(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		view := ForensicView{IP: ipStr}
-		if s.enrichment != nil {
-			summary, err := s.enrichment.Enrich(ctx, ip, enrichment.LookupOptions{ManualForensics: true})
+		if svc := s.securityIntelligenceService(); svc != nil {
+			summary, err := svc.Enrich(ctx, ip, enrichment.LookupOptions{ManualForensics: true})
 			if err == nil {
 				view.Summary = summary
-				view.Assess = s.enrichment.Assess(summary)
+				view.Assess = svc.Assess(summary)
 				view.HasEnrichment = true
 			} else {
 				view.EnrichmentError = fmt.Sprintf("enrichment failed: %v", err)
@@ -723,11 +723,11 @@ func (s *Server) handleForensicLookup(w http.ResponseWriter, r *http.Request) {
 
 	s.audit.Record("forensic_lookup", map[string]string{"ip": ipStr})
 
-	if s.enrichment != nil {
-		summary, err := s.enrichment.Enrich(ctx, ip, enrichment.LookupOptions{ManualForensics: true})
+	if svc := s.securityIntelligenceService(); svc != nil {
+		summary, err := svc.Enrich(ctx, ip, enrichment.LookupOptions{ManualForensics: true})
 		if err == nil {
 			view.Summary = summary
-			view.Assess = s.enrichment.Assess(summary)
+			view.Assess = svc.Assess(summary)
 			view.HasEnrichment = true
 		} else {
 			view.EnrichmentError = fmt.Sprintf("enrichment failed: %v", err)
@@ -1036,12 +1036,9 @@ func (s *Server) dashboardConsoleView(ctx context.Context) DashboardConsoleView 
 		{Label: "SQLite WAL", Level: statusLevelFromText(sqliteWALStatus(s.cfg.StateDir)), Detail: sqliteWALStatus(s.cfg.StateDir)},
 		{Label: "UI", Level: boolStatus(s.cfg.UI.Enabled), Detail: uiStatus(s.cfg.UI.Enabled, s.cfg.UI.Addr)},
 		{Label: "HA / fencing", Level: "disabled", Detail: "read-only UI shell"},
-		{Label: "Replay", Level: "disabled", Detail: "not wired"},
-		{Label: "Recovery", Level: "disabled", Detail: "not wired"},
 		{Label: "Ownership", Level: "healthy", Detail: "lineage preserved in runtime"},
 		{Label: "UI mutations", Level: boolStatus(s.cfg.UI.MutationsEnabled), Detail: boolDetail(s.cfg.UI.MutationsEnabled, "enabled", "disabled")},
 		{Label: "Cloudflare mutations", Level: cloudflareLevel(s.cfSentinelToken(), s.cfZoneIDFromSetup(ctx), s.cfg.Cloudflare.MutationsEnabled), Detail: cloudflareHealthStatus(s.cfSentinelToken(), s.cfZoneIDFromSetup(ctx), s.cfg.Cloudflare.MutationsEnabled)},
-		{Label: "Shadow / cutover", Level: "disabled", Detail: "not wired in UI shell"},
 	}
 	env := EnvironmentWidget{Total: len(detectors)}
 	for _, c := range checks {

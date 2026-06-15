@@ -137,7 +137,7 @@ func auditEntryToTimelineEvent(entry audit.AuditEntry) audit.TimelineEvent {
 		EventType:      valueOrUnknown(entry.Action),
 		Severity:       timelineSeverity(entry),
 		CorrelationID:  auditDisplayValue(entry.Correlation),
-		EvidenceID:     auditDisplayValue(resolvedAuditEventID(entry)),
+		EvidenceID:     "", // audit entries carry no evidence record; CorrelationID covers the correlation use-case
 		ReplaySequence: "unavailable",
 		ActorSource:    auditDisplayValue(timelineActorSource(entry)),
 		Action:         valueOrUnknown(entry.Action),
@@ -434,7 +434,7 @@ func TimelinePage(view TimelineView, csrfToken string) templ.Component {
 				_, err := fmt.Fprint(w, `</div>`)
 				return err
 			}
-			if _, err := fmt.Fprint(w, `<div class="table-wrap"><table><thead><tr><th>timestamp</th><th>scope</th><th>event type</th><th>severity</th><th>correlation id</th><th>evidence id</th><th>replay seq</th><th>actor/source</th><th>action</th><th>target</th><th>result</th><th>ai</th></tr></thead><tbody>`); err != nil {
+			if _, err := fmt.Fprint(w, `<div class="table-wrap"><table><colgroup><col style="width:10rem"><col style="width:6rem"><col style="width:9rem"><col style="width:5rem"><col style="width:10rem"><col style="width:10rem"><col style="width:7rem"><col style="width:9rem"><col style="width:9rem"><col style="width:9rem"><col style="width:9rem"><col></colgroup><thead><tr><th>timestamp</th><th>scope</th><th>event type</th><th>severity</th><th>correlation id</th><th>evidence id</th><th>replay seq</th><th>actor/source</th><th>action</th><th>target</th><th>result</th><th>ai</th></tr></thead><tbody>`); err != nil {
 				return err
 			}
 			for _, entry := range view.Entries {
@@ -445,7 +445,7 @@ func TimelinePage(view TimelineView, csrfToken string) templ.Component {
 					html.EscapeString(statusClass(entry.Severity)),
 					html.EscapeString(strings.ToUpper(valueOrUnknown(entry.Severity))),
 					compactCopyHTML(auditDisplayValue(entry.CorrelationID), 14, "Correlation copied"),
-					evidenceDetailLinkHTML(auditDisplayValue(entry.EvidenceID)),
+					evidenceDetailLinkHTML(entry.EvidenceID),
 					compactCopyHTML(auditDisplayValue(entry.ReplaySequence), 10, "Replay sequence copied"),
 					compactCopyHTML(auditDisplayValue(entry.ActorSource), 14, "Actor copied"),
 					html.EscapeString(valueOrUnknown(entry.Action)),
