@@ -44,9 +44,9 @@ func TestCurrentUsesInjectedValues(t *testing.T) {
 		BuildDate = origBuildDate
 	})
 
-	Version = "v1.7.0-dev"
+	Version = "v1.7.1"
 	Commit = "abc1234"
-	BuildDate = "2026-06-13T12:34:56Z"
+	BuildDate = "2026-06-15T00:00:00Z"
 
 	got := Current()
 	if got.Version != Version {
@@ -62,9 +62,9 @@ func TestCurrentUsesInjectedValues(t *testing.T) {
 
 func TestInfoStringIncludesAllFields(t *testing.T) {
 	info := Info{
-		Version:   "v1.7.0-dev",
+		Version:   "v1.7.1",
 		Commit:    "abc1234",
-		BuildDate: "2026-06-13T12:34:56Z",
+		BuildDate: "2026-06-15T00:00:00Z",
 		GoVersion: "go1.25.0",
 		GOOS:      "linux",
 		GOARCH:    "amd64",
@@ -72,9 +72,9 @@ func TestInfoStringIncludesAllFields(t *testing.T) {
 
 	got := info.String()
 	for _, want := range []string{
-		"Version:    v1.7.0-dev",
+		"Version:    v1.7.1",
 		"Commit:     abc1234",
-		"Build date: 2026-06-13T12:34:56Z",
+		"Build date: 2026-06-15T00:00:00Z",
 		"Go version: go1.25.0",
 		"OS / arch:  linux / amd64",
 	} {

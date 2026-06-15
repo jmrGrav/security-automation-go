@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v1.7.1] — 2026-06-15
+
+### Summary
+
+UI audit corrections. Fixes three operator-visible defects introduced in v1.7.0: broken evidence links on audit timeline rows, forensic enrichment not running in production, and table column truncation across four data tables. Also removes three developer-artifact status entries from the dashboard counter.
+
+### Fixes
+
+- **FIX-TIMELINE-LINKS — Audit timeline rows no longer generate broken evidence links** — Audit entries carry no evidence record; their `EvidenceID` field was being sourced from a random hex event ID via `resolvedAuditEventID`, producing clickable links that opened to "Evidence not found" live panels. Two-site fix: clear `EvidenceID` at the converter level and pass the raw empty string to `evidenceDetailLinkHTML` so it renders "unavailable" rather than routing through `auditDisplayValue → "unknown" → /evidence/unknown`. WAF evidence rows (real `EvidenceID`) are unaffected.
+- **FIX-FORENSIC-ENRICHMENT — Forensic enrichment now runs in production** — `handleForensicPage` and `handleForensicLookup` called `s.enrichment` directly, which is nil in production (not passed via `ui.Options`). Both handlers now use `securityIntelligenceService()`, the same factory already used by the Security Intelligence page, which falls back to initialising the service from config when `s.enrichment` is nil.
+- **FIX-TABLE-WIDTHS — Table column truncation resolved on four data tables** — All four main data tables (Timeline, WAF Events, Pipeline Health, Forensic Local Evidence) used `table-layout: fixed` with no column hints, giving equal width to every column and truncating source names and ID columns. Added `<colgroup>` with explicit `rem` widths per table so short numeric columns stay compact and ID/IP columns get adequate space.
+- **FIX-DASHBOARD-COUNTER — Dashboard disabled count no longer inflated by developer TODOs** — Replay, Recovery, and Shadow/cutover entries were listed in the dashboard status panel as `disabled: not wired`, inflating `DisabledCount` from 1 (HA/fencing — a real architectural boundary) to 4 and surfacing developer TODOs as operator-visible entries. The three entries are removed; HA/fencing remains.
+
+### Tests
+
+- Updated three timeline tests that asserted the old broken behaviour (audit entry `EvidenceID == correlation hex`). New assertions verify audit rows emit empty `EvidenceID`, correlation lands in `CorrelationID`, and no `/evidence/` links are generated for audit-only timelines.
+
 ## [v1.6.4] — 2026-06-13
 
 ### Summary
