@@ -109,12 +109,12 @@ func (b DefaultBuilder) buildIPContext(ctx context.Context, req ai.ExplainReques
 	}
 
 	type ipContextPayload struct {
-		SubjectType        ai.SubjectType               `json:"subject_type"`
-		SubjectID          string                       `json:"subject_id"`
-		ProviderPreference string                       `json:"provider_preference"`
-		Enrichment         *enrichmentSection           `json:"enrichment,omitempty"`
-		RecentDecisions    []decisionSummary            `json:"recent_decisions,omitempty"`
-		AuditTrail         []audit.AuditEntry           `json:"audit_trail,omitempty"`
+		SubjectType        ai.SubjectType     `json:"subject_type"`
+		SubjectID          string             `json:"subject_id"`
+		ProviderPreference string             `json:"provider_preference"`
+		Enrichment         *enrichmentSection `json:"enrichment,omitempty"`
+		RecentDecisions    []decisionSummary  `json:"recent_decisions,omitempty"`
+		AuditTrail         []audit.AuditEntry `json:"audit_trail,omitempty"`
 	}
 
 	ipCtx := ipContextPayload{
@@ -198,12 +198,12 @@ func (b DefaultBuilder) buildAuditOnlyContext(ctx context.Context, req ai.Explai
 }
 
 type enrichmentSection struct {
-	Hostname    string            `json:"hostname,omitempty"`
-	ASN         int               `json:"asn,omitempty"`
-	ASNOrg      string            `json:"asn_org,omitempty"`
-	Country     string            `json:"country,omitempty"`
-	Providers   []providerVerdict `json:"providers,omitempty"`
-	CacheHit    bool              `json:"cache_hit,omitempty"`
+	Hostname  string            `json:"hostname,omitempty"`
+	ASN       int               `json:"asn,omitempty"`
+	ASNOrg    string            `json:"asn_org,omitempty"`
+	Country   string            `json:"country,omitempty"`
+	Providers []providerVerdict `json:"providers,omitempty"`
+	CacheHit  bool              `json:"cache_hit,omitempty"`
 }
 
 type providerVerdict struct {

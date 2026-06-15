@@ -242,14 +242,14 @@ type PipelineSuppressionBreakdown struct {
 }
 
 type PipelineHealthRow struct {
-	Source              string
-	State               string
-	LastEventAt         string
-	LatestEvidenceID    string
-	Classified          int
-	Reported            int
-	Suppressed          int
-	Pending             int // Decision == "report_pending", awaiting outbox
+	Source               string
+	State                string
+	LastEventAt          string
+	LatestEvidenceID     string
+	Classified           int
+	Reported             int
+	Suppressed           int
+	Pending              int // Decision == "report_pending", awaiting outbox
 	SuppressionBreakdown PipelineSuppressionBreakdown
 }
 

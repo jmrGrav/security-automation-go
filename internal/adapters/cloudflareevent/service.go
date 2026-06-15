@@ -42,12 +42,12 @@ type MaliciousEvent struct {
 }
 
 type ProcessingReport struct {
-	Fetched         int
-	Classified      int
-	Reported        int
-	Suppressed      int
-	Breakdown       SuppressionBreakdown
-	HighWatermark   time.Time
+	Fetched       int
+	Classified    int
+	Reported      int
+	Suppressed    int
+	Breakdown     SuppressionBreakdown
+	HighWatermark time.Time
 	// MaliciousEvents holds non-benign, non-protected events from this batch.
 	// Only populated when the event passes the reporting pipeline without a
 	// benign_signal or protected_target suppression.

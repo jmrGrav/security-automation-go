@@ -65,7 +65,7 @@ type CloudflareConfig struct {
 	MutationsEnabled bool   `yaml:"mutations_enabled"`
 	// AutoBanEnabled gates automatic IP banning by the auto-ban evaluator.
 	// Requires MutationsEnabled=true. When false the evaluator runs in shadow mode.
-	AutoBanEnabled   bool   `yaml:"auto_ban_enabled"`
+	AutoBanEnabled bool `yaml:"auto_ban_enabled"`
 }
 
 type CrowdSecConfig struct {

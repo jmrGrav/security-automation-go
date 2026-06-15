@@ -79,10 +79,10 @@ func TestMixedBenignAndExploitExploitWins(t *testing.T) {
 // suppressed as benign_signal: the operator explicitly blocked this traffic.
 func TestCFCustomRuleBlockCleanURIReportable(t *testing.T) {
 	a := Assess(Event{
-		URIs:   []string{"/blog"},
-		Action: "block",
-		Source: "firewallCustom",
-		Hits:   1,
+		URIs:      []string{"/blog"},
+		Action:    "block",
+		Source:    "firewallCustom",
+		Hits:      1,
 		Timestamp: time.Now().UTC(),
 	})
 	if a.AbuseType == CategoryBenignProbe || a.AbuseType == CategoryBenignBootstrap {
@@ -99,10 +99,10 @@ func TestCFCustomRuleBlockCleanURIReportable(t *testing.T) {
 // CF Custom Rule block on a bootstrap URI must NOT early-return as benign_bootstrap.
 func TestCFCustomRuleBlockBootstrapURIReportable(t *testing.T) {
 	a := Assess(Event{
-		URIs:   []string{"/favicon.ico"},
-		Action: "block",
-		Source: "firewallCustom",
-		Hits:   1,
+		URIs:      []string{"/favicon.ico"},
+		Action:    "block",
+		Source:    "firewallCustom",
+		Hits:      1,
 		Timestamp: time.Now().UTC(),
 	})
 	if a.AbuseType == CategoryBenignBootstrap {
@@ -116,10 +116,10 @@ func TestCFCustomRuleBlockBootstrapURIReportable(t *testing.T) {
 // CF Managed Rule block must also be boosted.
 func TestCFManagedRuleBlockReportable(t *testing.T) {
 	a := Assess(Event{
-		URIs:   []string{"/search?q=test"},
-		Action: "block",
-		Source: "firewallManaged",
-		Hits:   1,
+		URIs:      []string{"/search?q=test"},
+		Action:    "block",
+		Source:    "firewallManaged",
+		Hits:      1,
 		Timestamp: time.Now().UTC(),
 	})
 	if a.Confidence < 0.70 {
@@ -130,10 +130,10 @@ func TestCFManagedRuleBlockReportable(t *testing.T) {
 // Non-block CF events (skip/allow) must NOT be boosted.
 func TestCFSkipActionNotBoosted(t *testing.T) {
 	a := Assess(Event{
-		URIs:   []string{"/blog"},
-		Action: "skip",
-		Source: "firewallCustom",
-		Hits:   1,
+		URIs:      []string{"/blog"},
+		Action:    "skip",
+		Source:    "firewallCustom",
+		Hits:      1,
 		Timestamp: time.Now().UTC(),
 	})
 	if a.Score >= 10 {
