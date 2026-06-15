@@ -9,7 +9,7 @@ Go control-plane that synchronises [CrowdSec](https://crowdsec.net/) decisions t
 [Cloudflare](https://www.cloudflare.com/), reports abusive IPs to
 [AbuseIPDB](https://www.abuseipdb.com/), and drives WAF follow-up actions.
 
-**Status: v1.7.1** — UI audit corrections (evidence links, forensic enrichment, table widths, dashboard counter), first-run wizard, encrypted CredentialStore, CrowdSec Go integration, SQLite as single source of truth for feature flags, admin recovery CLI. Production-ready.
+**Status: v1.7.2** — Live IP auto-banning via Cloudflare IP access rules (local evidence + AbuseIPDB confidence=100), AbuseIPDB enrichment in Forensic/Security Intelligence, CF named fields in Evidence Detail, Nginx 4xx/5xx access log view, pipeline suppression breakdown. Production-ready.
 
 ## Architecture
 
@@ -32,7 +32,7 @@ go vet ./...
 gofmt -l .
 go test ./...
 go test -race ./...
-make package         # dist/security-automation-go_1.7.1_amd64.deb
+make package         # dist/security-automation-go_1.7.2_amd64.deb
 ```
 
 ## Quick install
@@ -40,8 +40,8 @@ make package         # dist/security-automation-go_1.7.1_amd64.deb
 Download the latest `.deb` from [Releases](https://github.com/jmrGrav/security-automation-go/releases):
 
 ```bash
-curl -LO https://github.com/jmrGrav/security-automation-go/releases/download/v1.7.1/security-automation-go_1.7.1_amd64.deb
-curl -LO https://github.com/jmrGrav/security-automation-go/releases/download/v1.7.1/SHA256SUMS
+curl -LO https://github.com/jmrGrav/security-automation-go/releases/download/v1.7.2/security-automation-go_1.7.1_amd64.deb
+curl -LO https://github.com/jmrGrav/security-automation-go/releases/download/v1.7.2/SHA256SUMS
 sha256sum -c SHA256SUMS
 sudo dpkg -i security-automation-go_1.7.1_amd64.deb
 sudo systemctl start cf-sync
