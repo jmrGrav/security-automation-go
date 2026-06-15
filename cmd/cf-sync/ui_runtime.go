@@ -26,7 +26,6 @@ import (
 	"github.com/jm/security-automation-go/internal/security/enrichment"
 	"github.com/jm/security-automation-go/internal/security/enrichment/asn"
 	enrichmentdns "github.com/jm/security-automation-go/internal/security/enrichment/dns"
-	"github.com/jm/security-automation-go/internal/security/enrichment/spamhaus"
 	"github.com/jm/security-automation-go/internal/security/enrichment/virustotal"
 	"github.com/jm/security-automation-go/internal/services/reporting"
 	"github.com/jm/security-automation-go/internal/startupcheck"
@@ -275,9 +274,9 @@ func buildEnrichmentService(ctx context.Context, cfg *config.Config, creds inter
 	if vtKey, ok, _ := creds.Lookup(ctx, "virustotal.api_key"); ok && vtKey != "" {
 		lookupProviders = append(lookupProviders, virustotal.NewLookupClient(httpClient, vtKey))
 	}
-	if shKey, ok, _ := creds.Lookup(ctx, "spamhaus.api_key"); ok && shKey != "" {
-		lookupProviders = append(lookupProviders, spamhaus.NewLookupClient(httpClient, shKey))
-	}
+	// Spamhaus credential is a Submit API key (submit.spamhaus.org), not an
+	// Intelligence API key — no IP reputation lookup available. Spamhaus is
+	// wired as a reporter in the outbox pipeline, not as an enrichment provider.
 
 	return enrichment.NewService(enrichment.Config{
 		Enabled:    cfg.Enrichment.Enabled,

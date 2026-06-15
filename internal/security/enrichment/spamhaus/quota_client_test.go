@@ -11,7 +11,6 @@ import (
 
 	"github.com/jm/security-automation-go/internal/config"
 	"github.com/jm/security-automation-go/internal/httpclient"
-	"github.com/jm/security-automation-go/internal/security/quota"
 )
 
 type spamhausRedirectDoer struct {
@@ -29,7 +28,7 @@ func (d spamhausRedirectDoer) Do(req *http.Request) (*http.Response, error) {
 	return d.inner.Do(r)
 }
 
-func TestSpamhausQuotaClientFetchesLimits(t *testing.T) {
+func TestSpamhausQuotaClientFetchesSubmitCount(t *testing.T) {
 	t.Parallel()
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -37,11 +36,11 @@ func TestSpamhausQuotaClientFetchesLimits(t *testing.T) {
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
-		if !strings.HasSuffix(r.URL.Path, "/limits") {
+		if !strings.HasSuffix(r.URL.Path, "/submissions/count") {
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
-		_, _ = io.WriteString(w, `{"status":200,"limits":{"qms":1000,"qmh":1500,"rl_qph":3600,"rl_qpm":60,"rl_qps":1},"current":{"qpm":890,"qpd":890,"rl_qph":5,"rl_qpm":0,"rl_qps":0}}`)
+		_, _ = io.WriteString(w, `{"total":42,"approved":30,"pending":10,"rejected":2}`)
 	}))
 	defer srv.Close()
 
@@ -53,10 +52,13 @@ func TestSpamhausQuotaClientFetchesLimits(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Fetch returned error: %v", err)
 	}
-	if obs.Provider != "spamhaus" || obs.State != quota.Warning {
-		t.Fatalf("unexpected observation: %+v", obs)
+	if obs.Provider != "spamhaus" {
+		t.Fatalf("unexpected provider: %+v", obs)
 	}
-	if obs.Plan != "rl_qps" && obs.Plan != "rl_qpm" && obs.Plan != "rl_qph" && obs.Plan != "qms" && obs.Plan != "qmh" {
-		t.Fatalf("unexpected plan: %+v", obs)
+	if obs.Plan != "submit" {
+		t.Fatalf("expected plan=submit, got %q", obs.Plan)
+	}
+	if !obs.UsedKnown || obs.Used != 42 {
+		t.Fatalf("expected Used=42, got %+v", obs)
 	}
 }

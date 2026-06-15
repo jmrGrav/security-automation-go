@@ -21,6 +21,9 @@ func TestSpamhausLookupNotListed(t *testing.T) {
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
+		// A proper API 404 (IP not in any list) includes JSON content-type.
+		// This distinguishes it from a routing 404 ("404 page not found", no JSON).
+		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusNotFound)
 	}))
 	defer srv.Close()
@@ -30,7 +33,7 @@ func TestSpamhausLookupNotListed(t *testing.T) {
 
 	verdict, err := lc.Lookup(context.Background(), netip.MustParseAddr("1.2.3.4"))
 	if err != nil {
-		t.Fatalf("unexpected error for 404 (not listed): %v", err)
+		t.Fatalf("unexpected error for JSON 404 (not listed): %v", err)
 	}
 	if verdict.Score != 0 {
 		t.Errorf("expected score 0 for not-listed IP, got %d", verdict.Score)
@@ -40,6 +43,26 @@ func TestSpamhausLookupNotListed(t *testing.T) {
 	}
 	if verdict.Mode != enrichment.LookupModeManual {
 		t.Errorf("expected manual mode, got %q", verdict.Mode)
+	}
+}
+
+// A plain-text 404 (routing error, wrong API path) must return an error,
+// not a false "not listed" verdict.
+func TestSpamhausLookupPlainText404IsError(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = io.WriteString(w, "404 page not found")
+	}))
+	defer srv.Close()
+
+	client := newSpamhausTestClient(t, srv)
+	lc := NewLookupClient(client, "sh-token")
+
+	_, err := lc.Lookup(context.Background(), netip.MustParseAddr("1.2.3.4"))
+	if err == nil {
+		t.Fatal("expected error for plain-text 404 (routing 404 / wrong API path), got nil")
 	}
 }
 

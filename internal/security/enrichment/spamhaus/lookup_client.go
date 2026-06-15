@@ -52,15 +52,21 @@ func (c *LookupClient) Lookup(ctx context.Context, ip netip.Addr) (enrichment.Pr
 	}
 	defer resp.Body.Close()
 
-	// 404 = IP not found in any dataset → clean
+	// 404 means "IP not in any dataset" only when the server returns a JSON body.
+	// A plain-text "404 page not found" indicates the API path is wrong — treat it
+	// as an error rather than silently returning a false "not listed" verdict.
 	if resp.StatusCode == http.StatusNotFound {
-		return enrichment.ProviderVerdict{
-			Provider: "spamhaus",
-			Mode:     enrichment.LookupModeManual,
-			Score:    0,
-			Manual:   true,
-			Note:     "not listed",
-		}, nil
+		ct := resp.Header.Get("Content-Type")
+		if strings.Contains(ct, "application/json") {
+			return enrichment.ProviderVerdict{
+				Provider: "spamhaus",
+				Mode:     enrichment.LookupModeManual,
+				Score:    0,
+				Manual:   true,
+				Note:     "not listed",
+			}, nil
+		}
+		return enrichment.ProviderVerdict{}, fmt.Errorf("spamhaus: endpoint not found (verify API path: %s)", endpoint)
 	}
 
 	if resp.StatusCode >= 400 {
