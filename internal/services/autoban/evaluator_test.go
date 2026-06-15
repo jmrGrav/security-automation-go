@@ -40,11 +40,21 @@ func newEval(t *testing.T, live bool, enricher autoban.IPEnricher) *autoban.Eval
 	)
 }
 
+// withLocalEvent records one malicious event so EvaluateConfidence passes the
+// local-evidence gate. Call before any EvaluateConfidence call that must reach
+// the score check.
+func withLocalEvent(t *testing.T, ev *autoban.Evaluator, ip string) {
+	t.Helper()
+	ev.RecordMalicious(autoban.MaliciousEvent{IP: ip, AbuseType: "scanner", Timestamp: time.Now()})
+}
+
 // --- confidence-100 tests ---
 
 func TestConfidence100_TriggersBanInLiveMode(t *testing.T) {
+	const ip = "5.6.7.8"
 	ev := newEval(t, true, &fakeEnricher{abuseScore: 100})
-	d := ev.EvaluateConfidence(context.Background(), "5.6.7.8")
+	withLocalEvent(t, ev, ip)
+	d := ev.EvaluateConfidence(context.Background(), ip)
 	if !d.ShouldBan {
 		t.Fatalf("expected ban decision, got SkipReason=%q", d.SkipReason)
 	}
@@ -57,8 +67,10 @@ func TestConfidence100_TriggersBanInLiveMode(t *testing.T) {
 }
 
 func TestConfidence100_ShadowModeNeverMutates(t *testing.T) {
+	const ip = "5.6.7.8"
 	ev := newEval(t, false, &fakeEnricher{abuseScore: 100})
-	d := ev.EvaluateConfidence(context.Background(), "5.6.7.8")
+	withLocalEvent(t, ev, ip)
+	d := ev.EvaluateConfidence(context.Background(), ip)
 	if !d.ShouldBan {
 		t.Fatalf("expected ban decision, got SkipReason=%q", d.SkipReason)
 	}
@@ -67,12 +79,29 @@ func TestConfidence100_ShadowModeNeverMutates(t *testing.T) {
 	}
 }
 
+func TestConfidence100_NoLocalEvidence_Noban(t *testing.T) {
+	// confidence=100 from AbuseIPDB but no locally observed events → no ban.
+	ev := newEval(t, true, &fakeEnricher{abuseScore: 100})
+	d := ev.EvaluateConfidence(context.Background(), "5.6.7.8")
+	if d.ShouldBan {
+		t.Fatal("expected no ban without local evidence, got ShouldBan=true")
+	}
+	if d.SkipReason != "no_local_evidence" {
+		t.Errorf("expected skip reason no_local_evidence, got %q", d.SkipReason)
+	}
+}
+
 func TestConfidence100_BelowThresholdNoban(t *testing.T) {
+	const ip = "5.6.7.8"
 	for _, score := range []int{0, 50, 99} {
 		ev := newEval(t, true, &fakeEnricher{abuseScore: score})
-		d := ev.EvaluateConfidence(context.Background(), "5.6.7.8")
+		withLocalEvent(t, ev, ip)
+		d := ev.EvaluateConfidence(context.Background(), ip)
 		if d.ShouldBan {
 			t.Errorf("score=%d: expected no ban, got ShouldBan=true", score)
+		}
+		if d.SkipReason != "confidence_below_100" {
+			t.Errorf("score=%d: expected skip reason confidence_below_100, got %q", score, d.SkipReason)
 		}
 	}
 }
@@ -107,8 +136,10 @@ func TestConfidence100_CloudflareIPPreventsban(t *testing.T) {
 }
 
 func TestConfidence100_EnrichmentErrorFailOpen(t *testing.T) {
+	const ip = "5.6.7.8"
 	ev := newEval(t, true, &fakeEnricher{err: context.DeadlineExceeded})
-	d := ev.EvaluateConfidence(context.Background(), "5.6.7.8")
+	withLocalEvent(t, ev, ip)
+	d := ev.EvaluateConfidence(context.Background(), ip)
 	if d.ShouldBan {
 		t.Fatal("expected fail-open (no ban) on enrichment error")
 	}
@@ -118,15 +149,16 @@ func TestConfidence100_EnrichmentErrorFailOpen(t *testing.T) {
 }
 
 func TestConfidence100_DuplicateBanPrevented(t *testing.T) {
-	ev := newEval(t, true, &fakeEnricher{abuseScore: 100})
 	const ip = "5.6.7.8"
+	ev := newEval(t, true, &fakeEnricher{abuseScore: 100})
+	withLocalEvent(t, ev, ip)
 	// First evaluation — should ban
 	d := ev.EvaluateConfidence(context.Background(), ip)
 	if !d.ShouldBan {
 		t.Fatal("expected first ban to succeed")
 	}
 	ev.RecordBan(ip)
-	// Second evaluation — should be deduped
+	// Second evaluation — deduped at guardIP before reaching local-evidence check
 	d2 := ev.EvaluateConfidence(context.Background(), ip)
 	if d2.ShouldBan {
 		t.Error("expected duplicate ban to be skipped")

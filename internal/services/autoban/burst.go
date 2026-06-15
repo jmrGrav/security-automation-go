@@ -41,6 +41,21 @@ func (c *BurstCounter) Record(ip, key string, ts time.Time) {
 	c.events[ip] = append(c.events[ip], ts)
 }
 
+// HasLocalEvidence returns true if at least one event for ip has been recorded
+// within burstPruneLookback before now. Used to require local corroboration
+// before acting on an external reputation score.
+func (c *BurstCounter) HasLocalEvidence(ip string, now time.Time) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	cutoff := now.Add(-burstPruneLookback)
+	for _, t := range c.events[ip] {
+		if t.After(cutoff) {
+			return true
+		}
+	}
+	return false
+}
+
 // DetectBurst returns true if there exists any window-duration sub-window within
 // the stored event timestamps for ip that contains more than threshold events.
 //

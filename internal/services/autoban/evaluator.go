@@ -115,6 +115,14 @@ func (e *Evaluator) EvaluateConfidence(ctx context.Context, ip string) BanDecisi
 		return BanDecision{IP: ip, SkipReason: skip}
 	}
 
+	// Require local evidence: at least one malicious event for this IP must have
+	// been observed locally (CF WAF replay) before consulting AbuseIPDB. This
+	// prevents banning IPs that hold a high external score but have never appeared
+	// in local traffic — a necessary guard against false positives.
+	if !e.burst.HasLocalEvidence(ip, e.now()) {
+		return BanDecision{IP: ip, SkipReason: "no_local_evidence"}
+	}
+
 	// Guard: skip Check API call when AbuseIPDB quota is exhausted or throttled.
 	// This prevents spending the shared daily Check+Report budget during scan storms.
 	if state, ok := quota.DefaultRegistry().State("abuseipdb"); ok {
