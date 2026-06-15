@@ -281,6 +281,7 @@ func runWAFReplayIteration(ctx context.Context, logger *slog.Logger, zoneID stri
 				IP:        ev.IP,
 				AbuseType: ev.AbuseType,
 				Timestamp: ev.Timestamp,
+				RayID:     ev.RayID,
 			})
 			seen[ev.IP] = struct{}{}
 		}

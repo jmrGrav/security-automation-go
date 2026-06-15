@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/jm/security-automation-go/internal/security/enrichment"
+	"github.com/jm/security-automation-go/internal/security/quota"
 	"github.com/jm/security-automation-go/internal/security/trust"
 )
 
@@ -56,6 +57,9 @@ type MaliciousEvent struct {
 	// AbuseType is the classifier's assessment (e.g. "scanner", "brute_force").
 	// Must not be "benign_bootstrap" or "benign_probe" for the event to count.
 	AbuseType string
+	// RayID is the Cloudflare ray identifier used to deduplicate events across
+	// replay-overlap polls. Empty string disables dedup for this event.
+	RayID string
 }
 
 // Evaluator evaluates auto-ban rules against incoming malicious events.
@@ -100,7 +104,7 @@ func (e *Evaluator) RecordMalicious(ev MaliciousEvent) {
 	if _, err := netip.ParseAddr(ev.IP); err != nil {
 		return
 	}
-	e.burst.Record(ev.IP, ev.Timestamp)
+	e.burst.Record(ev.IP, ev.RayID, ev.Timestamp)
 }
 
 // EvaluateConfidence evaluates the confidence-100 rule for ip using AbuseIPDB
@@ -109,6 +113,14 @@ func (e *Evaluator) RecordMalicious(ev MaliciousEvent) {
 func (e *Evaluator) EvaluateConfidence(ctx context.Context, ip string) BanDecision {
 	if skip := e.guardIP(ip, e.now()); skip != "" {
 		return BanDecision{IP: ip, SkipReason: skip}
+	}
+
+	// Guard: skip Check API call when AbuseIPDB quota is exhausted or throttled.
+	// This prevents spending the shared daily Check+Report budget during scan storms.
+	if state, ok := quota.DefaultRegistry().State("abuseipdb"); ok {
+		if state == quota.Exhausted || state == quota.Throttled {
+			return BanDecision{IP: ip, SkipReason: "abuseipdb_quota_constrained"}
+		}
 	}
 
 	addr, _ := netip.ParseAddr(ip)
@@ -135,8 +147,7 @@ func (e *Evaluator) EvaluateBurst(ip string) BanDecision {
 		return BanDecision{IP: ip, SkipReason: skip}
 	}
 
-	count := e.burst.Count(ip, BurstWindow, e.now())
-	if count <= BurstThreshold {
+	if !e.burst.DetectBurst(ip, BurstWindow, BurstThreshold, e.now()) {
 		return BanDecision{IP: ip, SkipReason: "burst_below_threshold"}
 	}
 	return BanDecision{

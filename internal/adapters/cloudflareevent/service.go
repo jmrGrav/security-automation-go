@@ -38,6 +38,7 @@ type MaliciousEvent struct {
 	IP        string
 	AbuseType string
 	Timestamp time.Time
+	RayID     string
 }
 
 type ProcessingReport struct {
@@ -162,6 +163,7 @@ func (s *Service) ProcessSince(ctx context.Context, zoneID string, since time.Ti
 					IP:        normalized.IP,
 					AbuseType: result.Classification.AbuseType,
 					Timestamp: normalized.Timestamp,
+					RayID:     normalized.RayID,
 				})
 			}
 		}

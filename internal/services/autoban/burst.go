@@ -1,62 +1,82 @@
 package autoban
 
 import (
+	"sort"
 	"sync"
 	"time"
 )
 
-// BurstCounter tracks malicious event timestamps per IP in an in-memory sliding window.
-// All methods are safe for concurrent use.
+// burstPruneLookback is the maximum age of events considered for burst detection.
+// Must be longer than cloudflareReplayOverlap (10min) to cover all replayed events.
+const burstPruneLookback = 15 * time.Minute
+
+// BurstCounter tracks malicious event timestamps per IP using an in-memory
+// sliding-window structure. All methods are safe for concurrent use.
 type BurstCounter struct {
 	mu     sync.Mutex
 	events map[string][]time.Time
+	seen   map[string]struct{} // dedup: "ip:rayID"
 }
 
 func NewBurstCounter() *BurstCounter {
-	return &BurstCounter{events: make(map[string][]time.Time)}
+	return &BurstCounter{
+		events: make(map[string][]time.Time),
+		seen:   make(map[string]struct{}),
+	}
 }
 
-// Record adds a malicious event timestamp for ip. Only call for events that
-// are definitively malicious (not suppressed as benign, not protected_target).
-func (c *BurstCounter) Record(ip string, ts time.Time) {
+// Record adds a malicious event for ip at time ts. key is a unique event
+// identifier (ray_id) used to prevent double-counting from replay overlap.
+// When key is empty, every call is recorded (no dedup).
+func (c *BurstCounter) Record(ip, key string, ts time.Time) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if key != "" {
+		dk := ip + ":" + key
+		if _, ok := c.seen[dk]; ok {
+			return
+		}
+		c.seen[dk] = struct{}{}
+	}
 	c.events[ip] = append(c.events[ip], ts)
 }
 
-// Count returns the number of malicious events for ip within window before now,
-// and prunes stale entries.
-func (c *BurstCounter) Count(ip string, window time.Duration, now time.Time) int {
+// DetectBurst returns true if there exists any window-duration sub-window within
+// the stored event timestamps for ip that contains more than threshold events.
+//
+// It operates on event timestamps, not wall clock, so it correctly identifies
+// historical bursts replayed up to burstPruneLookback before now. Events older
+// than burstPruneLookback are pruned in place.
+func (c *BurstCounter) DetectBurst(ip string, window time.Duration, threshold int, now time.Time) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	cutoff := now.Add(-window)
-	ts := c.events[ip]
-	var fresh []time.Time
-	for _, t := range ts {
+
+	cutoff := now.Add(-burstPruneLookback)
+	raw := c.events[ip]
+	var ts []time.Time
+	for _, t := range raw {
 		if t.After(cutoff) {
-			fresh = append(fresh, t)
+			ts = append(ts, t)
 		}
 	}
-	c.events[ip] = fresh
-	return len(fresh)
-}
+	c.events[ip] = ts
 
-// Prune removes all entries older than window before now across all IPs.
-func (c *BurstCounter) Prune(window time.Duration, now time.Time) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	cutoff := now.Add(-window)
-	for ip, ts := range c.events {
-		var fresh []time.Time
-		for _, t := range ts {
-			if t.After(cutoff) {
-				fresh = append(fresh, t)
+	if len(ts) <= threshold {
+		return false
+	}
+	sort.Slice(ts, func(i, j int) bool { return ts[i].Before(ts[j]) })
+	for i := range ts {
+		count := 1
+		end := ts[i].Add(window)
+		for j := i + 1; j < len(ts); j++ {
+			if !ts[j].Before(end) {
+				break
+			}
+			count++
+			if count > threshold {
+				return true
 			}
 		}
-		if len(fresh) == 0 {
-			delete(c.events, ip)
-		} else {
-			c.events[ip] = fresh
-		}
 	}
+	return false
 }

@@ -2,6 +2,7 @@ package autoban_test
 
 import (
 	"context"
+	"fmt"
 	"net/netip"
 	"testing"
 	"time"
@@ -180,16 +181,56 @@ func TestBurstBenignEvents_DoNotCount(t *testing.T) {
 	}
 }
 
-func TestBurstExpiredEvents_DoNotCount(t *testing.T) {
+func TestBurstSpreadEvents_DoNotTriggerBan(t *testing.T) {
+	// 40 events spread over 2 minutes (one every 3s) — max ~10 in any 30s window,
+	// well below the threshold of 30.
 	ev := newEval(t, true, &fakeEnricher{abuseScore: 0})
 	const ip = "1.2.3.4"
-	old := time.Now().Add(-60 * time.Second) // older than 30s burst window
+	base := time.Now().Add(-2 * time.Minute)
 	for i := 0; i < 40; i++ {
-		ev.RecordMalicious(autoban.MaliciousEvent{IP: ip, AbuseType: "scanner", Timestamp: old})
+		ev.RecordMalicious(autoban.MaliciousEvent{
+			IP:        ip,
+			AbuseType: "scanner",
+			Timestamp: base.Add(time.Duration(i) * 3 * time.Second),
+			RayID:     fmt.Sprintf("ray-%03d", i),
+		})
 	}
 	d := ev.EvaluateBurst(ip)
 	if d.ShouldBan {
-		t.Error("expected expired events to not trigger burst ban")
+		t.Error("expected events spread over 2min to not trigger burst ban (max ~10/30s)")
+	}
+}
+
+func TestBurstStaleEvents_DoNotCount(t *testing.T) {
+	// Events older than burstPruneLookback (15min) are dropped; burst not triggered.
+	ev := newEval(t, true, &fakeEnricher{abuseScore: 0})
+	const ip = "1.2.3.4"
+	stale := time.Now().Add(-20 * time.Minute)
+	for i := 0; i < 40; i++ {
+		ev.RecordMalicious(autoban.MaliciousEvent{IP: ip, AbuseType: "scanner", Timestamp: stale})
+	}
+	d := ev.EvaluateBurst(ip)
+	if d.ShouldBan {
+		t.Error("expected events older than 15min to not trigger burst ban")
+	}
+}
+
+func TestBurstRayIDDedup_SameEventNotCounted(t *testing.T) {
+	// 40 submissions of the same ray_id — only 1 should be counted (no ban).
+	ev := newEval(t, true, &fakeEnricher{abuseScore: 0})
+	const ip = "1.2.3.4"
+	now := time.Now()
+	for i := 0; i < 40; i++ {
+		ev.RecordMalicious(autoban.MaliciousEvent{
+			IP:        ip,
+			AbuseType: "scanner",
+			Timestamp: now,
+			RayID:     "ray-dedupe",
+		})
+	}
+	d := ev.EvaluateBurst(ip)
+	if d.ShouldBan {
+		t.Error("expected same ray_id repeated 40 times to count only once, not triggering burst ban")
 	}
 }
 
