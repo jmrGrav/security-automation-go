@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/jm/security-automation-go/internal/adapters/cloudflareevent"
+	"github.com/jm/security-automation-go/internal/services/autoban"
 	"github.com/jm/security-automation-go/internal/api/auth"
 	"github.com/jm/security-automation-go/internal/api/server"
 	"github.com/jm/security-automation-go/internal/config"
@@ -198,7 +199,7 @@ func processOpenRestyOnce(ctx context.Context, logger *slog.Logger, bundle *wafB
 	}
 }
 
-func startWAFReplayPoller(ctx context.Context, logger *slog.Logger, interval time.Duration, zoneID string, wafReplay *cloudflareevent.Service, cursorStore cursorStateStore) {
+func startWAFReplayPoller(ctx context.Context, logger *slog.Logger, interval time.Duration, zoneID string, wafReplay *cloudflareevent.Service, cursorStore cursorStateStore, banEval *autoban.Evaluator) {
 	if wafReplay == nil {
 		return
 	}
@@ -215,7 +216,7 @@ func startWAFReplayPoller(ctx context.Context, logger *slog.Logger, interval tim
 			default:
 			}
 
-			since = runWAFReplayIteration(ctx, logger, zoneID, wafReplay, cursorStore, since, time.Now().UTC())
+			since = runWAFReplayIteration(ctx, logger, zoneID, wafReplay, cursorStore, since, time.Now().UTC(), banEval)
 
 			select {
 			case <-ctx.Done():
@@ -226,7 +227,7 @@ func startWAFReplayPoller(ctx context.Context, logger *slog.Logger, interval tim
 	}()
 }
 
-func runWAFReplayIteration(ctx context.Context, logger *slog.Logger, zoneID string, wafReplay *cloudflareevent.Service, cursorStore cursorStateStore, since time.Time, now time.Time) time.Time {
+func runWAFReplayIteration(ctx context.Context, logger *slog.Logger, zoneID string, wafReplay *cloudflareevent.Service, cursorStore cursorStateStore, since time.Time, now time.Time, banEval *autoban.Evaluator) time.Time {
 	querySince := replayQuerySince(since, cloudflareReplayOverlap)
 	report, err := wafReplay.ProcessSince(ctx, zoneID, querySince)
 	if err != nil {
@@ -272,6 +273,33 @@ func runWAFReplayIteration(ctx context.Context, logger *slog.Logger, zoneID stri
 		}
 		logger.Info("cloudflare waf replay processed", args...)
 	}
+	// Feed malicious events into the auto-ban evaluator (burst counter + confidence check).
+	if banEval != nil && len(report.MaliciousEvents) > 0 {
+		seen := make(map[string]struct{})
+		for _, ev := range report.MaliciousEvents {
+			banEval.RecordMalicious(autoban.MaliciousEvent{
+				IP:        ev.IP,
+				AbuseType: ev.AbuseType,
+				Timestamp: ev.Timestamp,
+			})
+			seen[ev.IP] = struct{}{}
+		}
+		for ip := range seen {
+			// Evaluate burst rule synchronously (no external I/O).
+			burstDecision := banEval.EvaluateBurst(ip)
+			banEval.Log(burstDecision)
+			if burstDecision.ShouldBan && !burstDecision.Shadow {
+				banEval.RecordBan(ip)
+			}
+			// Evaluate confidence-100 rule (calls AbuseIPDB with 6h cache).
+			confDecision := banEval.EvaluateConfidence(ctx, ip)
+			banEval.Log(confDecision)
+			if confDecision.ShouldBan && !confDecision.Shadow {
+				banEval.RecordBan(ip)
+			}
+		}
+	}
+
 	nextCursor := nextWAFReplayCursor(report, since, now)
 	if cursorStore != nil {
 		if err := cursorStore.Save(ctx, "cloudflare_waf_since", nextCursor); err != nil {
@@ -356,7 +384,7 @@ func runDaemonWithLocker(ctx context.Context, logger *slog.Logger, orch *pipelin
 	defer s.Stop()
 	childCtx, cancel := newDaemonContext(ctx, logger, srv)
 	defer cancel()
-	startWAFReplayPoller(childCtx, logger, interval, zoneID, wafReplay, cursorStore)
+	startWAFReplayPoller(childCtx, logger, interval, zoneID, wafReplay, cursorStore, bundle.banEvalService())
 	startCrowdSecOpenRestyPoller(childCtx, logger, interval, bundle)
 	if quotaRefreshers != nil {
 		quotaRefreshers.start(childCtx, logger)

@@ -32,13 +32,25 @@ type SuppressionBreakdown struct {
 	Other            int
 }
 
+// MaliciousEvent is a stripped-down record of a non-benign classified event,
+// used by the auto-ban evaluator to update the burst counter.
+type MaliciousEvent struct {
+	IP        string
+	AbuseType string
+	Timestamp time.Time
+}
+
 type ProcessingReport struct {
-	Fetched       int
-	Classified    int
-	Reported      int
-	Suppressed    int
-	Breakdown     SuppressionBreakdown
-	HighWatermark time.Time
+	Fetched         int
+	Classified      int
+	Reported        int
+	Suppressed      int
+	Breakdown       SuppressionBreakdown
+	HighWatermark   time.Time
+	// MaliciousEvents holds non-benign, non-protected events from this batch.
+	// Only populated when the event passes the reporting pipeline without a
+	// benign_signal or protected_target suppression.
+	MaliciousEvents []MaliciousEvent
 }
 
 func (r *ProcessingReport) addSuppression(reason string) {
@@ -142,9 +154,24 @@ func (s *Service) ProcessSince(ctx context.Context, zoneID string, since time.Ti
 			report.Suppressed++
 			report.addSuppression(result.SuppressionReason)
 		}
+		// Track malicious (non-benign, non-protected) events for burst-ban evaluation.
+		// Skip benign signals and protected targets — those must never increment the counter.
+		if result.SuppressionReason != "benign_signal" && result.SuppressionReason != "protected_target" {
+			if !isBenignAbuseType(result.Classification.AbuseType) {
+				report.MaliciousEvents = append(report.MaliciousEvents, MaliciousEvent{
+					IP:        normalized.IP,
+					AbuseType: result.Classification.AbuseType,
+					Timestamp: normalized.Timestamp,
+				})
+			}
+		}
 	}
 
 	return report, nil
+}
+
+func isBenignAbuseType(abuseType string) bool {
+	return abuseType == "benign_bootstrap" || abuseType == "benign_probe" || abuseType == ""
 }
 
 func joinPathAndQuery(path string, query string) string {

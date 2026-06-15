@@ -26,6 +26,7 @@ import (
 	"github.com/jm/security-automation-go/internal/security/enrichment"
 	"github.com/jm/security-automation-go/internal/security/enrichment/asn"
 	enrichmentdns "github.com/jm/security-automation-go/internal/security/enrichment/dns"
+	enrichmentabuseipdb "github.com/jm/security-automation-go/internal/security/enrichment/abuseipdb"
 	"github.com/jm/security-automation-go/internal/security/enrichment/virustotal"
 	"github.com/jm/security-automation-go/internal/services/reporting"
 	"github.com/jm/security-automation-go/internal/startupcheck"
@@ -277,6 +278,13 @@ func buildEnrichmentService(ctx context.Context, cfg *config.Config, creds inter
 
 	if vtKey, ok, _ := creds.Lookup(ctx, "virustotal.api_key"); ok && vtKey != "" {
 		lookupProviders = append(lookupProviders, virustotal.NewLookupClient(httpClient, vtKey))
+	}
+	// AbuseIPDB enrichment (manual mode only — fires on Forensic / Security Intelligence
+	// pages, never on per-event classification). The 6-hour enrichment cache ensures the
+	// Check API is called at most once per IP per session, protecting the daily quota.
+	// The reporting key is the same credential used for submitting reports.
+	if abuseKey, ok, _ := creds.Lookup(ctx, "abuseipdb.api_key"); ok && abuseKey != "" {
+		lookupProviders = append(lookupProviders, enrichmentabuseipdb.NewLookupClient(httpClient, abuseKey))
 	}
 	// Spamhaus credential is a Submit API key (submit.spamhaus.org), not an
 	// Intelligence API key — no IP reputation lookup available. Spamhaus is

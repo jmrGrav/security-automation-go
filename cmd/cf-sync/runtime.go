@@ -366,7 +366,7 @@ func runCFSync(configPath, mode string, dryRun bool, format string, metricsAddr 
 	}
 
 	if mode == "daemon" || mode == "ui" {
-		bundle := newWAFBundle(cf, abuse, hc, credentialStore, setupStore, securityTelemetry, trustRegistry, cfg, reportingStores)
+		bundle := newWAFBundle(cf, abuse, hc, credentialStore, setupStore, securityTelemetry, trustRegistry, cfg, reportingStores, logger)
 		runDaemonWithLocker(ctx, logger, orch, collector, jsonlJournal, qStore, stateStore, sm, driftMem, cooldownMgr, evidenceRecorder, bundleReg, activationMgr, fedRes, admController, reportingStores.Evidence, ownershipRepo, s.GetPool(), outboxWorker, scopeDir, cfg.Interval, metricsAddr, cfg.Cloudflare.ZoneID, bundle.cfWAFService(), cursorStore, quotaRefreshers, bundle, false)
 		// In ui mode the HTTP server runs in a goroutine above. If runDaemonWithLocker
 		// returns early (e.g. API token not configured) while the context is still live,

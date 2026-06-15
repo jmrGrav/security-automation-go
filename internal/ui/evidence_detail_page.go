@@ -114,6 +114,23 @@ func EvidenceDetailPage(view EvidenceDetailView) templ.Component {
 				return err
 			}
 
+			// Cloudflare-specific named fields (only rendered when at least one is set).
+			ne := ev.NormalizedEvent
+			cfRows := buildCFEventRows(ne.RayID, ne.RulesetID, ne.RuleID, ne.HTTPMethod, ne.EdgeResponseStatus, ne.CountryName, ne.ASNDescription)
+			if len(cfRows) > 0 {
+				if _, err := fmt.Fprint(w, `<div class="panel"><h2>Cloudflare event fields</h2><div class="kv">`); err != nil {
+					return err
+				}
+				for _, row := range cfRows {
+					if _, err := fmt.Fprintf(w, `<div class="row"><span>%s</span><span>%s</span></div>`, html.EscapeString(row.Key), html.EscapeString(row.Value)); err != nil {
+						return err
+					}
+				}
+				if _, err := fmt.Fprint(w, `</div></div>`); err != nil {
+					return err
+				}
+			}
+
 			if _, err := fmt.Fprint(w, `<div class="panel"><h2>Normalized event</h2>`); err != nil {
 				return err
 			}
@@ -148,6 +165,27 @@ func EvidenceDetailPage(view EvidenceDetailView) templ.Component {
 			return nil
 		}),
 	})
+}
+
+type cfRow struct{ Key, Value string }
+
+func buildCFEventRows(rayID, rulesetID, ruleID, httpMethod string, edgeStatus int, countryName, asnDescription string) []cfRow {
+	var rows []cfRow
+	add := func(k, v string) {
+		if v != "" {
+			rows = append(rows, cfRow{Key: k, Value: v})
+		}
+	}
+	add("ray_id", rayID)
+	add("ruleset_id", rulesetID)
+	add("rule_id", ruleID)
+	add("http_method", httpMethod)
+	if edgeStatus > 0 {
+		rows = append(rows, cfRow{Key: "edge_response_status", Value: fmt.Sprintf("%d", edgeStatus)})
+	}
+	add("country_name", countryName)
+	add("asn_description", asnDescription)
+	return rows
 }
 
 func stateForDetail(ev reporting.DecisionEvidence) string {
