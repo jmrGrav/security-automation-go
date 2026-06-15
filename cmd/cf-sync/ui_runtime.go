@@ -21,7 +21,13 @@ import (
 	aigemini "github.com/jm/security-automation-go/internal/ai/providers/gemini"
 	aiopenai "github.com/jm/security-automation-go/internal/ai/providers/openai"
 	"github.com/jm/security-automation-go/internal/config"
+	"github.com/jm/security-automation-go/internal/httpclient"
 	"github.com/jm/security-automation-go/internal/runtime/lock"
+	"github.com/jm/security-automation-go/internal/security/enrichment"
+	enrichmentabuseipdb "github.com/jm/security-automation-go/internal/security/enrichment/abuseipdb"
+	"github.com/jm/security-automation-go/internal/security/enrichment/asn"
+	enrichmentdns "github.com/jm/security-automation-go/internal/security/enrichment/dns"
+	"github.com/jm/security-automation-go/internal/security/enrichment/virustotal"
 	"github.com/jm/security-automation-go/internal/services/reporting"
 	"github.com/jm/security-automation-go/internal/startupcheck"
 	"github.com/jm/security-automation-go/internal/storage/sqlite"
@@ -152,6 +158,9 @@ func runUIWithLocker(ctx context.Context, logger *slog.Logger, cfg *config.Confi
 	if evidenceHolder != nil {
 		evidenceStore = evidenceHolder
 	}
+
+	enrichmentSvc := buildEnrichmentService(ctx, cfg, credentialStore)
+
 	server, err := ui.NewServer(cfg, ui.Options{
 		SetupStore:        setupStore,
 		CredentialStore:   credentialStore,
@@ -161,9 +170,14 @@ func runUIWithLocker(ctx context.Context, logger *slog.Logger, cfg *config.Confi
 		EvidenceStore:     evidenceStore,
 		ValidateAbuseIPDB: ui.ValidateAbuseIPDB,
 		AIExplainBuilder: func(effective ai.Config) aigateway.Gateway {
-			return aigateway.NewService(effective, buildAIProviders(effective, logger), nil, auditSink)
+			opts := []aigateway.ServiceOption{
+				aigateway.WithEvidenceReader(evidenceStore),
+				aigateway.WithIPEnricher(enrichmentSvc),
+			}
+			return aigateway.NewService(effective, buildAIProviders(effective, logger), nil, auditSink, opts...)
 		},
-		AIConfig: aiCfg,
+		AIConfig:   aiCfg,
+		Enrichment: enrichmentSvc,
 		ProviderFactories: map[string]ui.ProviderFactory{
 			"openai":    func(pc ai.ProviderConfig) providers.Provider { return aiopenai.New(pc) },
 			"anthropic": func(pc ai.ProviderConfig) providers.Provider { return aianthropic.New(pc) },
@@ -250,4 +264,37 @@ func buildAIProviders(cfg ai.Config, logger *slog.Logger) []providers.Provider {
 func parseInt(s string) int {
 	v, _ := strconv.Atoi(s)
 	return v
+}
+
+// buildEnrichmentService constructs a single *enrichment.Service with VirusTotal
+// and Spamhaus lookup providers when their credentials are available. Building
+// once at startup preserves the in-memory cache across requests.
+func buildEnrichmentService(ctx context.Context, cfg *config.Config, creds interface {
+	Lookup(context.Context, string) (string, bool, error)
+}) *enrichment.Service {
+	httpClient := httpclient.New(config.HTTPConfig{})
+
+	var lookupProviders []enrichment.LookupProvider
+
+	if vtKey, ok, _ := creds.Lookup(ctx, "virustotal.api_key"); ok && vtKey != "" {
+		lookupProviders = append(lookupProviders, virustotal.NewLookupClient(httpClient, vtKey))
+	}
+	// AbuseIPDB enrichment (manual mode only — fires on Forensic / Security Intelligence
+	// pages, never on per-event classification). The 6-hour enrichment cache ensures the
+	// Check API is called at most once per IP per session, protecting the daily quota.
+	// The reporting key is the same credential used for submitting reports.
+	if abuseKey, ok, _ := creds.Lookup(ctx, "abuseipdb.api_key"); ok && abuseKey != "" {
+		lookupProviders = append(lookupProviders, enrichmentabuseipdb.NewLookupClient(httpClient, abuseKey))
+	}
+	// Spamhaus credential is a Submit API key (submit.spamhaus.org), not an
+	// Intelligence API key — no IP reputation lookup available. Spamhaus is
+	// wired as a reporter in the outbox pipeline, not as an enrichment provider.
+
+	return enrichment.NewService(enrichment.Config{
+		Enabled:    cfg.Enrichment.Enabled,
+		DNSEnabled: cfg.Enrichment.DNSEnabled,
+		ASNEnabled: cfg.Enrichment.ASNEnabled,
+		Timeout:    cfg.Enrichment.Timeout,
+		CacheTTL:   cfg.Enrichment.CacheTTL,
+	}, enrichmentdns.NewNetResolver(), asn.NewStaticProvider(), lookupProviders, nil)
 }

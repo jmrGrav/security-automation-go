@@ -54,3 +54,6 @@ tests/smoke/dist/
 tests/smoke/playwright-report/
 tests/smoke/test-results/
 SMOKE_TEST_REPORT.md
+
+# Agent-generated plan files (superpowers skill)
+docs/superpowers/plans/

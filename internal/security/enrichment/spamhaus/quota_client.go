@@ -12,7 +12,11 @@ import (
 	"github.com/jm/security-automation-go/internal/security/quota"
 )
 
-const quotaURL = "https://api.spamhaus.org/api/intel/v1/limits"
+// submitCountURL is the Spamhaus Submit API health/count endpoint.
+// The user's Spamhaus credential is a Submit API key (submit.spamhaus.org),
+// not an Intelligence API key (api.spamhaus.org). The Submit API has no
+// rate-limit quota endpoint; use submissions/count as a reachability probe.
+const submitCountURL = "https://submit.spamhaus.org/portal/api/v1/submissions/count"
 
 type QuotaClient struct {
 	client   httpclient.Client
@@ -45,7 +49,7 @@ func (c *QuotaClient) Fetch(ctx context.Context) (quota.Observation, error) {
 		return obs, nil
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, quotaURL, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, submitCountURL, nil)
 	if err != nil {
 		quota.RecordRefreshFailure("spamhaus")
 		return quota.Observation{Provider: "spamhaus", QuotaSource: "api", State: quota.Unknown}, err
@@ -65,13 +69,13 @@ func (c *QuotaClient) Fetch(ctx context.Context) (quota.Observation, error) {
 		return quota.Observation{Provider: "spamhaus", QuotaSource: "api", State: quota.Unknown}, fmt.Errorf("spamhaus HTTP %d", resp.StatusCode)
 	}
 
-	var payload siaLimitsResponse
+	var payload submitCountResponse
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
 		quota.RecordRefreshFailure("spamhaus")
 		return quota.Observation{Provider: "spamhaus", QuotaSource: "api", State: quota.Unknown}, err
 	}
 
-	obs := buildSpamhausObservation(payload)
+	obs := buildSpamhausSubmitObservation(payload)
 	c.store(obs)
 	quota.DefaultRegistry().Record(obs)
 	return obs, nil
@@ -98,106 +102,27 @@ func (c *QuotaClient) store(obs quota.Observation) {
 	c.mu.Unlock()
 }
 
-type siaLimitsResponse struct {
-	Status int `json:"status"`
-	Limits struct {
-		QMS   int64 `json:"qms"`
-		QMH   int64 `json:"qmh"`
-		RLQPH int64 `json:"rl_qph"`
-		RLQPM int64 `json:"rl_qpm"`
-		RLQPS int64 `json:"rl_qps"`
-	} `json:"limits"`
-	Current struct {
-		QPM   int64 `json:"qpm"`
-		QPD   int64 `json:"qpd"`
-		RLQPH int64 `json:"rl_qph"`
-		RLQPM int64 `json:"rl_qpm"`
-		RLQPS int64 `json:"rl_qps"`
-	} `json:"current"`
+// submitCountResponse is the response from the Spamhaus Submit API
+// GET /portal/api/v1/submissions/count endpoint.
+type submitCountResponse struct {
+	Total    int `json:"total"`
+	Approved int `json:"approved"`
+	Pending  int `json:"pending"`
+	Rejected int `json:"rejected"`
 }
 
-func buildSpamhausObservation(payload siaLimitsResponse) quota.Observation {
-	now := time.Now().UTC()
+// buildSpamhausSubmitObservation converts a Submit API count response into a
+// quota.Observation. The Submit API has no hard rate-limit; a 200 response
+// means the credential is valid and the provider is reachable.
+func buildSpamhausSubmitObservation(payload submitCountResponse) quota.Observation {
 	obs := quota.Observation{
 		Provider:    "spamhaus",
-		Plan:        "limits",
-		QuotaSource: "api:/api/intel/v1/limits",
-		ObservedAt:  now,
+		Plan:        "submit",
+		QuotaSource: "api:submit.spamhaus.org/portal/api/v1/submissions/count",
+		ObservedAt:  time.Now().UTC(),
+		UsedKnown:   true,
+		Used:        float64(payload.Total),
+		Notes:       []string{"submit api: no hard quota", fmt.Sprintf("submissions last 30d: total=%d approved=%d pending=%d rejected=%d", payload.Total, payload.Approved, payload.Pending, payload.Rejected)},
 	}
-
-	type candidate struct {
-		name      string
-		allowed   int64
-		used      int64
-		remaining int64
-		percent   float64
-	}
-
-	cands := []candidate{}
-	if payload.Limits.QMH > 0 {
-		remaining := payload.Limits.QMH - payload.Current.QPM
-		if remaining < 0 {
-			remaining = 0
-		}
-		cands = append(cands, candidate{name: "qmh", allowed: payload.Limits.QMH, used: payload.Current.QPM, remaining: remaining, percent: percentRemaining(payload.Limits.QMH, remaining)})
-	}
-	if payload.Limits.QMS > 0 {
-		remaining := payload.Limits.QMS - payload.Current.QPM
-		if remaining < 0 {
-			remaining = 0
-		}
-		cands = append(cands, candidate{name: "qms", allowed: payload.Limits.QMS, used: payload.Current.QPM, remaining: remaining, percent: percentRemaining(payload.Limits.QMS, remaining)})
-	}
-	if payload.Limits.RLQPH > 0 {
-		remaining := payload.Limits.RLQPH - payload.Current.RLQPH
-		if remaining < 0 {
-			remaining = 0
-		}
-		cands = append(cands, candidate{name: "rl_qph", allowed: payload.Limits.RLQPH, used: payload.Current.RLQPH, remaining: remaining, percent: percentRemaining(payload.Limits.RLQPH, remaining)})
-	}
-	if payload.Limits.RLQPM > 0 {
-		remaining := payload.Limits.RLQPM - payload.Current.RLQPM
-		if remaining < 0 {
-			remaining = 0
-		}
-		cands = append(cands, candidate{name: "rl_qpm", allowed: payload.Limits.RLQPM, used: payload.Current.RLQPM, remaining: remaining, percent: percentRemaining(payload.Limits.RLQPM, remaining)})
-	}
-	if payload.Limits.RLQPS > 0 {
-		remaining := payload.Limits.RLQPS - payload.Current.RLQPS
-		if remaining < 0 {
-			remaining = 0
-		}
-		cands = append(cands, candidate{name: "rl_qps", allowed: payload.Limits.RLQPS, used: payload.Current.RLQPS, remaining: remaining, percent: percentRemaining(payload.Limits.RLQPS, remaining)})
-	}
-
-	var best *candidate
-	for i := range cands {
-		cand := cands[i]
-		if best == nil || cand.percent < best.percent {
-			copyCand := cand
-			best = &copyCand
-		}
-	}
-	if best == nil {
-		return quota.ClassifyObservation(obs)
-	}
-
-	obs.Plan = best.name
-	obs.LimitKnown = true
-	obs.Limit = float64(best.allowed)
-	obs.UsedKnown = true
-	obs.Used = float64(best.used)
-	obs.RemainingKnown = true
-	obs.Remaining = float64(best.remaining)
-	obs.PercentKnown = true
-	obs.RemainingPercent = best.percent
-	obs.Notes = []string{"official limits endpoint", "reset time not exposed by provider"}
 	return quota.ClassifyObservation(obs)
-}
-
-func percentRemaining(limit, remaining int64) float64 {
-	if limit <= 0 {
-		return 0
-	}
-	return (float64(remaining) / float64(limit)) * 100
 }

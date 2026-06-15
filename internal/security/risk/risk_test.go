@@ -74,3 +74,69 @@ func TestMixedBenignAndExploitExploitWins(t *testing.T) {
 		t.Fatalf("expected exploit to win, got %+v", a)
 	}
 }
+
+// CF Custom Rule block with a clean URI (no attack pattern) must not be
+// suppressed as benign_signal: the operator explicitly blocked this traffic.
+func TestCFCustomRuleBlockCleanURIReportable(t *testing.T) {
+	a := Assess(Event{
+		URIs:      []string{"/blog"},
+		Action:    "block",
+		Source:    "firewallCustom",
+		Hits:      1,
+		Timestamp: time.Now().UTC(),
+	})
+	if a.AbuseType == CategoryBenignProbe || a.AbuseType == CategoryBenignBootstrap {
+		t.Errorf("CF custom rule block must not be benign, got %q", a.AbuseType)
+	}
+	if a.Confidence < 0.70 {
+		t.Errorf("CF custom rule block confidence %.2f must be >= 0.70 (score=%d)", a.Confidence, a.Score)
+	}
+	if a.SuppressedLowSignal {
+		t.Error("CF custom rule block must not be marked SuppressedLowSignal")
+	}
+}
+
+// CF Custom Rule block on a bootstrap URI must NOT early-return as benign_bootstrap.
+func TestCFCustomRuleBlockBootstrapURIReportable(t *testing.T) {
+	a := Assess(Event{
+		URIs:      []string{"/favicon.ico"},
+		Action:    "block",
+		Source:    "firewallCustom",
+		Hits:      1,
+		Timestamp: time.Now().UTC(),
+	})
+	if a.AbuseType == CategoryBenignBootstrap {
+		t.Errorf("CF custom rule block must not be benign_bootstrap, got %q", a.AbuseType)
+	}
+	if a.Confidence < 0.70 {
+		t.Errorf("expected confidence >= 0.70 for CF custom rule block, got %.2f", a.Confidence)
+	}
+}
+
+// CF Managed Rule block must also be boosted.
+func TestCFManagedRuleBlockReportable(t *testing.T) {
+	a := Assess(Event{
+		URIs:      []string{"/search?q=test"},
+		Action:    "block",
+		Source:    "firewallManaged",
+		Hits:      1,
+		Timestamp: time.Now().UTC(),
+	})
+	if a.Confidence < 0.70 {
+		t.Errorf("CF managed rule block confidence %.2f must be >= 0.70", a.Confidence)
+	}
+}
+
+// Non-block CF events (skip/allow) must NOT be boosted.
+func TestCFSkipActionNotBoosted(t *testing.T) {
+	a := Assess(Event{
+		URIs:      []string{"/blog"},
+		Action:    "skip",
+		Source:    "firewallCustom",
+		Hits:      1,
+		Timestamp: time.Now().UTC(),
+	})
+	if a.Score >= 10 {
+		t.Errorf("skip action must not receive CF block boost, got score=%d", a.Score)
+	}
+}

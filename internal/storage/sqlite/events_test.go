@@ -318,6 +318,45 @@ func TestEventRepositoryCheckpointListDeleteAndReadOnly(t *testing.T) {
 	}
 }
 
+func TestEventRepositorySaveCheckpointIdempotent(t *testing.T) {
+	db, err := New(t.TempDir())
+	if err != nil {
+		t.Fatalf("create db: %v", err)
+	}
+	defer db.Close()
+
+	repo := NewEventRepository(db)
+	ctx := context.Background()
+
+	cp := events.Checkpoint{
+		Name:          "runtime-state",
+		ScopeID:       "scope-idem",
+		Sequence:      1,
+		EventID:       1,
+		State:         json.RawMessage(`{"status":"failed"}`),
+		Metadata:      map[string]any{"trigger": "startup:stale_recovery"},
+		SchemaVersion: events.SchemaVersion,
+		CreatedAt:     time.Now().UTC(),
+	}
+	cp.Checksum = checkpointChecksum(cp)
+
+	if err := repo.SaveCheckpoint(ctx, cp); err != nil {
+		t.Fatalf("first save: %v", err)
+	}
+	// Second save of the same (name, scope_id, sequence) must be a no-op, not an error.
+	if err := repo.SaveCheckpoint(ctx, cp); err != nil {
+		t.Fatalf("duplicate save should be ignored, got: %v", err)
+	}
+
+	list, err := repo.ListCheckpoints(ctx, "scope-idem", "runtime-state", 0)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(list) != 1 {
+		t.Fatalf("expected 1 checkpoint after duplicate save, got %d", len(list))
+	}
+}
+
 func TestEventRepositoryConcurrentAppendSameScope(t *testing.T) {
 	tmpDir := t.TempDir()
 	db, err := New(tmpDir)

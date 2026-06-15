@@ -190,15 +190,16 @@ func (s *SetupStore) GetRecoveryKeyHash(ctx context.Context) (string, bool, erro
 	return hash, true, nil
 }
 
-// RuntimeFlags holds the four feature-enable flags stored in ui_settings.
+// RuntimeFlags holds the feature-enable flags stored in ui_settings.
 type RuntimeFlags struct {
 	CSPollerEnabled            bool
 	CloudflareMutationsEnabled bool
 	AbuseIPDBEnabled           bool
 	BetterStackEnabled         bool
+	AutoBanEnabled             bool
 }
 
-// GetRuntimeFlags reads all four feature flags from ui_settings.
+// GetRuntimeFlags reads all feature flags from ui_settings.
 // Missing rows default to false (safe: off by default, operator must enable).
 func (s *SetupStore) GetRuntimeFlags(ctx context.Context) (RuntimeFlags, error) {
 	const op = "storage.sqlite.SetupStore.GetRuntimeFlags"
@@ -207,6 +208,7 @@ func (s *SetupStore) GetRuntimeFlags(ctx context.Context) (RuntimeFlags, error) 
 		"cloudflare_mutations_enabled",
 		"abuseipdb_enabled",
 		"betterstack_enabled",
+		"auto_ban_enabled",
 	}
 	var flags RuntimeFlags
 	for _, key := range keys {
@@ -227,6 +229,8 @@ func (s *SetupStore) GetRuntimeFlags(ctx context.Context) (RuntimeFlags, error) 
 			flags.AbuseIPDBEnabled = enabled
 		case "betterstack_enabled":
 			flags.BetterStackEnabled = enabled
+		case "auto_ban_enabled":
+			flags.AutoBanEnabled = enabled
 		}
 	}
 	return flags, nil

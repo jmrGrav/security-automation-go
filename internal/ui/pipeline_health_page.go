@@ -48,6 +48,7 @@ func (s *Server) buildPipelineHealthView(ctx context.Context) PipelineHealthView
 		row.Reported, _ = s.evidence.Count(ctx, reporting.EvidenceSearchOptions{Source: src.slug, AbuseIPDBReported: true})
 		row.Suppressed, _ = s.evidence.Count(ctx, reporting.EvidenceSearchOptions{Source: src.slug, Suppressed: true})
 		row.Pending, _ = s.evidence.Count(ctx, reporting.EvidenceSearchOptions{Source: src.slug, Decision: "report_pending"})
+		row.SuppressionBreakdown = s.buildSuppressionBreakdown(ctx, src.slug)
 		if latest, ok := s.latestEvidenceForSource(ctx, src.slug); ok {
 			row.LastEventAt = formatEventTimestamp(latest.Timestamp)
 			row.LatestEvidenceID = latest.EvidenceID
@@ -70,6 +71,13 @@ func (s *Server) buildPipelineHealthView(ctx context.Context) PipelineHealthView
 		total.Reported += row.Reported
 		total.Suppressed += row.Suppressed
 		total.Pending += row.Pending
+		total.SuppressionBreakdown.ProtectedTarget += row.SuppressionBreakdown.ProtectedTarget
+		total.SuppressionBreakdown.BenignSignal += row.SuppressionBreakdown.BenignSignal
+		total.SuppressionBreakdown.LowConfidence += row.SuppressionBreakdown.LowConfidence
+		total.SuppressionBreakdown.DuplicateReport += row.SuppressionBreakdown.DuplicateReport
+		total.SuppressionBreakdown.RecentlyReported += row.SuppressionBreakdown.RecentlyReported
+		total.SuppressionBreakdown.NoCategories += row.SuppressionBreakdown.NoCategories
+		total.SuppressionBreakdown.Other += row.SuppressionBreakdown.Other
 	}
 	if total.State == "" {
 		if total.Classified > 0 {
@@ -83,6 +91,69 @@ func (s *Server) buildPipelineHealthView(ctx context.Context) PipelineHealthView
 		Rows:  rows,
 		Total: total,
 	}
+}
+
+func (s *Server) buildSuppressionBreakdown(ctx context.Context, source string) PipelineSuppressionBreakdown {
+	count := func(reason string) int {
+		n, _ := s.evidence.Count(ctx, reporting.EvidenceSearchOptions{Source: source, SuppressionReason: reason})
+		return n
+	}
+	bd := PipelineSuppressionBreakdown{
+		ProtectedTarget:  count("protected_target"),
+		BenignSignal:     count("benign_signal"),
+		LowConfidence:    count("low_confidence"),
+		DuplicateReport:  count("duplicate_report"),
+		RecentlyReported: count("abuseipdb_recently_reported"),
+		NoCategories:     count("no_abuse_categories"),
+	}
+	// Other = Suppressed total minus known reasons (covers malformed, dedup_store_error, etc.)
+	return bd
+}
+
+func suppressionBreakdownTitle(bd PipelineSuppressionBreakdown) string {
+	if bd.ProtectedTarget == 0 && bd.BenignSignal == 0 && bd.LowConfidence == 0 &&
+		bd.DuplicateReport == 0 && bd.RecentlyReported == 0 && bd.NoCategories == 0 {
+		return ""
+	}
+	var parts []string
+	if bd.ProtectedTarget > 0 {
+		parts = append(parts, fmt.Sprintf("protected_target=%d", bd.ProtectedTarget))
+	}
+	if bd.BenignSignal > 0 {
+		parts = append(parts, fmt.Sprintf("benign_signal=%d", bd.BenignSignal))
+	}
+	if bd.LowConfidence > 0 {
+		parts = append(parts, fmt.Sprintf("low_confidence=%d", bd.LowConfidence))
+	}
+	if bd.DuplicateReport > 0 {
+		parts = append(parts, fmt.Sprintf("duplicate=%d", bd.DuplicateReport))
+	}
+	if bd.RecentlyReported > 0 {
+		parts = append(parts, fmt.Sprintf("recently_reported=%d", bd.RecentlyReported))
+	}
+	if bd.NoCategories > 0 {
+		parts = append(parts, fmt.Sprintf("no_categories=%d", bd.NoCategories))
+	}
+	result := ""
+	for i, p := range parts {
+		if i > 0 {
+			result += " "
+		}
+		result += p
+	}
+	return result
+}
+
+func buildSuppressedCell(count int, bd PipelineSuppressionBreakdown) string {
+	detail := suppressionBreakdownTitle(bd)
+	if detail == "" {
+		return strconv.Itoa(count)
+	}
+	return fmt.Sprintf(`<span title="%s">%d</span><br><span class="muted" style="font-size:.75em;white-space:pre-wrap">%s</span>`,
+		html.EscapeString(detail),
+		count,
+		html.EscapeString(detail),
+	)
 }
 
 func PipelineHealthPage(view PipelineHealthView) templ.Component {
@@ -113,6 +184,7 @@ func PipelineHealthPage(view PipelineHealthView) templ.Component {
 				if row.LatestEvidenceID != "" {
 					latestEvidence = evidenceDetailLinkHTML(row.LatestEvidenceID)
 				}
+				suppressedCell := buildSuppressedCell(row.Suppressed, row.SuppressionBreakdown)
 				if _, err := fmt.Fprintf(w,
 					`<tr><td>%s</td><td><span class="badge %s">%s</span></td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>`,
 					html.EscapeString(row.Source),
@@ -120,7 +192,7 @@ func PipelineHealthPage(view PipelineHealthView) templ.Component {
 					html.EscapeString(row.State),
 					strconv.Itoa(row.Classified),
 					strconv.Itoa(row.Reported),
-					strconv.Itoa(row.Suppressed),
+					suppressedCell,
 					strconv.Itoa(row.Pending),
 					lastEventCell,
 					latestEvidence,
@@ -129,6 +201,7 @@ func PipelineHealthPage(view PipelineHealthView) templ.Component {
 				}
 			}
 			t := view.Total
+			totalSuppressedCell := buildSuppressedCell(t.Suppressed, t.SuppressionBreakdown)
 			if _, err := fmt.Fprintf(w,
 				`</tbody><tfoot><tr><th>%s</th><th><span class="badge %s">%s</span></th><th>%s</th><th>%s</th><th>%s</th><th>%s</th><th>%s</th><th>%s</th></tr></tfoot></table></div></div>`,
 				html.EscapeString(t.Source),
@@ -136,7 +209,7 @@ func PipelineHealthPage(view PipelineHealthView) templ.Component {
 				html.EscapeString(t.State),
 				strconv.Itoa(t.Classified),
 				strconv.Itoa(t.Reported),
-				strconv.Itoa(t.Suppressed),
+				totalSuppressedCell,
 				strconv.Itoa(t.Pending),
 				html.EscapeString(t.LastEventAt),
 				evidenceDetailLinkHTML(t.LatestEvidenceID),

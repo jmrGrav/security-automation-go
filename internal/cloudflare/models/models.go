@@ -87,7 +87,7 @@ type FirewallListItem struct {
 	ModifiedOn time.Time `json:"modified_on"`
 }
 
-// WAFEvent represents a WAF event (GraphQL).
+// WAFEvent represents a WAF event (GraphQL firewallEventsAdaptive).
 type WAFEvent struct {
 	Action             string    `json:"action"`
 	ClientIP           string    `json:"clientIP"`
@@ -99,4 +99,10 @@ type WAFEvent struct {
 	UserAgent          string    `json:"userAgent,omitempty"`
 	RuleID             string    `json:"ruleId,omitempty"`
 	Description        string    `json:"description,omitempty"`
+	RayName            string    `json:"rayName,omitempty"`
+	RulesetID          string    `json:"rulesetId,omitempty"`
+	CountryName        string    `json:"clientCountryName,omitempty"`
+	ASNDescription     string    `json:"clientASNDescription,omitempty"`
+	HTTPMethod         string    `json:"clientRequestHTTPMethodName,omitempty"`
+	EdgeResponseStatus int       `json:"edgeResponseStatus,omitempty"`
 }

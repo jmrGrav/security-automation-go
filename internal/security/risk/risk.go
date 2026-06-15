@@ -119,7 +119,15 @@ func Assess(event Event) Assessment {
 			onlyBootstrap = false
 		}
 	}
-	if onlyBootstrap {
+	// An explicit block by a Cloudflare firewall rule (Custom Rules, Managed Rules)
+	// means the operator deliberately configured a rule to block this traffic.
+	// Override the bootstrap early-return so these events reach the full scorer.
+	cfExplicitBlock := strings.EqualFold(event.Action, "block") &&
+		(strings.EqualFold(event.Source, "firewallCustom") ||
+			strings.EqualFold(event.Source, "firewallRules") ||
+			strings.EqualFold(event.Source, "firewallManaged"))
+
+	if onlyBootstrap && !cfExplicitBlock {
 		return Assessment{
 			Score:               score,
 			AbuseType:           CategoryBenignBootstrap,
@@ -168,6 +176,17 @@ func Assess(event Event) Assessment {
 	if onlyBenign {
 		abuseType = CategoryBenignProbe
 	}
+
+	// Boost score for explicit CF rule blocks; promote out of benign classification
+	// so the reporting policy does not suppress them as benign_signal.
+	if cfExplicitBlock {
+		score += 10
+		evidence = append(evidence, "cf_rule_block:"+event.Source)
+		if abuseType == CategoryBenignBootstrap || abuseType == CategoryBenignProbe {
+			abuseType = CategorySuspiciousProbe
+		}
+	}
+
 	if abuseType == CategoryBenignProbe && score >= 5 {
 		abuseType = CategorySuspiciousProbe
 	}

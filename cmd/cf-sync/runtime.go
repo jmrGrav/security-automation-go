@@ -219,6 +219,9 @@ func runCFSync(configPath, mode string, dryRun bool, format string, metricsAddr 
 		if rflags.AbuseIPDBEnabled {
 			cfg.AbuseIPDB.Enabled = true
 		}
+		if rflags.AutoBanEnabled {
+			cfg.Cloudflare.AutoBanEnabled = true
+		}
 	} else {
 		logger.Warn("could not read runtime flags from SQLite — using config/env defaults", "error", err)
 	}
@@ -322,12 +325,18 @@ func runCFSync(configPath, mode string, dryRun bool, format string, metricsAddr 
 	securityTelemetry := newSecurityTelemetry(cfg, betterClient)
 	quotaRefreshers := newQuotaRefreshers(cfg, hc, cf, preBanTransport, credentialStore, setupStore)
 	abuseExecutor := newRuntimeAbuseExecutor(hc, credentialStore, setupStore, cfg != nil && cfg.AbuseIPDB.Enabled, abuse)
+	outboxCfg := reporting.OutboxWorkerConfig{
+		Limit:    25,
+		Interval: cfg.Interval,
+	}
+	if cfg.Runtime.Profile == config.RuntimeProfileStrictHA {
+		// In strict-HA mode, the outbox worker must hold a reconcile lease before
+		// dispatching reports to prevent split-brain duplicate submissions.
+		// In single-node mode, no second writer exists so the guard is omitted.
+		outboxCfg.LeaseGuard = outboxLeaseGuard
+	}
 	var outboxWorker *reporting.OutboxWorker
-	outboxWorker = reporting.NewOutboxWorker(reportingStores.Outbox, abuseExecutor, reportingStores.Dedup, reportingStores.Evidence, securityTelemetry, reporting.OutboxWorkerConfig{
-		Limit:      25,
-		Interval:   cfg.Interval,
-		LeaseGuard: outboxLeaseGuard,
-	})
+	outboxWorker = reporting.NewOutboxWorker(reportingStores.Outbox, abuseExecutor, reportingStores.Dedup, reportingStores.Evidence, securityTelemetry, outboxCfg)
 	configureSecurityGuard(govExec, preBanChecker, trustRegistry, cfg)
 	govExec.SetTelemetrySink(securityTelemetry)
 	govExec.SetApprovalEvidenceStore(sqlite.NewApprovalEvidenceStore(sqliteDB))
@@ -360,7 +369,7 @@ func runCFSync(configPath, mode string, dryRun bool, format string, metricsAddr 
 	}
 
 	if mode == "daemon" || mode == "ui" {
-		bundle := newWAFBundle(cf, abuse, hc, credentialStore, setupStore, securityTelemetry, trustRegistry, cfg, reportingStores)
+		bundle := newWAFBundle(cf, abuse, hc, credentialStore, setupStore, securityTelemetry, trustRegistry, cfg, reportingStores, logger)
 		runDaemonWithLocker(ctx, logger, orch, collector, jsonlJournal, qStore, stateStore, sm, driftMem, cooldownMgr, evidenceRecorder, bundleReg, activationMgr, fedRes, admController, reportingStores.Evidence, ownershipRepo, s.GetPool(), outboxWorker, scopeDir, cfg.Interval, metricsAddr, cfg.Cloudflare.ZoneID, bundle.cfWAFService(), cursorStore, quotaRefreshers, bundle, false)
 		// In ui mode the HTTP server runs in a goroutine above. If runDaemonWithLocker
 		// returns early (e.g. API token not configured) while the context is still live,

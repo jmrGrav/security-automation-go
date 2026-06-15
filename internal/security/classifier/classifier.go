@@ -10,19 +10,24 @@ import (
 )
 
 type Event struct {
-	IP        string    `json:"ip"`
-	URI       string    `json:"uri"`
-	URIs      []string  `json:"uris,omitempty"`
-	Hostname  string    `json:"hostname"`
-	UserAgent string    `json:"user_agent"`
-	Action    string    `json:"action"`
-	RuleID    string    `json:"rule_id"`
-	RuleName  string    `json:"rule_name"`
-	Source    string    `json:"source"`
-	Timestamp time.Time `json:"timestamp"`
-	RayID     string    `json:"ray_id,omitempty"`
-	Hits      int       `json:"hits"`
-	WindowSec int       `json:"window_seconds"`
+	IP                 string    `json:"ip"`
+	URI                string    `json:"uri"`
+	URIs               []string  `json:"uris,omitempty"`
+	Hostname           string    `json:"hostname"`
+	UserAgent          string    `json:"user_agent"`
+	Action             string    `json:"action"`
+	HTTPMethod         string    `json:"http_method,omitempty"`
+	RuleID             string    `json:"rule_id"`
+	RulesetID          string    `json:"ruleset_id,omitempty"`
+	RuleName           string    `json:"rule_name"`
+	Source             string    `json:"source"`
+	Timestamp          time.Time `json:"timestamp"`
+	RayID              string    `json:"ray_id,omitempty"`
+	CountryName        string    `json:"country_name,omitempty"`
+	ASNDescription     string    `json:"asn_description,omitempty"`
+	EdgeResponseStatus int       `json:"edge_response_status,omitempty"`
+	Hits               int       `json:"hits"`
+	WindowSec          int       `json:"window_seconds"`
 }
 
 type Classification struct {

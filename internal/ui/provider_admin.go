@@ -752,11 +752,11 @@ func providerDiagnosticTextFromText(text string) string {
 		return providerTestUnknownError
 	case strings.Contains(text, "invalid api key") || strings.Contains(text, "api key invalid") || strings.Contains(text, "invalid key"):
 		return providerTestInvalidKey
-	case strings.Contains(text, "authentication failed") || strings.Contains(text, "auth failed") || strings.Contains(text, "unauthorized"):
+	case strings.Contains(text, "authentication failed") || strings.Contains(text, "auth failed") || strings.Contains(text, "unauthorized") || strings.Contains(text, "http 401") || strings.Contains(text, "http 403"):
 		return providerTestAuthFailed
 	case strings.Contains(text, "quota exceeded") || strings.Contains(text, "quota exhausted") || strings.Contains(text, "exhausted") || strings.Contains(text, "insufficient quota"):
 		return providerTestQuotaExceeded
-	case strings.Contains(text, "rate limited") || strings.Contains(text, "too many requests") || strings.Contains(text, "rate limit"):
+	case strings.Contains(text, "rate limited") || strings.Contains(text, "too many requests") || strings.Contains(text, "rate limit") || strings.Contains(text, "http 429"):
 		return providerTestRateLimited
 	case strings.Contains(text, "timeout") || strings.Contains(text, "deadline exceeded") || strings.Contains(text, "context deadline exceeded"):
 		return providerTestTimeout

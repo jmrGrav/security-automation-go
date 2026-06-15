@@ -67,6 +67,59 @@ func TestEvidenceDetailPage_RendersEvidenceAndSuppressionReason(t *testing.T) {
 	}
 }
 
+func TestEvidenceDetailPage_RendersCFFields(t *testing.T) {
+	store := &fakeEvidenceStore{
+		records: []reporting.DecisionEvidence{
+			{
+				EvidenceID: "ev-cf1",
+				Timestamp:  time.Date(2026, 6, 15, 10, 0, 0, 0, time.UTC),
+				Source:     "cloudflare_waf",
+				IP:         "1.2.3.4",
+				Decision:   "suppress",
+				Suppressed: true,
+				NormalizedEvent: classifier.Event{
+					Source:             "cloudflare_waf",
+					IP:                 "1.2.3.4",
+					RayID:              "abc123rayid",
+					RulesetID:          "rs-001",
+					RuleID:             "rule-007",
+					HTTPMethod:         "POST",
+					EdgeResponseStatus: 403,
+					CountryName:        "France",
+					ASNDescription:     "OVH SAS",
+				},
+			},
+		},
+	}
+	srv, _, _ := newTestServer(t, nil)
+	srv.evidence = store
+	cookie := loginCookie(t, srv, "test-password-123!@#")
+
+	req := httptest.NewRequest(http.MethodGet, "/evidence/ev-cf1", nil)
+	req.AddCookie(cookie)
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	body := rr.Body.String()
+	for _, want := range []string{
+		"Cloudflare event fields",
+		"ray_id", "abc123rayid",
+		"ruleset_id", "rs-001",
+		"rule_id", "rule-007",
+		"http_method", "POST",
+		"edge_response_status", "403",
+		"country_name", "France",
+		"asn_description", "OVH SAS",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("expected %q in CF fields section, body length %d", want, len(body))
+		}
+	}
+}
+
 func TestEvidenceDetailPage_Returns404ForUnknownEvidence(t *testing.T) {
 	srv, _, _ := newTestServer(t, nil)
 	srv.evidence = &fakeEvidenceStore{records: nil}

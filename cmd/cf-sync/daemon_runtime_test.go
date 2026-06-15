@@ -110,7 +110,7 @@ func TestRunWAFReplayIterationDoesNotAdvanceCursorOnProcessingError(t *testing.T
 	}, reportingService)
 
 	since := time.Date(2026, 5, 28, 10, 0, 0, 0, time.UTC)
-	got := runWAFReplayIteration(context.Background(), logger, "zone", service, store, since, since.Add(time.Minute))
+	got := runWAFReplayIteration(context.Background(), logger, "zone", service, store, since, since.Add(time.Minute), nil, nil)
 	if !got.Equal(since) {
 		t.Fatalf("expected cursor to stay put on processing error, got=%s want=%s", got, since)
 	}
@@ -140,7 +140,7 @@ func TestRunWAFReplayIterationAdvancesCursorOnSuccess(t *testing.T) {
 	}, reportingService)
 
 	since := time.Date(2026, 5, 28, 10, 0, 0, 0, time.UTC)
-	got := runWAFReplayIteration(context.Background(), logger, "zone", service, store, since, since.Add(time.Minute))
+	got := runWAFReplayIteration(context.Background(), logger, "zone", service, store, since, since.Add(time.Minute), nil, nil)
 	if !got.Equal(hw) {
 		t.Fatalf("expected cursor to advance to high watermark, got=%s want=%s", got, hw)
 	}
@@ -170,7 +170,7 @@ func TestRunWAFReplayIterationDoesNotAdvanceCursorOnSaveFailure(t *testing.T) {
 	}, reportingService)
 
 	since := time.Date(2026, 5, 28, 10, 0, 0, 0, time.UTC)
-	got := runWAFReplayIteration(context.Background(), logger, "zone", service, store, since, since.Add(time.Minute))
+	got := runWAFReplayIteration(context.Background(), logger, "zone", service, store, since, since.Add(time.Minute), nil, nil)
 	if !got.Equal(since) {
 		t.Fatalf("expected cursor to stay put on save failure, got=%s want=%s", got, since)
 	}
