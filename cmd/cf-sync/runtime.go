@@ -322,12 +322,18 @@ func runCFSync(configPath, mode string, dryRun bool, format string, metricsAddr 
 	securityTelemetry := newSecurityTelemetry(cfg, betterClient)
 	quotaRefreshers := newQuotaRefreshers(cfg, hc, cf, preBanTransport, credentialStore, setupStore)
 	abuseExecutor := newRuntimeAbuseExecutor(hc, credentialStore, setupStore, cfg != nil && cfg.AbuseIPDB.Enabled, abuse)
+	outboxCfg := reporting.OutboxWorkerConfig{
+		Limit:    25,
+		Interval: cfg.Interval,
+	}
+	if cfg.Runtime.Profile == config.RuntimeProfileStrictHA {
+		// In strict-HA mode, the outbox worker must hold a reconcile lease before
+		// dispatching reports to prevent split-brain duplicate submissions.
+		// In single-node mode, no second writer exists so the guard is omitted.
+		outboxCfg.LeaseGuard = outboxLeaseGuard
+	}
 	var outboxWorker *reporting.OutboxWorker
-	outboxWorker = reporting.NewOutboxWorker(reportingStores.Outbox, abuseExecutor, reportingStores.Dedup, reportingStores.Evidence, securityTelemetry, reporting.OutboxWorkerConfig{
-		Limit:      25,
-		Interval:   cfg.Interval,
-		LeaseGuard: outboxLeaseGuard,
-	})
+	outboxWorker = reporting.NewOutboxWorker(reportingStores.Outbox, abuseExecutor, reportingStores.Dedup, reportingStores.Evidence, securityTelemetry, outboxCfg)
 	configureSecurityGuard(govExec, preBanChecker, trustRegistry, cfg)
 	govExec.SetTelemetrySink(securityTelemetry)
 	govExec.SetApprovalEvidenceStore(sqlite.NewApprovalEvidenceStore(sqliteDB))

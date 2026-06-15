@@ -222,8 +222,12 @@ func (r *EventRepository) SaveCheckpoint(ctx context.Context, checkpoint events.
 		checkpoint.CreatedAt = time.Now().UTC()
 	}
 
+	// OR IGNORE makes checkpoint saves idempotent: a duplicate (name, scope_id, sequence)
+	// is silently skipped rather than failing with a UNIQUE constraint. This handles the
+	// case where the process restarts after PublishEvent committed but before SaveCheckpoint
+	// completed, leaving the same sequence eligible again on the next cycle.
 	_, err = r.db.Conn().ExecContext(ctx, `
-		INSERT INTO event_checkpoints (
+		INSERT OR IGNORE INTO event_checkpoints (
 			name, scope_id, sequence, event_id, checksum, state, metadata, schema_version, created_at
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`, checkpoint.Name, checkpoint.ScopeID, checkpoint.Sequence, checkpoint.EventID, checkpoint.Checksum, string(checkpoint.State), string(metadata), checkpoint.SchemaVersion, checkpoint.CreatedAt)
