@@ -225,6 +225,7 @@ func (s *Server) routes() {
 	s.mux.Handle("GET /evidence", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleEvidencePage)))))
 	s.mux.Handle("GET /evidence/{id}", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleEvidenceDetailPage)))))
 	s.mux.Handle("GET /pipeline", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handlePipelineHealthPage)))))
+	s.mux.Handle("GET /nginx-access", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleNginxAccessPage)))))
 	s.mux.Handle("GET /sync", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleCFSyncPage)))))
 	s.mux.Handle("GET /about", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleAboutPage)))))
 	s.mux.Handle("GET /system", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleAboutPage)))))

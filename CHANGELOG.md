@@ -2,6 +2,28 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v1.7.2] — unreleased (pending validation)
+
+### Summary
+
+Operability sprint. Fixes two root causes that had silenced AbuseIPDB reporting since June 13: an orchestrator checkpoint UNIQUE constraint crash loop and an unconditional LeaseGuard that blocked single-node outbox processing. Improves provider diagnostic clarity so HTTP 401/403/429 errors surface their specific status code instead of the generic "provider returned empty error" message. Adds Nginx 4xx/5xx access log view at `/nginx-access`.
+
+### Fixes
+
+- **FIX-ABUSEIPDB-SILENCE — LeaseGuard gated on strict-HA profile** — `OutboxWorkerConfig.LeaseGuard` was unconditionally set to the `outboxLeaseGuard`, requiring an active reconcile lease before dispatching any reports. In `single-node` mode no orchestrator lease exists, so all outbox processing was blocked. The guard is now only attached when `cfg.Runtime.Profile == config.RuntimeProfileStrictHA`.
+- **FIX-CHECKPOINT — Idempotent event checkpoint saves** — `SaveCheckpoint` used a plain `INSERT INTO event_checkpoints`, which crashed with `UNIQUE constraint failed` on every restart when the same `(name, scope_id, sequence)` was re-attempted during startup recovery. Changed to `INSERT OR IGNORE` so duplicate saves are silently skipped.
+- **FIX-PROVIDER-DIAGNOSTIC — HTTP status codes in plain-text errors now classified** — `providerDiagnosticTextFromText` now matches `"http 401"` and `"http 403"` as `AUTH_FAILED`, and `"http 429"` as `RATE_LIMITED`. Previously, errors like `"spamhaus HTTP 401"` (returned by the Spamhaus quota client) fell through to `TEST_FAILED` / "provider returned empty error", giving operators no actionable information. Test coverage added for all three new patterns.
+
+### Features
+
+- **FEAT-NGINX-ACCESS — Nginx 4xx/5xx access log view** — New read-only page at `/nginx-access` parses the nginx combined-format access log from `CrowdSec.NginxLogDir`, filters for 4xx/5xx responses, and groups by IP + status code. Columns: IP, status badge, count, method, last URI, user agent, first/last seen, Forensic link. Fail-open: absent log directory or empty files render a "no data" message. No AbuseIPDB reporting from this view.
+
+### Known Debt (not fixed in v1.7.2)
+
+- **VirusTotal/Spamhaus enrichment not wired**: `enrichment.NewService` is called with `nil` lookup providers in production. VirusTotal defines a `Client` interface but has no concrete IP-lookup implementation. Spamhaus only has a reporter client (outbound). The Security Intelligence and Forensic enrichment pages only perform DNS + ASN lookups. This is structural work for a future sprint.
+- **Confidence gap (score 5–9)**: Scanner signatures like `nikto`, `sqlmap`, and `curl` produce confidence 0.65, below the 0.70 reporting threshold. These IPs are suppressed even though they represent real malicious activity.
+- **5.255.111.197 dual-result**: One entry received both `reported` and `failed|HTTP 400` statuses. Root cause is a dedup race between the evidence check and the executor call. No duplicate reports sent.
+
 ## [v1.7.1] — 2026-06-15
 
 ### Summary

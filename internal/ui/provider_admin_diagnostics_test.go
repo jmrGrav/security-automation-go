@@ -67,6 +67,21 @@ func TestProviderTestOutcomeMapsCommonProviderFailures(t *testing.T) {
 			want: "HTTP_418",
 		},
 		{
+			name: "plain http 401 (spamhaus style)",
+			err:  errors.New("spamhaus HTTP 401"),
+			want: "AUTH_FAILED",
+		},
+		{
+			name: "plain http 403",
+			err:  errors.New("virustotal HTTP 403"),
+			want: "AUTH_FAILED",
+		},
+		{
+			name: "plain http 429",
+			err:  errors.New("provider HTTP 429"),
+			want: "RATE_LIMITED",
+		},
+		{
 			name: "unknown fallback",
 			err:  errors.New("unexpected provider failure"),
 			want: "TEST_FAILED",
