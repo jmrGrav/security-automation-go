@@ -100,7 +100,7 @@ func PipelineHealthPage(view PipelineHealthView) templ.Component {
 					return err
 				}
 			}
-			if _, err := fmt.Fprint(w, `<div class="panel"><div class="table-wrap"><table><thead><tr><th>Source</th><th>State</th><th>Classified</th><th>Reported</th><th>Suppressed</th><th>Pending</th><th>Last event</th><th>Latest evidence</th></tr></thead><tbody>`); err != nil {
+			if _, err := fmt.Fprint(w, `<div class="panel"><div class="table-wrap"><table><colgroup><col style="width:13rem"><col style="width:9rem"><col style="width:6rem"><col style="width:6rem"><col style="width:6rem"><col style="width:6rem"><col style="width:12rem"><col></colgroup><thead><tr><th>Source</th><th>State</th><th>Classified</th><th>Reported</th><th>Suppressed</th><th>Pending</th><th>Last event</th><th>Latest evidence</th></tr></thead><tbody>`); err != nil {
 				return err
 			}
 			for _, row := range view.Rows {

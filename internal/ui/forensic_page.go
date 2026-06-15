@@ -150,7 +150,7 @@ func ForensicPage(view ForensicView, csrfToken string) templ.Component {
 		}
 
 		if len(view.LocalEvidence) > 0 {
-			if _, err := fmt.Fprint(w, `<div class="panel"><h2>Local Evidence History</h2><div class="table-wrap"><table><thead><tr><th>timestamp</th><th>source</th><th>type</th><th>score</th><th>decision</th><th>status</th></tr></thead><tbody>`); err != nil {
+			if _, err := fmt.Fprint(w, `<div class="panel"><h2>Local Evidence History</h2><div class="table-wrap"><table><colgroup><col style="width:12rem"><col style="width:9rem"><col style="width:8rem"><col style="width:4rem"><col style="width:8rem"><col></colgroup><thead><tr><th>timestamp</th><th>source</th><th>type</th><th>score</th><th>decision</th><th>status</th></tr></thead><tbody>`); err != nil {
 				return err
 			}
 			for _, ev := range view.LocalEvidence {

@@ -674,11 +674,11 @@ func (s *Server) handleForensicPage(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		view := ForensicView{IP: ipStr}
-		if s.enrichment != nil {
-			summary, err := s.enrichment.Enrich(ctx, ip, enrichment.LookupOptions{ManualForensics: true})
+		if svc := s.securityIntelligenceService(); svc != nil {
+			summary, err := svc.Enrich(ctx, ip, enrichment.LookupOptions{ManualForensics: true})
 			if err == nil {
 				view.Summary = summary
-				view.Assess = s.enrichment.Assess(summary)
+				view.Assess = svc.Assess(summary)
 				view.HasEnrichment = true
 			} else {
 				view.EnrichmentError = fmt.Sprintf("enrichment failed: %v", err)
@@ -723,11 +723,11 @@ func (s *Server) handleForensicLookup(w http.ResponseWriter, r *http.Request) {
 
 	s.audit.Record("forensic_lookup", map[string]string{"ip": ipStr})
 
-	if s.enrichment != nil {
-		summary, err := s.enrichment.Enrich(ctx, ip, enrichment.LookupOptions{ManualForensics: true})
+	if svc := s.securityIntelligenceService(); svc != nil {
+		summary, err := svc.Enrich(ctx, ip, enrichment.LookupOptions{ManualForensics: true})
 		if err == nil {
 			view.Summary = summary
-			view.Assess = s.enrichment.Assess(summary)
+			view.Assess = svc.Assess(summary)
 			view.HasEnrichment = true
 		} else {
 			view.EnrichmentError = fmt.Sprintf("enrichment failed: %v", err)

@@ -266,7 +266,6 @@ func TestTimelineFiltersAndExportsReadOnlyEvents(t *testing.T) {
 	for _, want := range []string{
 		"security_intelligence_lookup",
 		"corr-1",
-		"evt-1",
 		"neutral",
 	} {
 		if !strings.Contains(body, want) {
@@ -296,7 +295,7 @@ func TestTimelineFiltersAndExportsReadOnlyEvents(t *testing.T) {
 	}
 }
 
-func TestTimelineProjectsProviderTestTargetAndLegacyEventID(t *testing.T) {
+func TestTimelineProjectsProviderTestTargetAndCorrelation(t *testing.T) {
 	srv, auditSink, _ := newTestServer(t, nil)
 	auditSink.Record("provider_test", map[string]string{
 		"actor":          "local",
@@ -314,8 +313,11 @@ func TestTimelineProjectsProviderTestTargetAndLegacyEventID(t *testing.T) {
 		if event.Target != "cloudflare" {
 			t.Fatalf("expected provider_test target to project provider name, got %+v", event)
 		}
-		if event.EvidenceID != "corr-provider" {
-			t.Fatalf("expected provider_test legacy event id fallback, got %+v", event)
+		if event.EvidenceID != "" {
+			t.Fatalf("audit entries must have empty EvidenceID (no evidence record), got %+v", event)
+		}
+		if event.CorrelationID != "corr-provider" {
+			t.Fatalf("expected correlation_id in CorrelationID field, got %+v", event)
 		}
 		if event.Result != "ready" {
 			t.Fatalf("expected provider_test result to stay useful, got %+v", event)
@@ -325,7 +327,7 @@ func TestTimelineProjectsProviderTestTargetAndLegacyEventID(t *testing.T) {
 	t.Fatalf("expected provider_test event in timeline, got %+v", events)
 }
 
-func TestTimelinePageFallsBackToCorrelationForLegacyEventID(t *testing.T) {
+func TestTimelinePageAuditEntryShowsCorrelationNotEvidenceLink(t *testing.T) {
 	srv, auditSink, _ := newTestServer(t, nil)
 	auditSink.Record("provider_test", map[string]string{
 		"actor":          "local",
@@ -345,10 +347,18 @@ func TestTimelinePageFallsBackToCorrelationForLegacyEventID(t *testing.T) {
 	}
 
 	body := rr.Body.String()
+	// correlation id must appear in correlation column (rendered 3× via title, data-copy-text, text)
 	if strings.Count(body, "corr-legacy") < 2 {
-		t.Fatalf("expected correlation fallback in timeline event id cell, got %s", body)
+		t.Fatalf("expected correlation id to appear in correlation column, got %s", body)
+	}
+	// audit entries must NOT produce evidence links — evidence id column shows "unavailable"
+	if strings.Contains(body, `href="/evidence/`) {
+		t.Fatalf("audit entry must not produce evidence links in timeline, got %s", body)
+	}
+	if !strings.Contains(body, `unavailable`) {
+		t.Fatalf("audit entry evidence id cell should show 'unavailable', got %s", body)
 	}
 	if strings.Contains(body, ">unknown<") {
-		t.Fatalf("legacy correlation row should not render unknown event id, got %s", body)
+		t.Fatalf("timeline row should not render 'unknown' in evidence id cell, got %s", body)
 	}
 }
