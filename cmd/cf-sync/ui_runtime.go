@@ -21,7 +21,13 @@ import (
 	aigemini "github.com/jm/security-automation-go/internal/ai/providers/gemini"
 	aiopenai "github.com/jm/security-automation-go/internal/ai/providers/openai"
 	"github.com/jm/security-automation-go/internal/config"
+	"github.com/jm/security-automation-go/internal/httpclient"
 	"github.com/jm/security-automation-go/internal/runtime/lock"
+	"github.com/jm/security-automation-go/internal/security/enrichment"
+	"github.com/jm/security-automation-go/internal/security/enrichment/asn"
+	enrichmentdns "github.com/jm/security-automation-go/internal/security/enrichment/dns"
+	"github.com/jm/security-automation-go/internal/security/enrichment/spamhaus"
+	"github.com/jm/security-automation-go/internal/security/enrichment/virustotal"
 	"github.com/jm/security-automation-go/internal/services/reporting"
 	"github.com/jm/security-automation-go/internal/startupcheck"
 	"github.com/jm/security-automation-go/internal/storage/sqlite"
@@ -152,6 +158,9 @@ func runUIWithLocker(ctx context.Context, logger *slog.Logger, cfg *config.Confi
 	if evidenceHolder != nil {
 		evidenceStore = evidenceHolder
 	}
+
+	enrichmentSvc := buildEnrichmentService(ctx, cfg, credentialStore)
+
 	server, err := ui.NewServer(cfg, ui.Options{
 		SetupStore:        setupStore,
 		CredentialStore:   credentialStore,
@@ -163,7 +172,8 @@ func runUIWithLocker(ctx context.Context, logger *slog.Logger, cfg *config.Confi
 		AIExplainBuilder: func(effective ai.Config) aigateway.Gateway {
 			return aigateway.NewService(effective, buildAIProviders(effective, logger), nil, auditSink)
 		},
-		AIConfig: aiCfg,
+		AIConfig:   aiCfg,
+		Enrichment: enrichmentSvc,
 		ProviderFactories: map[string]ui.ProviderFactory{
 			"openai":    func(pc ai.ProviderConfig) providers.Provider { return aiopenai.New(pc) },
 			"anthropic": func(pc ai.ProviderConfig) providers.Provider { return aianthropic.New(pc) },
@@ -250,4 +260,30 @@ func buildAIProviders(cfg ai.Config, logger *slog.Logger) []providers.Provider {
 func parseInt(s string) int {
 	v, _ := strconv.Atoi(s)
 	return v
+}
+
+// buildEnrichmentService constructs a single *enrichment.Service with VirusTotal
+// and Spamhaus lookup providers when their credentials are available. Building
+// once at startup preserves the in-memory cache across requests.
+func buildEnrichmentService(ctx context.Context, cfg *config.Config, creds interface {
+	Lookup(context.Context, string) (string, bool, error)
+}) *enrichment.Service {
+	httpClient := httpclient.New(config.HTTPConfig{})
+
+	var lookupProviders []enrichment.LookupProvider
+
+	if vtKey, ok, _ := creds.Lookup(ctx, "virustotal.api_key"); ok && vtKey != "" {
+		lookupProviders = append(lookupProviders, virustotal.NewLookupClient(httpClient, vtKey))
+	}
+	if shKey, ok, _ := creds.Lookup(ctx, "spamhaus.api_key"); ok && shKey != "" {
+		lookupProviders = append(lookupProviders, spamhaus.NewLookupClient(httpClient, shKey))
+	}
+
+	return enrichment.NewService(enrichment.Config{
+		Enabled:    cfg.Enrichment.Enabled,
+		DNSEnabled: cfg.Enrichment.DNSEnabled,
+		ASNEnabled: cfg.Enrichment.ASNEnabled,
+		Timeout:    cfg.Enrichment.Timeout,
+		CacheTTL:   cfg.Enrichment.CacheTTL,
+	}, enrichmentdns.NewNetResolver(), asn.NewStaticProvider(), lookupProviders, nil)
 }
