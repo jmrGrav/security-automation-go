@@ -20,12 +20,48 @@ type Service struct {
 	reporting *reporting.Service
 }
 
+type SuppressionBreakdown struct {
+	ProtectedTarget  int
+	BenignSignal     int
+	LowConfidence    int
+	NoCategories     int
+	DuplicateReport  int
+	RecentlyReported int
+	DedupeStoreError int
+	MalformedEvent   int
+	Other            int
+}
+
 type ProcessingReport struct {
 	Fetched       int
 	Classified    int
 	Reported      int
 	Suppressed    int
+	Breakdown     SuppressionBreakdown
 	HighWatermark time.Time
+}
+
+func (r *ProcessingReport) addSuppression(reason string) {
+	switch reason {
+	case "protected_target":
+		r.Breakdown.ProtectedTarget++
+	case "benign_signal":
+		r.Breakdown.BenignSignal++
+	case "low_confidence":
+		r.Breakdown.LowConfidence++
+	case "no_abuse_categories":
+		r.Breakdown.NoCategories++
+	case "duplicate_report":
+		r.Breakdown.DuplicateReport++
+	case "abuseipdb_recently_reported":
+		r.Breakdown.RecentlyReported++
+	case "abuseipdb_dedup_store_error":
+		r.Breakdown.DedupeStoreError++
+	case "malformed_event":
+		r.Breakdown.MalformedEvent++
+	default:
+		r.Breakdown.Other++
+	}
 }
 
 func NewService(source Source, reportingService *reporting.Service) *Service {
@@ -73,6 +109,7 @@ func (s *Service) ProcessSince(ctx context.Context, zoneID string, since time.Ti
 		})
 		if err != nil {
 			report.Suppressed++
+			report.addSuppression("malformed_event")
 			metrics.CloudflareWAFMalformedEventsTotal.Inc()
 			s.reporting.Observe(ctx, tmevents.SecurityEvent{
 				Timestamp:         time.Now().UTC(),
@@ -103,6 +140,7 @@ func (s *Service) ProcessSince(ctx context.Context, zoneID string, since time.Ti
 		}
 		if result.Suppressed {
 			report.Suppressed++
+			report.addSuppression(result.SuppressionReason)
 		}
 	}
 

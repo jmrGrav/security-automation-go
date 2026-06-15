@@ -169,7 +169,11 @@ func runUIWithLocker(ctx context.Context, logger *slog.Logger, cfg *config.Confi
 		EvidenceStore:     evidenceStore,
 		ValidateAbuseIPDB: ui.ValidateAbuseIPDB,
 		AIExplainBuilder: func(effective ai.Config) aigateway.Gateway {
-			return aigateway.NewService(effective, buildAIProviders(effective, logger), nil, auditSink)
+			opts := []aigateway.ServiceOption{
+				aigateway.WithEvidenceReader(evidenceStore),
+				aigateway.WithIPEnricher(enrichmentSvc),
+			}
+			return aigateway.NewService(effective, buildAIProviders(effective, logger), nil, auditSink, opts...)
 		},
 		AIConfig:   aiCfg,
 		Enrichment: enrichmentSvc,

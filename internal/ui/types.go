@@ -231,15 +231,26 @@ type DashboardView struct {
 	Providers []ProviderView
 }
 
+type PipelineSuppressionBreakdown struct {
+	ProtectedTarget  int
+	BenignSignal     int
+	LowConfidence    int
+	DuplicateReport  int
+	RecentlyReported int
+	NoCategories     int
+	Other            int
+}
+
 type PipelineHealthRow struct {
-	Source           string
-	State            string
-	LastEventAt      string
-	LatestEvidenceID string
-	Classified       int
-	Reported         int
-	Suppressed       int
-	Pending          int // Decision == "report_pending", awaiting outbox
+	Source              string
+	State               string
+	LastEventAt         string
+	LatestEvidenceID    string
+	Classified          int
+	Reported            int
+	Suppressed          int
+	Pending             int // Decision == "report_pending", awaiting outbox
+	SuppressionBreakdown PipelineSuppressionBreakdown
 }
 
 type PipelineHealthView struct {

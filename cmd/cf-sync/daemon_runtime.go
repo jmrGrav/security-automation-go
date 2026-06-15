@@ -234,12 +234,43 @@ func runWAFReplayIteration(ctx context.Context, logger *slog.Logger, zoneID stri
 		return since
 	}
 	if report.Fetched > 0 {
-		logger.Info("cloudflare waf replay processed",
+		args := []any{
 			"fetched", report.Fetched,
 			"classified", report.Classified,
 			"reported", report.Reported,
 			"suppressed", report.Suppressed,
-		)
+		}
+		if report.Suppressed > 0 {
+			bd := report.Breakdown
+			if bd.ProtectedTarget > 0 {
+				args = append(args, "sup_protected_target", bd.ProtectedTarget)
+			}
+			if bd.BenignSignal > 0 {
+				args = append(args, "sup_benign_signal", bd.BenignSignal)
+			}
+			if bd.LowConfidence > 0 {
+				args = append(args, "sup_low_confidence", bd.LowConfidence)
+			}
+			if bd.DuplicateReport > 0 {
+				args = append(args, "sup_duplicate", bd.DuplicateReport)
+			}
+			if bd.RecentlyReported > 0 {
+				args = append(args, "sup_recently_reported", bd.RecentlyReported)
+			}
+			if bd.NoCategories > 0 {
+				args = append(args, "sup_no_categories", bd.NoCategories)
+			}
+			if bd.MalformedEvent > 0 {
+				args = append(args, "sup_malformed", bd.MalformedEvent)
+			}
+			if bd.DedupeStoreError > 0 {
+				args = append(args, "sup_dedup_error", bd.DedupeStoreError)
+			}
+			if bd.Other > 0 {
+				args = append(args, "sup_other", bd.Other)
+			}
+		}
+		logger.Info("cloudflare waf replay processed", args...)
 	}
 	nextCursor := nextWAFReplayCursor(report, since, now)
 	if cursorStore != nil {

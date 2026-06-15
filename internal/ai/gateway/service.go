@@ -33,7 +33,7 @@ type Service struct {
 }
 
 // NewService constructs a fail-closed explain gateway.
-func NewService(cfg ai.Config, providers []providers.Provider, quotas aiquota.Registry, auditReader audit.AuditReader) *Service {
+func NewService(cfg ai.Config, providers []providers.Provider, quotas aiquota.Registry, auditReader audit.AuditReader, opts ...ServiceOption) *Service {
 	if cfg.MaxContextBytes <= 0 {
 		cfg.MaxContextBytes = 12_000
 	}
@@ -49,15 +49,43 @@ func NewService(cfg ai.Config, providers []providers.Provider, quotas aiquota.Re
 	if cfg.RateLimitPerMinute <= 0 {
 		cfg.RateLimitPerMinute = 10
 	}
-	return &Service{
+	builder := aicontext.DefaultBuilder{Audit: auditReader}
+	svc := &Service{
 		cfg:       cfg,
 		cache:     aicache.NewMemoryStore(),
-		builder:   aicontext.DefaultBuilder{Audit: auditReader},
 		redactor:  airedaction.DefaultRedactor{},
 		router:    airouter.StaticSelector{Providers: providers, Quota: quotas},
 		providers: providers,
 		quotas:    quotas,
 		now:       time.Now,
+	}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(&builder)
+		}
+	}
+	svc.builder = builder
+	return svc
+}
+
+// ServiceOption configures optional capabilities of the explain gateway.
+type ServiceOption func(*aicontext.DefaultBuilder)
+
+// WithEvidenceReader wires the evidence store into the context builder for IP subject enrichment.
+func WithEvidenceReader(r aicontext.EvidenceReader) ServiceOption {
+	return func(b *aicontext.DefaultBuilder) {
+		if r != nil {
+			b.Evidence = r
+		}
+	}
+}
+
+// WithIPEnricher wires the enrichment service into the context builder for IP subject enrichment.
+func WithIPEnricher(e aicontext.IPEnricher) ServiceOption {
+	return func(b *aicontext.DefaultBuilder) {
+		if e != nil {
+			b.Enricher = e
+		}
 	}
 }
 
