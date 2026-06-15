@@ -85,13 +85,13 @@ func configureSecurityGuard(exec *execution.GovernedExecutor, checker reputation
 // Sharing ensures a single dedup store and a single evidence store across all
 // three sources (Cloudflare WAF, CrowdSec, OpenResty).
 type wafBundle struct {
-	cfWAF     *cloudflareevent.Service
-	csSource  *crowdsecevent.LiveSource
-	cs        *crowdsecevent.Service
-	orSource  *openrestyevent.LiveSource
-	or        *openrestyevent.Service
-	banEval   *autoban.Evaluator
-	banExec   autoban.BanExecutor
+	cfWAF    *cloudflareevent.Service
+	csSource *crowdsecevent.LiveSource
+	cs       *crowdsecevent.Service
+	orSource *openrestyevent.LiveSource
+	or       *openrestyevent.Service
+	banEval  *autoban.Evaluator
+	banExec  autoban.BanExecutor
 }
 
 // newWAFBundle creates all WAF event services sharing one reporting.Service.

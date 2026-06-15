@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/jm/security-automation-go/internal/adapters/cloudflareevent"
-	"github.com/jm/security-automation-go/internal/services/autoban"
 	"github.com/jm/security-automation-go/internal/api/auth"
 	"github.com/jm/security-automation-go/internal/api/server"
 	"github.com/jm/security-automation-go/internal/config"
@@ -35,6 +34,7 @@ import (
 	stateful_scheduler "github.com/jm/security-automation-go/internal/runtime/scheduler/stateful"
 	"github.com/jm/security-automation-go/internal/runtime/state"
 	"github.com/jm/security-automation-go/internal/runtime/status"
+	"github.com/jm/security-automation-go/internal/services/autoban"
 	"github.com/jm/security-automation-go/internal/services/reporting"
 	"github.com/jm/security-automation-go/internal/storage/sqlite"
 )
