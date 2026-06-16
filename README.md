@@ -40,10 +40,10 @@ make package         # dist/security-automation-go_1.7.2_amd64.deb
 Download the latest `.deb` from [Releases](https://github.com/jmrGrav/security-automation-go/releases):
 
 ```bash
-curl -LO https://github.com/jmrGrav/security-automation-go/releases/download/v1.7.2/security-automation-go_1.7.1_amd64.deb
+curl -LO https://github.com/jmrGrav/security-automation-go/releases/download/v1.7.2/security-automation-go_1.7.2_amd64.deb
 curl -LO https://github.com/jmrGrav/security-automation-go/releases/download/v1.7.2/SHA256SUMS
 sha256sum -c SHA256SUMS
-sudo dpkg -i security-automation-go_1.7.1_amd64.deb
+sudo dpkg -i security-automation-go_1.7.2_amd64.deb
 sudo systemctl start cf-sync
 ```
 
