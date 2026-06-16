@@ -454,4 +454,16 @@ var (
 		Name: "event_archive_storage_bytes",
 		Help: "Current SQLite storage footprint for the raw event archive and sidecar WAL/SHM files.",
 	})
+	SpamhausSubmitTotal = promauto.With(Registry).NewCounter(prometheus.CounterOpts{
+		Name: "spamhaus_submit_total",
+		Help: "Total number of successful Spamhaus Submit API submissions.",
+	})
+	SpamhausSubmitFailuresTotal = promauto.With(Registry).NewCounter(prometheus.CounterOpts{
+		Name: "spamhaus_submit_failures_total",
+		Help: "Total number of failed Spamhaus Submit API submissions.",
+	})
+	SpamhausSubmitDedupTotal = promauto.With(Registry).NewCounter(prometheus.CounterOpts{
+		Name: "spamhaus_submit_dedup_total",
+		Help: "Total number of Spamhaus submissions skipped by the 24h per-IP dedup.",
+	})
 )

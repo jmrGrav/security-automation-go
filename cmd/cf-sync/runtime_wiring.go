@@ -22,6 +22,7 @@ import (
 	"github.com/jm/security-automation-go/internal/execution"
 	"github.com/jm/security-automation-go/internal/httpclient"
 	"github.com/jm/security-automation-go/internal/runtime/providerstate"
+	"github.com/jm/security-automation-go/internal/security/enrichment/spamhaus"
 	fp_memory "github.com/jm/security-automation-go/internal/security/fp_memory"
 	"github.com/jm/security-automation-go/internal/security/reputation"
 	sectrust "github.com/jm/security-automation-go/internal/security/trust"
@@ -102,6 +103,15 @@ func newWAFBundle(cf *client.Client, abuse *abuseipdb.Client, hc httpclient.Clie
 	svc := reporting.New(reportExecutor, telemetry, trustRegistry, cfg.AbuseIPDB.CacheTTL)
 	if stores != nil {
 		stores.Configure(svc)
+	}
+	// Wire Spamhaus Submit independently of AbuseIPDB.
+	// Key is read from credential store at startup; nil key disables submission (fail-open).
+	if creds != nil {
+		if shKey, ok, _ := creds.Lookup(context.Background(), "spamhaus.api_key"); ok && shKey != "" {
+			if runtimeProviderEnabled(context.Background(), stateStore, "spamhaus", cfg != nil && cfg.Spamhaus.Enabled) {
+				svc.SetSpamhausClient(spamhaus.NewSubmitClient(hc, shKey))
+			}
+		}
 	}
 	// Build the auto-ban evaluator using the AbuseIPDB key known at startup.
 	// A nil key disables the confidence-100 rule (fail-open); burst rule still works.
