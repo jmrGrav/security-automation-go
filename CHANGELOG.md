@@ -2,6 +2,26 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v1.7.3] — 2026-06-16
+
+### Summary
+
+Hotfix: Spamhaus Submit was never wired into the reporting pipeline — the `spamhaus.Client` interface existed but had no concrete implementation. This release adds `SubmitClient` (POST `/portal/api/v1/submissions/add/ip`, Bearer token) and wires it into `reporting.Service` independently of AbuseIPDB: own 24h per-IP in-memory dedup, fail-open on error, independent metrics. AbuseIPDB behaviour is unchanged.
+
+### Fixes
+
+- **FIX-SPAMHAUS-SUBMIT — Spamhaus Submit wired into reporting pipeline** — `internal/security/enrichment/spamhaus.SubmitClient` implements `Client.Report()` via `POST https://submit.spamhaus.org/portal/api/v1/submissions/add/ip` with Bearer token auth. Error handling: HTTP 401/403 → auth error (logged WARN), HTTP 429 → rate-limit error (logged WARN), HTTP 5xx → server error retryable (logged WARN). All errors are fail-open: Spamhaus failure does not affect the AbuseIPDB result or `Process()` return value.
+
+- **FIX-SPAMHAUS-DEDUP — Per-IP 24h dedup for Spamhaus** — `spamhausIPDedup` tracks submitted IPs with a 24h TTL (in-memory, resets on restart). Second event for the same IP within the window skips the Spamhaus call entirely. Dedup is independent from AbuseIPDB's `enforceRecentReportWindow`.
+
+- **FIX-SPAMHAUS-WIRE — Startup wiring in `newWAFBundle`** — reads `spamhaus.api_key` from the credential store at startup and calls `svc.SetSpamhausClient(spamhaus.NewSubmitClient(hc, shKey))` when the key is present and the provider state is enabled. Missing key → no-op (fail-open), matching the AbuseIPDB pattern.
+
+### Metrics Added
+
+- `spamhaus_submit_total` — successful Spamhaus submissions
+- `spamhaus_submit_failures_total` — failed submissions (error logged WARN, execution continues)
+- `spamhaus_submit_dedup_total` — submissions skipped by 24h per-IP dedup
+
 ## [v1.7.2] — 2026-06-15
 
 ### Summary

@@ -5,7 +5,7 @@ BUILD_DATE := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 LDFLAGS ?= -s -w -X github.com/jm/security-automation-go/internal/buildmeta.Version=$(VERSION) -X github.com/jm/security-automation-go/internal/buildmeta.Commit=$(GIT_COMMIT) -X github.com/jm/security-automation-go/internal/buildmeta.BuildDate=$(BUILD_DATE)
 BUILD_FLAGS ?= -trimpath -buildvcs=false -ldflags "$(LDFLAGS)"
 STATIC_ENV = CGO_ENABLED=0
-VERSION ?= 1.7.2
+VERSION ?= 1.7.3
 GOPATH_BIN := $(shell $(GO) env GOPATH)/bin
 
 GOFMT_FILES := $(shell find . -type f -name '*.go' -not -path './vendor/*')

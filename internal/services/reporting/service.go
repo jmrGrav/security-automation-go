@@ -2,6 +2,8 @@ package reporting
 
 import (
 	"context"
+	"log/slog"
+	"net/netip"
 	"strings"
 	"time"
 
@@ -10,6 +12,7 @@ import (
 	"github.com/jm/security-automation-go/internal/observability/metrics"
 	"github.com/jm/security-automation-go/internal/security/abuseformat"
 	"github.com/jm/security-automation-go/internal/security/classifier"
+	"github.com/jm/security-automation-go/internal/security/enrichment/spamhaus"
 	"github.com/jm/security-automation-go/internal/security/reportdedup"
 	"github.com/jm/security-automation-go/internal/security/trust"
 	tmevents "github.com/jm/security-automation-go/internal/telemetry/events"
@@ -44,12 +47,16 @@ type Service struct {
 	failClosedOnStore bool
 	now               func() time.Time
 	gate              *decisionGate
+	spamhausClient    spamhaus.Client
+	spamhausDedup     *spamhausIPDedup
+	logger            *slog.Logger
 }
 
 func New(reporter abexec.Executor, sink sinks.Sink, registry *trust.Registry, dedupTTL time.Duration) *Service {
 	if dedupTTL <= 0 {
 		dedupTTL = 15 * time.Minute
 	}
+	now := func() time.Time { return time.Now().UTC() }
 	return &Service{
 		reporter:          reporter,
 		sink:              sink,
@@ -58,9 +65,17 @@ func New(reporter abexec.Executor, sink sinks.Sink, registry *trust.Registry, de
 		reportWindow:      24 * time.Hour,
 		lowConfidence:     0.70,
 		failClosedOnStore: true,
-		now:               func() time.Time { return time.Now().UTC() },
-		gate:              newDecisionGate(dedupTTL, func() time.Time { return time.Now().UTC() }),
+		now:               now,
+		gate:              newDecisionGate(dedupTTL, now),
+		spamhausDedup:     newSpamhausIPDedup(24*time.Hour, now),
+		logger:            slog.Default(),
 	}
+}
+
+// SetSpamhausClient wires an independent Spamhaus Submit reporter.
+// A nil client disables Spamhaus submission (fail-open).
+func (s *Service) SetSpamhausClient(client spamhaus.Client) {
+	s.spamhausClient = client
 }
 
 func (s *Service) SetReportDedupStore(store reportdedup.Store) {
@@ -80,6 +95,9 @@ func (s *Service) SetClock(now func() time.Time) {
 		s.now = now
 		if s.gate != nil {
 			s.gate.setClock(now)
+		}
+		if s.spamhausDedup != nil {
+			s.spamhausDedup.setClock(now)
 		}
 	}
 }
@@ -104,6 +122,9 @@ func (s *Service) Process(ctx context.Context, req Request) (Result, error) {
 	if suppressionReason != "" {
 		return s.handleSuppressedDecision(ctx, req, cls, comment, telemetryEvent, suppressionReason)
 	}
+
+	// Spamhaus submit: independent from AbuseIPDB, fail-open, own 24h dedup per IP.
+	s.submitToSpamhaus(ctx, req.Event.IP, cls.AbuseType)
 
 	unlock := s.gate.lockIP(strings.TrimSpace(req.Event.IP))
 	defer unlock()
@@ -168,4 +189,26 @@ func (s *Service) finalizeReportedDecision(ctx context.Context, req Request, cls
 		TelemetryEvent: telemetryEvent,
 		Report:         &attempt.report,
 	}
+}
+
+func (s *Service) submitToSpamhaus(ctx context.Context, rawIP string, reason string) {
+	if s.spamhausClient == nil {
+		return
+	}
+	ip, err := netip.ParseAddr(strings.TrimSpace(rawIP))
+	if err != nil {
+		return
+	}
+	if s.spamhausDedup != nil && s.spamhausDedup.markSeen(ip.String()) {
+		metrics.SpamhausSubmitDedupTotal.Inc()
+		return
+	}
+	if err := s.spamhausClient.Report(ctx, ip, reason); err != nil {
+		metrics.SpamhausSubmitFailuresTotal.Inc()
+		if s.logger != nil {
+			s.logger.Warn("spamhaus submit failed (fail-open)", "ip", rawIP, "error", err)
+		}
+		return
+	}
+	metrics.SpamhausSubmitTotal.Inc()
 }
