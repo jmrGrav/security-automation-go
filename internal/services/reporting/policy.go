@@ -10,6 +10,7 @@ import (
 	"github.com/jm/security-automation-go/internal/observability/metrics"
 	"github.com/jm/security-automation-go/internal/security/abuseformat"
 	"github.com/jm/security-automation-go/internal/security/classifier"
+	"github.com/jm/security-automation-go/internal/security/reputation"
 )
 
 func (s *Service) suppressionReason(req Request, cls classifier.Classification) string {
@@ -29,6 +30,25 @@ func (s *Service) suppressionReason(req Request, cls classifier.Classification) 
 		return "duplicate_report"
 	}
 	return ""
+}
+
+// reputationLocalSignal maps a classifier.Classification to the
+// reputation.LocalSignal the gate uses to decide whether external low/zero
+// reputation should suppress this report outright (SignalWeak/SignalNone)
+// or merely move it to investigation_shadow (SignalConfirmedHostile).
+//
+// Confirmed-hostile AbuseType values mirror classifier/risk's own hostile
+// categories (exploit_attempt, appsec_attack, confirmed_abuse) — anything
+// definitively assessed as an attack payload, not just a scanner/probe.
+func reputationLocalSignal(cls classifier.Classification) reputation.LocalSignal {
+	switch cls.AbuseType {
+	case "benign_bootstrap", "benign_probe", "":
+		return reputation.LocalSignal{Strength: reputation.SignalNone, AbuseType: cls.AbuseType}
+	case "exploit_attempt", "appsec_attack", "confirmed_abuse":
+		return reputation.LocalSignal{Strength: reputation.SignalConfirmedHostile, AbuseType: cls.AbuseType}
+	default:
+		return reputation.LocalSignal{Strength: reputation.SignalWeak, AbuseType: cls.AbuseType}
+	}
 }
 
 func telemetrySource(source abuseformat.Source) string {
