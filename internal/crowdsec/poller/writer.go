@@ -19,17 +19,31 @@ type DecisionRecord struct {
 }
 
 type decisionFields struct {
-	EventType   string `json:"event_type"`
-	ID          int64  `json:"id"`
-	IP          string `json:"ip"`
-	Type        string `json:"type,omitempty"`
-	Scenario    string `json:"scenario"`
-	Duration    string `json:"duration,omitempty"`
-	Origin      string `json:"origin,omitempty"`
-	Scope       string `json:"scope,omitempty"`
-	Simulated   bool   `json:"simulated,omitempty"`
-	Action      string `json:"action,omitempty"`
-	HasDecision bool   `json:"has_decision,omitempty"`
+	EventType   string     `json:"event_type"`
+	ID          int64      `json:"id"`
+	IP          string     `json:"ip"`
+	Type        string     `json:"type,omitempty"`
+	Scenario    string     `json:"scenario"`
+	Duration    string     `json:"duration,omitempty"`
+	Origin      string     `json:"origin,omitempty"`
+	Scope       string     `json:"scope,omitempty"`
+	Simulated   bool       `json:"simulated,omitempty"`
+	Action      string     `json:"action,omitempty"`
+	HasDecision bool       `json:"has_decision,omitempty"`
+	WAF         *wafDetail `json:"waf,omitempty"`
+}
+
+// wafDetail carries the Coraza/OWASP-CRS rule-level detail for an alert,
+// when available. Additive and optional — absent for plain CrowdSec
+// decisions and for alerts with no AppSec event data.
+type wafDetail struct {
+	RuleID       string `json:"rule_id,omitempty"`
+	Message      string `json:"message,omitempty"`
+	Category     string `json:"category,omitempty"`
+	URI          string `json:"uri,omitempty"`
+	MatchedZones string `json:"matched_zones,omitempty"`
+	Data         string `json:"data,omitempty"`
+	TargetFQDN   string `json:"target_fqdn,omitempty"`
 }
 
 // logWriter appends newline-delimited JSON records to a file.

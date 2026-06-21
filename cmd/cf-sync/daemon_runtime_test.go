@@ -11,6 +11,8 @@ import (
 
 	abmodels "github.com/jm/security-automation-go/internal/abuseipdb/models"
 	"github.com/jm/security-automation-go/internal/adapters/cloudflareevent"
+	"github.com/jm/security-automation-go/internal/adapters/nginxerrors"
+	"github.com/jm/security-automation-go/internal/adapters/wafref"
 	cfmodels "github.com/jm/security-automation-go/internal/cloudflare/models"
 	"github.com/jm/security-automation-go/internal/security/trust"
 	"github.com/jm/security-automation-go/internal/services/reporting"
@@ -237,4 +239,111 @@ func TestNewAuthenticator(t *testing.T) {
 			t.Fatal("expected error for missing CF_SYNC_API_TOKEN, got nil")
 		}
 	})
+}
+
+// TestWAFRefOffsetSurvivesSimulatedRestart guards against re-reading the
+// entire waf_refs.jsonl file (and re-recording its refs into evidence) on
+// every daemon restart. processWAFRefOnce must persist its byte offset via
+// the cursor store, and a freshly constructed LiveSource/wafBundle — as
+// happens on restart — must pick that offset back up via loadWAFRefOffset.
+func TestWAFRefOffsetSurvivesSimulatedRestart(t *testing.T) {
+	dir := t.TempDir()
+	refsFile := dir + "/waf_refs.jsonl"
+	line := `{"ref":"REF1","ts":"2026-06-13T10:00:00Z","client_ip":"8.8.8.8","host":"arleo.eu","method":"GET","uri":"/a","reason":"appsec"}` + "\n"
+	if err := os.WriteFile(refsFile, []byte(line), 0644); err != nil {
+		t.Fatalf("write refs file: %v", err)
+	}
+
+	logger := slog.New(slog.NewTextHandler(testWriter{t}, nil))
+	store := &fakeCursorStore{}
+	svc := reporting.New(&fakeAbuseReporter{}, &sinks.RecorderSink{}, trust.DefaultRegistry(), time.Minute)
+
+	// First run: a fresh LiveSource reads the one existing line.
+	bundle1 := &wafBundle{wrSource: wafref.NewLiveSource(refsFile), wr: wafref.NewService(svc)}
+	loadWAFRefOffset(context.Background(), logger, store, bundle1)
+	processWAFRefOnce(context.Background(), logger, bundle1, store)
+	if len(store.saved) != 1 {
+		t.Fatalf("expected offset to be persisted after first run, got %d saves", len(store.saved))
+	}
+	store.loadValue = store.saved[len(store.saved)-1]
+	store.found = true
+
+	// Simulated restart: a brand new LiveSource/bundle over the same file.
+	// Without restoring the persisted offset, this would re-read REF1 from
+	// byte 0 and re-process it, producing a duplicate evidence row.
+	bundle2 := &wafBundle{wrSource: wafref.NewLiveSource(refsFile), wr: wafref.NewService(svc)}
+	loadWAFRefOffset(context.Background(), logger, store, bundle2)
+	if got := bundle2.wrSource.Offset(); got != int64(len(line)) {
+		t.Fatalf("expected restored offset %d, got %d", len(line), got)
+	}
+
+	savesBefore := len(store.saved)
+	processWAFRefOnce(context.Background(), logger, bundle2, store)
+	if len(store.saved) != savesBefore {
+		t.Fatalf("expected no new events/saves on restart with no new data, got %d saves", len(store.saved))
+	}
+
+	// New ref appended after the restart must still be picked up.
+	more := `{"ref":"REF2","ts":"2026-06-13T10:05:00Z","client_ip":"9.9.9.9","host":"arleo.eu","method":"GET","uri":"/b","reason":"appsec"}` + "\n"
+	f, err := os.OpenFile(refsFile, os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		t.Fatalf("open for append: %v", err)
+	}
+	if _, err := f.WriteString(more); err != nil {
+		t.Fatalf("append: %v", err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	processWAFRefOnce(context.Background(), logger, bundle2, store)
+	if len(store.saved) != savesBefore+1 {
+		t.Fatalf("expected offset to advance after new ref appended, got %d saves", len(store.saved))
+	}
+}
+
+// TestNginxErrorsCursorAdvancesWithoutOverlapAndAvoidsDuplicates guards
+// against the failure mode the Cloudflare WAF replay's overlap window has:
+// since reporting's decisionEvidenceID is wall-clock-seeded (not idempotent
+// per logical event), re-reading an overlap window on every tick would
+// re-record the same burst as a brand new evidence row each time. The
+// nginxerrors cursor must advance straight to the high watermark with no
+// overlap, so a burst already seen is never reprocessed on the next tick.
+func TestNginxErrorsCursorAdvancesWithoutOverlapAndAvoidsDuplicates(t *testing.T) {
+	dir := t.TempDir()
+	line := func(ip, ts, uri string) string {
+		return ip + ` - - [` + ts + `] "GET ` + uri + ` HTTP/1.1" 404 123 "-" "scanner/1.0"`
+	}
+	content := line("9.9.9.9", "13/Jun/2026:10:00:00 +0000", "/admin") + "\n" +
+		line("9.9.9.9", "13/Jun/2026:10:00:01 +0000", "/admin") + "\n" +
+		line("9.9.9.9", "13/Jun/2026:10:00:02 +0000", "/admin") + "\n"
+	if err := os.WriteFile(dir+"/access.log", []byte(content), 0644); err != nil {
+		t.Fatalf("write access log: %v", err)
+	}
+
+	logger := slog.New(slog.NewTextHandler(testWriter{t}, nil))
+	store := &fakeCursorStore{}
+	svc := reporting.New(&fakeAbuseReporter{}, &sinks.RecorderSink{}, trust.DefaultRegistry(), time.Minute)
+	erSource := nginxerrors.NewLiveSource(dir)
+	bundle := &wafBundle{erSource: erSource, er: nginxerrors.NewService(erSource, svc)}
+
+	since := time.Date(2026, 6, 13, 9, 0, 0, 0, time.UTC)
+	since = processNginxErrorsOnce(context.Background(), logger, bundle, store, since)
+	if len(store.saved) != 1 {
+		t.Fatalf("expected cursor to be persisted after the qualifying burst, got %d saves", len(store.saved))
+	}
+	wantWatermark := time.Date(2026, 6, 13, 10, 0, 2, 0, time.UTC)
+	if !since.Equal(wantWatermark) {
+		t.Fatalf("expected cursor to advance to the burst's last event time %s, got %s", wantWatermark, since)
+	}
+
+	// Re-running against the same unchanged file must not reprocess the
+	// burst (no overlap re-read, no duplicate evidence/save).
+	savesBefore := len(store.saved)
+	since2 := processNginxErrorsOnce(context.Background(), logger, bundle, store, since)
+	if len(store.saved) != savesBefore {
+		t.Fatalf("expected no new save when no new entries exist past the cursor, got %d saves", len(store.saved))
+	}
+	if !since2.Equal(since) {
+		t.Fatalf("expected cursor to stay put with no new data, got %s want %s", since2, since)
+	}
 }

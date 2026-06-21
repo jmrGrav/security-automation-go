@@ -409,3 +409,67 @@ func TestConfidence100_QuotaThrottled_NoAbuseIPDBCall(t *testing.T) {
 		t.Errorf("expected AbuseIPDB Enrich not called when quota throttled, got callCount=%d", fe.callCount)
 	}
 }
+
+// --- EvaluateExternalBurst tests (used by nginxerrors HTTP-error escalation) ---
+
+func TestEvaluateExternalBurst_LiveModeTriggersBan(t *testing.T) {
+	ev := newEval(t, true, &fakeEnricher{})
+	d := ev.EvaluateExternalBurst("9.9.9.9", "http_error_burst")
+	if !d.ShouldBan {
+		t.Fatalf("expected ban decision, got SkipReason=%q", d.SkipReason)
+	}
+	if d.Reason != "http_error_burst" {
+		t.Errorf("expected reason to pass through, got %q", d.Reason)
+	}
+	if d.Shadow {
+		t.Error("expected Shadow=false in live mode")
+	}
+}
+
+func TestEvaluateExternalBurst_ShadowModeNeverBans(t *testing.T) {
+	ev := newEval(t, false, &fakeEnricher{})
+	d := ev.EvaluateExternalBurst("9.9.9.9", "http_error_burst")
+	if !d.ShouldBan {
+		t.Fatalf("expected ShouldBan=true with Shadow=true, got SkipReason=%q", d.SkipReason)
+	}
+	if !d.Shadow {
+		t.Error("expected Shadow=true in shadow mode; callers must never mutate on a shadow decision")
+	}
+}
+
+func TestEvaluateExternalBurst_ProtectedIPNeverBans(t *testing.T) {
+	ev := newEval(t, true, &fakeEnricher{})
+	const cfIP = "173.245.48.2" // allowlisted Cloudflare IP
+	d := ev.EvaluateExternalBurst(cfIP, "http_error_burst")
+	if d.ShouldBan {
+		t.Error("expected protected/allowlisted IP to be exempt from external burst ban")
+	}
+	if d.SkipReason != "protected_target" {
+		t.Errorf("expected skip reason protected_target, got %q", d.SkipReason)
+	}
+}
+
+func TestEvaluateExternalBurst_PrivateIPNeverBans(t *testing.T) {
+	ev := newEval(t, true, &fakeEnricher{})
+	d := ev.EvaluateExternalBurst("10.0.0.5", "http_error_burst")
+	if d.ShouldBan {
+		t.Error("expected RFC1918 IP to be exempt from external burst ban")
+	}
+	if d.SkipReason != "not_public_ip" {
+		t.Errorf("expected skip reason not_public_ip, got %q", d.SkipReason)
+	}
+}
+
+func TestEvaluateExternalBurst_DedupSkipsSecondBan(t *testing.T) {
+	ev := newEval(t, true, &fakeEnricher{})
+	const ip = "9.9.9.9"
+	d1 := ev.EvaluateExternalBurst(ip, "http_error_burst")
+	if !d1.ShouldBan {
+		t.Fatal("first evaluation should authorize ban")
+	}
+	ev.RecordBan(ip)
+	d2 := ev.EvaluateExternalBurst(ip, "http_error_burst")
+	if d2.ShouldBan {
+		t.Error("second evaluation should be deduped")
+	}
+}

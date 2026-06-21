@@ -53,6 +53,9 @@ func (f *fakeEvidenceStore) Search(_ context.Context, opts reporting.EvidenceSea
 		if opts.Suppressed && !r.Suppressed {
 			continue
 		}
+		if opts.WAFRef != "" && r.WAFRef != opts.WAFRef {
+			continue
+		}
 		out = append(out, r)
 	}
 	sort.SliceStable(out, func(i, j int) bool {
@@ -83,6 +86,7 @@ func (f *fakeEvidenceStore) Count(_ context.Context, opts reporting.EvidenceSear
 		SuppressionReason: opts.SuppressionReason,
 		AbuseIPDBReported: opts.AbuseIPDBReported,
 		Suppressed:        opts.Suppressed,
+		WAFRef:            opts.WAFRef,
 	})
 	return len(all), err
 }
@@ -171,6 +175,37 @@ func TestEvidencePage_ReportedFilter(t *testing.T) {
 	}
 	if strings.Contains(body, "5.6.7.8") {
 		t.Errorf("non-reported IP 5.6.7.8 must not appear in reported filter")
+	}
+}
+
+func TestEvidencePage_WAFRefFilter(t *testing.T) {
+	store := &fakeEvidenceStore{
+		records: []reporting.DecisionEvidence{
+			{EvidenceID: "ev1", IP: "1.2.3.4", Source: "crowdsec_waf", AbuseType: "scanner", WAFRef: "abc-123", Timestamp: time.Now()},
+			{EvidenceID: "ev2", IP: "5.6.7.8", Source: "crowdsec_waf", AbuseType: "exploit_attempt", WAFRef: "def-456", Timestamp: time.Now()},
+		},
+	}
+	srv, _, _ := newTestServer(t, nil)
+	srv.evidence = store
+	cookie := loginCookie(t, srv, "test-password-123!@#")
+
+	req := httptest.NewRequest(http.MethodGet, "/evidence?waf_ref=abc-123", nil)
+	req.AddCookie(cookie)
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rr.Code)
+	}
+	body := rr.Body.String()
+	if !strings.Contains(body, "1.2.3.4") {
+		t.Errorf("expected evidence matching waf_ref=abc-123 to appear")
+	}
+	if strings.Contains(body, "5.6.7.8") {
+		t.Errorf("evidence with a different waf_ref must not appear in filtered view")
+	}
+	if !strings.Contains(body, "abc-123") {
+		t.Errorf("expected WAF ref column/badge to render the ref value")
 	}
 }
 

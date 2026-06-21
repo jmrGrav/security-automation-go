@@ -17,6 +17,7 @@ const evidencePageSize = 50
 
 type EvidenceView struct {
 	Filter    string
+	WAFRef    string
 	Page      int
 	PageSize  int
 	Total     int
@@ -31,11 +32,13 @@ func (s *Server) handleEvidencePage(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := stableUIReadContext(r.Context())
 	defer cancel()
 	filter := strings.TrimSpace(r.URL.Query().Get("filter"))
+	wafRef := strings.TrimSpace(r.URL.Query().Get("waf_ref"))
 	page := parsePositiveInt(r.URL.Query().Get("page"), 1)
 	pageSize := clampInt(parsePositiveInt(r.URL.Query().Get("limit"), evidencePageSize), 10, 200)
 
 	view := EvidenceView{
 		Filter:    filter,
+		WAFRef:    wafRef,
 		Page:      page,
 		PageSize:  pageSize,
 		EmptyText: "No WAF events recorded yet. Events will appear here once the daemon processes security events.",
@@ -47,7 +50,7 @@ func (s *Server) handleEvidencePage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	baseOpts := reporting.EvidenceSearchOptions{}
+	baseOpts := reporting.EvidenceSearchOptions{WAFRef: wafRef}
 	switch filter {
 	case "reported":
 		baseOpts.AbuseIPDBReported = true
@@ -85,6 +88,9 @@ func (s *Server) handleEvidencePage(w http.ResponseWriter, r *http.Request) {
 	}
 	if filter != "" {
 		badges = append(badges, StatusItem{Label: "Filter", Level: "warning", Detail: filter})
+	}
+	if wafRef != "" {
+		badges = append(badges, StatusItem{Label: "WAF Ref", Level: "warning", Detail: wafRef})
 	}
 
 	view.Total = total
@@ -131,7 +137,13 @@ func EvidencePage(view EvidenceView) templ.Component {
 					return err
 				}
 			}
-			if _, err := fmt.Fprint(w, `>Low confidence (suppressed)</option></select></span></div><div class="row" style="grid-template-columns: minmax(8rem, 9rem) minmax(0, 1fr)"><span>Limit</span><span><input name="limit" type="number" min="10" max="200" value="`); err != nil {
+			if _, err := fmt.Fprint(w, `>Low confidence (suppressed)</option></select></span></div><div class="row" style="grid-template-columns: minmax(8rem, 9rem) minmax(0, 1fr)"><span>WAF ref</span><span><input name="waf_ref" type="text" placeholder="block-page reference" value="`); err != nil {
+				return err
+			}
+			if _, err := io.WriteString(w, html.EscapeString(view.WAFRef)); err != nil {
+				return err
+			}
+			if _, err := fmt.Fprint(w, `" /></span></div><div class="row" style="grid-template-columns: minmax(8rem, 9rem) minmax(0, 1fr)"><span>Limit</span><span><input name="limit" type="number" min="10" max="200" value="`); err != nil {
 				return err
 			}
 			if _, err := io.WriteString(w, strconv.Itoa(view.PageSize)); err != nil {
@@ -141,13 +153,13 @@ func EvidencePage(view EvidenceView) templ.Component {
 				return err
 			}
 			if view.HasPrev {
-				prevURL := fmt.Sprintf(`/evidence?filter=%s&page=%d&limit=%d`, html.EscapeString(view.Filter), view.Page-1, view.PageSize)
+				prevURL := fmt.Sprintf(`/evidence?filter=%s&waf_ref=%s&page=%d&limit=%d`, html.EscapeString(view.Filter), html.EscapeString(view.WAFRef), view.Page-1, view.PageSize)
 				if _, err := fmt.Fprintf(w, `<a class="badge" href="%s">← Prev</a>`, prevURL); err != nil {
 					return err
 				}
 			}
 			if view.HasNext {
-				nextURL := fmt.Sprintf(`/evidence?filter=%s&page=%d&limit=%d`, html.EscapeString(view.Filter), view.Page+1, view.PageSize)
+				nextURL := fmt.Sprintf(`/evidence?filter=%s&waf_ref=%s&page=%d&limit=%d`, html.EscapeString(view.Filter), html.EscapeString(view.WAFRef), view.Page+1, view.PageSize)
 				if _, err := fmt.Fprintf(w, `<a class="badge" href="%s">Next →</a>`, nextURL); err != nil {
 					return err
 				}
@@ -160,7 +172,7 @@ func EvidencePage(view EvidenceView) templ.Component {
 				return writeEmptyState(w, view.EmptyText)
 			}
 
-			if _, err := fmt.Fprint(w, `<div class="table-wrap"><table><colgroup><col style="width:10rem"><col style="width:12rem"><col style="width:8rem"><col style="width:9rem"><col style="width:8rem"><col style="width:4rem"><col style="width:5rem"><col style="width:8rem"><col><col style="width:7rem"></colgroup><thead><tr><th>timestamp</th><th>evidence id</th><th>source</th><th>IP</th><th>type</th><th>score</th><th>confidence</th><th>decision</th><th>suppression</th><th>status</th></tr></thead><tbody>`); err != nil {
+			if _, err := fmt.Fprint(w, `<div class="table-wrap"><table><colgroup><col style="width:10rem"><col style="width:12rem"><col style="width:8rem"><col style="width:9rem"><col style="width:8rem"><col style="width:4rem"><col style="width:5rem"><col style="width:8rem"><col><col style="width:7rem"><col style="width:8rem"></colgroup><thead><tr><th>timestamp</th><th>evidence id</th><th>source</th><th>IP</th><th>type</th><th>score</th><th>confidence</th><th>decision</th><th>suppression</th><th>status</th><th>WAF ref</th></tr></thead><tbody>`); err != nil {
 				return err
 			}
 			for _, ev := range view.Entries {
@@ -181,7 +193,12 @@ func EvidencePage(view EvidenceView) templ.Component {
 				evidenceLink := evidenceDetailLinkHTML(ev.EvidenceID)
 				ipCell := fmt.Sprintf(`<a href="/forensic?ip=%s" title="Explain this IP" data-live-panel-link="true" data-live-panel-title="Forensic Lookup">%s</a>`,
 					html.EscapeString(ev.IP), html.EscapeString(ev.IP))
-				if _, err := fmt.Fprintf(w, `<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%d</td><td>%.2f</td><td>%s</td><td>%s</td><td>%s</td></tr>`,
+				wafRefCell := `<span class="muted">none</span>`
+				if ev.WAFRef != "" {
+					ref := html.EscapeString(ev.WAFRef)
+					wafRefCell = fmt.Sprintf(`<a class="badge" href="/evidence?waf_ref=%s" title="%s">%s</a>`, ref, ref, ref)
+				}
+				if _, err := fmt.Fprintf(w, `<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%d</td><td>%.2f</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>`,
 					html.EscapeString(ev.Timestamp.Format("2006-01-02 15:04:05")),
 					evidenceLink,
 					html.EscapeString(ev.Source),
@@ -192,6 +209,7 @@ func EvidencePage(view EvidenceView) templ.Component {
 					html.EscapeString(ev.Decision),
 					suppression,
 					statusBadge,
+					wafRefCell,
 				); err != nil {
 					return err
 				}

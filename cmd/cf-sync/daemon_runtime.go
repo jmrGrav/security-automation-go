@@ -137,10 +137,15 @@ func newDaemonContext(ctx context.Context, logger *slog.Logger, srv *http.Server
 // startCrowdSecOpenRestyPoller starts a background goroutine that reads CrowdSec
 // decisions and OpenResty Lua events on each interval tick and feeds them into
 // the shared reporting service (evidence + AbuseIPDB outbox).
-func startCrowdSecOpenRestyPoller(ctx context.Context, logger *slog.Logger, interval time.Duration, bundle *wafBundle) {
+const wafRefOffsetCursorName = "wafref_refs_offset"
+const nginxErrorsCursorName = "nginx_errors_since"
+
+func startCrowdSecOpenRestyPoller(ctx context.Context, logger *slog.Logger, interval time.Duration, bundle *wafBundle, cursorStore cursorStateStore) {
 	if bundle == nil {
 		return
 	}
+	loadWAFRefOffset(ctx, logger, cursorStore, bundle)
+	nginxErrorsSince := loadNginxErrorsCursor(ctx, logger, cursorStore, interval)
 	go func() {
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
@@ -152,6 +157,8 @@ func startCrowdSecOpenRestyPoller(ctx context.Context, logger *slog.Logger, inte
 			}
 			processCrowdSecOnce(ctx, logger, bundle)
 			processOpenRestyOnce(ctx, logger, bundle)
+			processWAFRefOnce(ctx, logger, bundle, cursorStore)
+			nginxErrorsSince = processNginxErrorsOnce(ctx, logger, bundle, cursorStore, nginxErrorsSince)
 			select {
 			case <-ctx.Done():
 				return
@@ -197,6 +204,116 @@ func processOpenRestyOnce(ctx context.Context, logger *slog.Logger, bundle *wafB
 	if len(events) > 0 {
 		logger.Info("openresty waf events processed", "count", len(events))
 	}
+}
+
+func processWAFRefOnce(ctx context.Context, logger *slog.Logger, bundle *wafBundle, cursorStore cursorStateStore) {
+	if bundle == nil || bundle.wrSource == nil || bundle.wr == nil {
+		return
+	}
+	events, err := bundle.wrSource.Read(ctx)
+	if err != nil {
+		logger.WarnContext(ctx, "waf ref live source read failed", "error", err)
+		return
+	}
+	for _, event := range events {
+		if _, err := bundle.wr.Process(ctx, event); err != nil {
+			logger.WarnContext(ctx, "waf ref event processing failed", "ip", event.IP, "ref", event.Ref, "error", err)
+		}
+	}
+	if len(events) > 0 {
+		logger.Info("waf ref events processed", "count", len(events))
+		saveWAFRefOffset(ctx, logger, cursorStore, bundle)
+	}
+}
+
+// loadWAFRefOffset restores the wafref.LiveSource byte offset persisted by a
+// prior run, so a daemon restart resumes tailing waf_refs.jsonl instead of
+// re-reading the whole file and re-recording duplicate evidence rows for
+// refs already processed. The cursor store's column holds a time.Time, so
+// the byte offset is encoded as a Unix timestamp (seconds since epoch).
+func loadWAFRefOffset(ctx context.Context, logger *slog.Logger, cursorStore cursorStateStore, bundle *wafBundle) {
+	if cursorStore == nil || bundle == nil || bundle.wrSource == nil {
+		return
+	}
+	persisted, ok, err := cursorStore.Load(ctx, wafRefOffsetCursorName)
+	if err != nil {
+		logger.WarnContext(ctx, "waf ref offset cursor load failed", "error", err)
+		return
+	}
+	if !ok {
+		return
+	}
+	bundle.wrSource.SetOffset(persisted.Unix())
+}
+
+func saveWAFRefOffset(ctx context.Context, logger *slog.Logger, cursorStore cursorStateStore, bundle *wafBundle) {
+	if cursorStore == nil || bundle == nil || bundle.wrSource == nil {
+		return
+	}
+	offset := time.Unix(bundle.wrSource.Offset(), 0).UTC()
+	if err := cursorStore.Save(ctx, wafRefOffsetCursorName, offset); err != nil {
+		logger.WarnContext(ctx, "waf ref offset cursor save failed", "error", err)
+	}
+}
+
+// processNginxErrorsOnce aggregates nginx access-log error entries (status
+// >=400) into per-IP bursts and records qualifying bursts as Evidence/
+// Timeline only — never AbuseIPDB/Spamhaus, never auto-ban. It returns the
+// cursor to use on the next tick. Unlike the Cloudflare WAF replay, this
+// cursor never re-queries an overlap window: access-log entries are read
+// fully each tick and filtered by timestamp, so an overlap would reprocess
+// the same burst and write duplicate evidence rows (decisionEvidenceID is
+// seeded by wall-clock time, not the event's own timestamp).
+func processNginxErrorsOnce(ctx context.Context, logger *slog.Logger, bundle *wafBundle, cursorStore cursorStateStore, since time.Time) time.Time {
+	if bundle == nil || bundle.er == nil {
+		return since
+	}
+	report, err := bundle.er.ProcessSince(ctx, since)
+	if err != nil {
+		logger.WarnContext(ctx, "nginx error source processing failed", "error", err)
+		return since
+	}
+	if report.Bursts > 0 {
+		logger.Info("nginx http error bursts processed",
+			"fetched", report.Fetched,
+			"bursts", report.Bursts,
+			"below_min_burst", report.BelowMinBurst,
+			"suppressed", report.Suppressed,
+		)
+	}
+	next := since
+	if report.HighWatermark.After(since) {
+		next = report.HighWatermark.UTC()
+	}
+	if next.Equal(since) {
+		return since
+	}
+	if cursorStore != nil {
+		if err := cursorStore.Save(ctx, nginxErrorsCursorName, next); err != nil {
+			logger.WarnContext(ctx, "nginx errors cursor save failed", "error", err)
+			return since
+		}
+	}
+	return next
+}
+
+// loadNginxErrorsCursor restores the persisted high-watermark, or falls back
+// to now-interval on a cold start so the first tick doesn't backfill an
+// entire access-log history (and its rotated .log.1 sibling) as bursts.
+func loadNginxErrorsCursor(ctx context.Context, logger *slog.Logger, cursorStore cursorStateStore, interval time.Duration) time.Time {
+	coldStart := time.Now().UTC().Add(-interval)
+	if cursorStore == nil {
+		return coldStart
+	}
+	persisted, ok, err := cursorStore.Load(ctx, nginxErrorsCursorName)
+	if err != nil {
+		logger.WarnContext(ctx, "nginx errors cursor load failed", "error", err)
+		return coldStart
+	}
+	if !ok {
+		return coldStart
+	}
+	return persisted.UTC()
 }
 
 func startWAFReplayPoller(ctx context.Context, logger *slog.Logger, interval time.Duration, zoneID string, wafReplay *cloudflareevent.Service, cursorStore cursorStateStore, banEval *autoban.Evaluator, banExec autoban.BanExecutor) {
@@ -390,7 +507,7 @@ func runDaemonWithLocker(ctx context.Context, logger *slog.Logger, orch *pipelin
 	childCtx, cancel := newDaemonContext(ctx, logger, srv)
 	defer cancel()
 	startWAFReplayPoller(childCtx, logger, interval, zoneID, wafReplay, cursorStore, bundle.banEvalService(), bundle.banExecutorService())
-	startCrowdSecOpenRestyPoller(childCtx, logger, interval, bundle)
+	startCrowdSecOpenRestyPoller(childCtx, logger, interval, bundle, cursorStore)
 	if quotaRefreshers != nil {
 		quotaRefreshers.start(childCtx, logger)
 	}

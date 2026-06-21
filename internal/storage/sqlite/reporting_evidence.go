@@ -119,6 +119,10 @@ func (s *ReportingEvidenceStore) Search(ctx context.Context, opts reporting.Evid
 	if opts.Suppressed {
 		query += " AND json_extract(data, '$.suppressed') = 1"
 	}
+	if strings.TrimSpace(opts.WAFRef) != "" {
+		query += " AND json_extract(data, '$.waf_ref') = ?"
+		args = append(args, strings.TrimSpace(opts.WAFRef))
+	}
 	if !opts.From.IsZero() {
 		query += " AND timestamp >= ?"
 		args = append(args, opts.From.UTC())
@@ -197,6 +201,10 @@ func (s *ReportingEvidenceStore) Count(ctx context.Context, opts reporting.Evide
 	}
 	if opts.Suppressed {
 		query += " AND json_extract(data, '$.suppressed') = 1"
+	}
+	if strings.TrimSpace(opts.WAFRef) != "" {
+		query += " AND json_extract(data, '$.waf_ref') = ?"
+		args = append(args, strings.TrimSpace(opts.WAFRef))
 	}
 	if !opts.From.IsZero() {
 		query += " AND timestamp >= ?"

@@ -44,14 +44,27 @@ func NewLiveSource(decisionsLog string, nginxLogDir string, lookback time.Durati
 type decisionEnvelope struct {
 	DT string `json:"dt"`
 	CS struct {
-		EventType string `json:"event_type"`
-		Origin    string `json:"origin"`
-		Action    string `json:"action"`
-		Type      string `json:"type"`
-		Scenario  string `json:"scenario"`
-		IP        string `json:"ip"`
-		ID        any    `json:"id"`
+		EventType string     `json:"event_type"`
+		Origin    string     `json:"origin"`
+		Action    string     `json:"action"`
+		Type      string     `json:"type"`
+		Scenario  string     `json:"scenario"`
+		IP        string     `json:"ip"`
+		ID        any        `json:"id"`
+		WAF       *wafDetail `json:"waf"`
 	} `json:"cs"`
+}
+
+// wafDetail mirrors poller.wafDetail — the optional Coraza/OWASP-CRS
+// rule-level detail attached to "alert" records in decisions.log.
+type wafDetail struct {
+	RuleID       string `json:"rule_id,omitempty"`
+	Message      string `json:"message,omitempty"`
+	Category     string `json:"category,omitempty"`
+	URI          string `json:"uri,omitempty"`
+	MatchedZones string `json:"matched_zones,omitempty"`
+	Data         string `json:"data,omitempty"`
+	TargetFQDN   string `json:"target_fqdn,omitempty"`
 }
 
 func (s *LiveSource) Read(ctx context.Context) ([]RawEvent, error) {
@@ -97,14 +110,40 @@ func (s *LiveSource) Read(ctx context.Context) ([]RawEvent, error) {
 		}
 
 		uris := s.lookupURIs(ip, 5)
+		ruleID := rawID
+		ruleName := env.CS.Scenario
+		hostname := ""
+		if env.CS.WAF != nil {
+			if env.CS.WAF.URI != "" {
+				uris = append([]string{env.CS.WAF.URI}, uris...)
+			}
+			if env.CS.WAF.RuleID != "" {
+				ruleID = env.CS.WAF.RuleID
+			}
+			if env.CS.WAF.Message != "" {
+				ruleName = env.CS.WAF.Message
+			}
+			hostname = env.CS.WAF.TargetFQDN
+		}
+
+		// Alerts with no attached CrowdSec decision are detections only —
+		// the Lua AppSec fusion check already blocked the request in-band,
+		// but no ban exists. Mark them evidence-only so the Service never
+		// reports them upstream. Real ban decisions (eventType=="decision")
+		// and confirmed bans (alert with a decision attached) keep the
+		// existing "block" action and full reporting path.
+		eventAction := "block"
+		if env.CS.EventType == "alert" && strings.ToLower(strings.TrimSpace(env.CS.Action)) != "banned" {
+			eventAction = "detected"
+		}
 
 		events = append(events, RawEvent{
 			IP:        ip,
-			Hostname:  "",
+			Hostname:  hostname,
 			URIs:      uris,
-			Action:    "block",
-			RuleID:    rawID,
-			RuleName:  env.CS.Scenario,
+			Action:    eventAction,
+			RuleID:    ruleID,
+			RuleName:  ruleName,
 			Timestamp: ts,
 			Hits:      max(1, len(uris)),
 			WindowSec: int(s.Lookback.Seconds()),
@@ -116,9 +155,11 @@ func (s *LiveSource) Read(ctx context.Context) ([]RawEvent, error) {
 func (s *LiveSource) acceptDecision(eventType, origin, action, decisionType, scenario string) bool {
 	switch eventType {
 	case "alert":
-		if action != "banned" {
-			return false
-		}
+		// Accept both confirmed bans and detection-only alerts (e.g. a
+		// single Coraza/CRS match that triggered an in-request block but
+		// has no CrowdSec decision yet). Detection-only alerts are tagged
+		// "detected" above and routed through the evidence-only path by
+		// the Service — they are never reported upstream from here.
 	case "decision":
 		if decisionType != "ban" {
 			return false

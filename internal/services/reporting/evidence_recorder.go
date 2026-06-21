@@ -55,6 +55,7 @@ func (s *Service) recordEvidenceWithID(ctx context.Context, evidenceID string, r
 		FormatterVersion:  FormatterVersion,
 		PolicyVersion:     PolicyVersion,
 		NormalizedEvent:   req.Event,
+		WAFRef:            req.Event.Ref,
 		Metadata: map[string]any{
 			"source_name":        string(req.Source),
 			"replay_evidence":    append([]string(nil), cls.Evidence...),

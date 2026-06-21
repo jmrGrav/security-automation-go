@@ -14,7 +14,9 @@ import (
 	abtransport "github.com/jm/security-automation-go/internal/abuseipdb/transport"
 	"github.com/jm/security-automation-go/internal/adapters/cloudflareevent"
 	crowdsecevent "github.com/jm/security-automation-go/internal/adapters/crowdsecevent"
+	"github.com/jm/security-automation-go/internal/adapters/nginxerrors"
 	openrestyevent "github.com/jm/security-automation-go/internal/adapters/openrestyevent"
+	"github.com/jm/security-automation-go/internal/adapters/wafref"
 	"github.com/jm/security-automation-go/internal/betterstack"
 	cfpkg "github.com/jm/security-automation-go/internal/cloudflare"
 	"github.com/jm/security-automation-go/internal/cloudflare/client"
@@ -91,6 +93,10 @@ type wafBundle struct {
 	cs       *crowdsecevent.Service
 	orSource *openrestyevent.LiveSource
 	or       *openrestyevent.Service
+	wrSource *wafref.LiveSource
+	wr       *wafref.Service
+	erSource *nginxerrors.LiveSource
+	er       *nginxerrors.Service
 	banEval  *autoban.Evaluator
 	banExec  autoban.BanExecutor
 }
@@ -127,15 +133,31 @@ func newWAFBundle(cf *client.Client, abuse *abuseipdb.Client, hc httpclient.Clie
 		cfEnforcer := cfpkg.NewClient(hc, cfg.Cloudflare.APIToken)
 		banExec = &cfBanExecutor{client: cfEnforcer, zoneID: cfg.Cloudflare.ZoneID, logger: logger}
 	}
-	return &wafBundle{
+	bundle := &wafBundle{
 		cfWAF:    cloudflareevent.NewService(cf, svc),
 		csSource: crowdsecevent.NewLiveSource(cfg.CrowdSec.DecisionsLog, cfg.CrowdSec.NginxLogDir, 24*time.Hour),
 		cs:       crowdsecevent.NewService(svc),
 		orSource: openrestyevent.NewLiveSource(cfg.OpenResty.EventsFile),
 		or:       openrestyevent.NewService(svc),
+		wrSource: wafref.NewLiveSource(cfg.OpenResty.WAFRefsFile),
+		wr:       wafref.NewService(svc),
 		banEval:  banEval,
 		banExec:  banExec,
 	}
+	if cfg.HTTPErrorIntel.Enabled {
+		erSource := nginxerrors.NewLiveSource(cfg.CrowdSec.NginxLogDir)
+		erSvc := nginxerrors.NewService(erSource, svc)
+		erSvc.SetMinBurst(cfg.HTTPErrorIntel.MinBurst)
+		// EnforceMode is the standing-rule opt-in: WAF/HTTP-error signals never
+		// reach the auto-ban evaluator unless an operator explicitly sets this.
+		// banEval still applies its own shadow/trust/dedup guards regardless.
+		if cfg.HTTPErrorIntel.EnforceMode && banEval != nil {
+			erSvc.SetEnforcement(banEval, banExec, cfg.HTTPErrorIntel.BanThreshold)
+		}
+		bundle.erSource = erSource
+		bundle.er = erSvc
+	}
+	return bundle
 }
 
 func newRuntimeAbuseExecutor(hc httpclient.Client, creds credentialLooker, stateStore providerstate.Store, fallbackEnabled bool, initial *abuseipdb.Client) abexec.Executor {

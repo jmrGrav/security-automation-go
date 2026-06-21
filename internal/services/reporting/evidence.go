@@ -39,6 +39,12 @@ type DecisionEvidence struct {
 	PolicyVersion     string           `json:"decision_policy_version,omitempty"`
 	NormalizedEvent   classifier.Event `json:"normalized_event,omitempty"`
 	Metadata          map[string]any   `json:"metadata,omitempty"`
+
+	// WAFRef is the block-page reference (e.g. from the OpenResty/Lua WAF
+	// bundle's waf_refs.jsonl) that correlates this evidence to what a human
+	// saw on the "Access denied" page. Optional; empty for sources that don't
+	// carry one.
+	WAFRef string `json:"waf_ref,omitempty"`
 }
 
 type EvidenceSearchOptions struct {
@@ -48,6 +54,7 @@ type EvidenceSearchOptions struct {
 	SuppressionReason string
 	AbuseIPDBReported bool
 	Suppressed        bool
+	WAFRef            string
 	From              time.Time
 	To                time.Time
 	Limit             int

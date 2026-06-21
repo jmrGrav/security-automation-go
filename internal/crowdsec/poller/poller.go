@@ -258,6 +258,19 @@ func (p *Poller) processAlerts(ctx context.Context) (int, error) {
 			action = "banned"
 		}
 
+		var waf *wafDetail
+		if match, ok := a.primaryWAFMatch(); ok {
+			waf = &wafDetail{
+				RuleID:       match.RuleID,
+				Message:      match.Message,
+				Category:     match.Category,
+				URI:          match.URI,
+				MatchedZones: match.MatchedZones,
+				Data:         match.Data,
+				TargetFQDN:   match.TargetFQDN,
+			}
+		}
+
 		if err := p.writer.write(DecisionRecord{
 			DT:       dt,
 			Host:     p.host,
@@ -269,6 +282,7 @@ func (p *Poller) processAlerts(ctx context.Context) (int, error) {
 				Scenario:    orDefault(a.Scenario, "unknown"),
 				Action:      action,
 				HasDecision: a.hasDecision(),
+				WAF:         waf,
 			},
 		}); err != nil {
 			return count, fmt.Errorf("write alert %d: %w", a.ID, err)
