@@ -15,6 +15,7 @@ import (
 	"github.com/jm/security-automation-go/internal/adapters/cloudflareevent"
 	"github.com/jm/security-automation-go/internal/api/auth"
 	"github.com/jm/security-automation-go/internal/api/server"
+	cfpkg "github.com/jm/security-automation-go/internal/cloudflare"
 	"github.com/jm/security-automation-go/internal/config"
 	"github.com/jm/security-automation-go/internal/observability/handlers"
 	"github.com/jm/security-automation-go/internal/orchestrator/pipeline"
@@ -468,7 +469,7 @@ func nextWAFReplayCursor(report cloudflareevent.ProcessingReport, previous time.
 	return previous.UTC()
 }
 
-func runDaemonWithLocker(ctx context.Context, logger *slog.Logger, orch *pipeline.Orchestrator, collector *status.Collector, j journal.JournalStore, qStore *quarantine.Store, store *state.StateStore, sm *engine.StateMachine, dm *memory.Store, cm *cooldown.Manager, rec *recorder.Recorder, br *registry.Registry, am *activation.Manager, fr *federation.Resolver, adm *admission.Controller, evidence reporting.EvidenceStore, ownershipRepo *sqlite.OwnershipRepository, p *pool.Pool, outboxWorker *reporting.OutboxWorker, stateDir string, interval time.Duration, metricsAddr string, zoneID string, wafReplay *cloudflareevent.Service, cursorStore *sqlite.CursorStore, quotaRefreshers *quotaRefreshers, bundle *wafBundle, acquireLock bool) {
+func runDaemonWithLocker(ctx context.Context, logger *slog.Logger, orch *pipeline.Orchestrator, collector *status.Collector, j journal.JournalStore, qStore *quarantine.Store, store *state.StateStore, sm *engine.StateMachine, dm *memory.Store, cm *cooldown.Manager, rec *recorder.Recorder, br *registry.Registry, am *activation.Manager, fr *federation.Resolver, adm *admission.Controller, evidence reporting.EvidenceStore, ownershipRepo *sqlite.OwnershipRepository, p *pool.Pool, outboxWorker *reporting.OutboxWorker, stateDir string, interval time.Duration, metricsAddr string, zoneID string, wafReplay *cloudflareevent.Service, cursorStore *sqlite.CursorStore, quotaRefreshers *quotaRefreshers, bundle *wafBundle, acquireLock bool, cfEnforcer cfpkg.EnforcementClient, banLifecycleCleanupInterval time.Duration) {
 	logger.Info("starting in daemon mode", "state_dir", stateDir, "interval", interval, "metrics_addr", metricsAddr)
 	var ownershipLineage *ownership.LineageQueryService
 	if ownershipRepo != nil {
@@ -508,6 +509,7 @@ func runDaemonWithLocker(ctx context.Context, logger *slog.Logger, orch *pipelin
 	defer cancel()
 	startWAFReplayPoller(childCtx, logger, interval, zoneID, wafReplay, cursorStore, bundle.banEvalService(), bundle.banExecutorService())
 	startCrowdSecOpenRestyPoller(childCtx, logger, interval, bundle, cursorStore)
+	startBanLifecycleCleanup(childCtx, logger, bundle.banLifecycleStoreService(), cfEnforcer, zoneID, banLifecycleCleanupInterval, j, evidence)
 	if quotaRefreshers != nil {
 		quotaRefreshers.start(childCtx, logger)
 	}

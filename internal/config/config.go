@@ -66,6 +66,11 @@ type CloudflareConfig struct {
 	// AutoBanEnabled gates automatic IP banning by the auto-ban evaluator.
 	// Requires MutationsEnabled=true. When false the evaluator runs in shadow mode.
 	AutoBanEnabled bool `yaml:"auto_ban_enabled"`
+	// CleanupInterval controls how often the autoban ban-lifecycle cleanup
+	// worker scans for expired Cloudflare access rules and removes them.
+	// Defaults to 5 minutes when unset/zero. Named to compose cleanly under
+	// a future `reputation_policy.cloudflare.cleanup_interval` block.
+	CleanupInterval time.Duration `yaml:"cleanup_interval"`
 }
 
 type CrowdSecConfig struct {
@@ -230,6 +235,9 @@ func DefaultConfig() *Config {
 			CacheTTL:       15 * time.Minute,
 			RequestTimeout: 2 * time.Second,
 		},
+		Cloudflare: CloudflareConfig{
+			CleanupInterval: 5 * time.Minute,
+		},
 		Spamhaus:   SpamhausConfig{},
 		VirusTotal: VirusTotalConfig{},
 		HTTPErrorIntel: HTTPErrorIntelConfig{
@@ -298,6 +306,9 @@ func (c *Config) FinalizePaths() {
 	}
 	if c.UI.ProviderStateFile == "" {
 		c.UI.ProviderStateFile = filepath.Join(c.StateDir, "runtime", "ai-providers.env")
+	}
+	if c.Cloudflare.CleanupInterval <= 0 {
+		c.Cloudflare.CleanupInterval = 5 * time.Minute
 	}
 }
 

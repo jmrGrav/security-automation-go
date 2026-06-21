@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/jm/security-automation-go/internal/cloudflare/client"
@@ -35,6 +36,11 @@ type EnforcementClient interface {
 	AccessRuleClient
 	// ListIPAccessRulesByTag returns {ip/cidr: ruleID} for rules matching the given notes tag.
 	ListIPAccessRulesByTag(ctx context.Context, zoneID, tag string) (map[string]string, error)
+	// ListIPAccessRulesByNotePrefix returns every access rule whose notes
+	// field starts with prefix, along with its rule ID and configured
+	// IP/CIDR value. Used by the autoban ban-lifecycle cleanup worker as a
+	// fallback lookup when a tracked entry's RuleID is unknown.
+	ListIPAccessRulesByNotePrefix(ctx context.Context, zoneID, prefix string) ([]models.IPAccessRule, error)
 	// AddIPAccessRule creates a block rule. target is "ip" or "ip_range".
 	AddIPAccessRule(ctx context.Context, zoneID, value, notes, target string) (string, error)
 	// DeleteIPAccessRule removes a rule by its CF rule ID.
@@ -152,6 +158,25 @@ func (c *Client) ListIPAccessRulesByTag(ctx context.Context, zoneID, tag string)
 		result[val] = r.ID
 	}
 	return result, nil
+}
+
+// ListIPAccessRulesByNotePrefix returns every access rule whose notes field
+// starts with prefix. Used as a fallback identification mechanism by the
+// autoban ban-lifecycle cleanup worker when a tracked entry's RuleID is
+// empty (e.g. lost local state); the rule's note still carries the
+// "cf-sync:autoban:<reason>:exp=<RFC3339>" tag written at ban creation time.
+func (c *Client) ListIPAccessRulesByNotePrefix(ctx context.Context, zoneID, prefix string) ([]models.IPAccessRule, error) {
+	rules, err := c.inner.Discovery.ListIPAccessRules(ctx, zoneID)
+	if err != nil {
+		return nil, fmt.Errorf("cloudflare.Client.ListIPAccessRulesByNotePrefix: %w", err)
+	}
+	var out []models.IPAccessRule
+	for _, r := range rules {
+		if strings.HasPrefix(r.Notes, prefix) {
+			out = append(out, r)
+		}
+	}
+	return out, nil
 }
 
 // addIPAccessRulePayload is the CF API body for creating an IP access rule.
