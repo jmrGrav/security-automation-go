@@ -12,6 +12,15 @@ if ! getent passwd security-automation >/dev/null 2>&1; then
         security-automation
 fi
 
+# /run/crowdsec-lua is owned root:www-data 775 — the WAF Lua bundle (running
+# as www-data under nginx/openresty) writes events.jsonl and waf_refs.jsonl
+# there. Without group membership the daemon cannot rename/read files in
+# that directory (root:www-data 775 denies "other"). Idempotent; skip if the
+# www-data group doesn't exist on this host (e.g. no local nginx/openresty).
+if getent group www-data >/dev/null 2>&1; then
+    usermod -aG www-data security-automation || true
+fi
+
 # Create directories
 # /etc/security-automation-go/ root — bootstrap-only non-secret config
 install -d -m 755 -o root -g root \

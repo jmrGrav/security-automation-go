@@ -22,6 +22,12 @@ import (
 type Request struct {
 	Source abuseformat.Source
 	Event  classifier.Event
+
+	// EvidenceOnly forces this event to be recorded as Evidence/Timeline
+	// without ever submitting to AbuseIPDB, Spamhaus, or feeding auto-ban.
+	// Used for WAF detections that have no corroborating ban decision yet —
+	// keeps the pipeline evidence-first per the WAF integration constraints.
+	EvidenceOnly bool
 }
 
 type Result struct {
@@ -117,6 +123,10 @@ func (s *Service) Process(ctx context.Context, req Request) (Result, error) {
 	cls := prepared.classification
 	comment := prepared.comment
 	telemetryEvent := prepared.telemetry
+
+	if req.EvidenceOnly {
+		return s.handleSuppressedDecision(ctx, req, cls, comment, telemetryEvent, "waf_evidence_only")
+	}
 
 	suppressionReason := s.suppressionReason(req, cls)
 	if suppressionReason != "" {

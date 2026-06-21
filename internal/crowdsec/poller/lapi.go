@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -59,6 +60,82 @@ func (e *LAPIAlert) metaLookup(key string) string {
 		}
 	}
 	return ""
+}
+
+// wafMatch holds the Coraza/OWASP-CRS rule detail for one matched event.
+type wafMatch struct {
+	RuleID       string
+	Message      string
+	Category     string
+	URI          string
+	MatchedZones string
+	Data         string
+	TargetFQDN   string
+}
+
+// primaryWAFMatch returns the rule-level detail of the event most likely to
+// describe the actual attack, not CRS setup/bookkeeping rules. CRS emits one
+// event per matched rule, and the first is often a body-inspection setup
+// rule (e.g. native_rule:901340) with no matched payload. We prefer the
+// first event carrying a non-empty "data" meta value (the matched payload),
+// falling back to the first event with any rule_name if none match.
+func (e *LAPIAlert) primaryWAFMatch() (wafMatch, bool) {
+	var fallback wafMatch
+	haveFallback := false
+	for _, ev := range e.Events {
+		m := metaOf(ev)
+		ruleName := m["rule_name"]
+		if ruleName == "" {
+			continue
+		}
+		match := wafMatch{
+			RuleID:       ruleName,
+			Message:      m["message"],
+			URI:          m["uri"],
+			MatchedZones: m["matched_zones"],
+			Data:         m["data"],
+			TargetFQDN:   m["target_fqdn"],
+		}
+		match.Category = categorizeWAFRule(ruleName)
+		if !haveFallback {
+			fallback = match
+			haveFallback = true
+		}
+		if match.Data != "" {
+			return match, true
+		}
+	}
+	return fallback, haveFallback
+}
+
+func metaOf(ev alertEvent) map[string]string {
+	out := make(map[string]string, len(ev.Meta))
+	for _, m := range ev.Meta {
+		out[m.Key] = m.Value
+	}
+	return out
+}
+
+// categorizeWAFRule maps an OWASP CRS native_rule ID to a coarse attack
+// category using the standard CRS rule-ID range convention.
+func categorizeWAFRule(ruleName string) string {
+	id := strings.TrimPrefix(ruleName, "native_rule:")
+	switch {
+	case strings.HasPrefix(id, "942"):
+		return "sqli"
+	case strings.HasPrefix(id, "94"):
+		return "xss"
+	case strings.HasPrefix(id, "932"), strings.HasPrefix(id, "933"):
+		return "rce"
+	case strings.HasPrefix(id, "930"):
+		return "traversal"
+	case strings.HasPrefix(id, "913"):
+		return "scanner"
+	case id != ruleName: // had the native_rule: prefix but no known range
+		return "waf"
+	default:
+		return "waf"
+	}
 }
 
 type lapiClient struct {

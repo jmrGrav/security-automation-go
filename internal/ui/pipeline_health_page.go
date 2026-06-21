@@ -18,6 +18,7 @@ var pipelineSources = []struct{ slug, display string }{
 	{"cloudflare_waf", "Cloudflare WAF"},
 	{"crowdsec_waf", "CrowdSec WAF"},
 	{"openresty_waf", "OpenResty WAF"},
+	{"nginx_http_error", "HTTP Errors (4xx/5xx)"},
 }
 
 func (s *Server) handlePipelineHealthPage(w http.ResponseWriter, r *http.Request) {
@@ -229,6 +230,8 @@ func detectorNameForSourceSlug(slug string) string {
 		return "crowdsec"
 	case "openresty_waf":
 		return "openresty"
+	case "nginx_http_error":
+		return "nginx"
 	default:
 		return ""
 	}

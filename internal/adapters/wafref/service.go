@@ -1,4 +1,4 @@
-package crowdsecevent
+package wafref
 
 import (
 	"context"
@@ -15,6 +15,12 @@ func NewService(reportingService *reporting.Service) *Service {
 	return &Service{reporting: reportingService}
 }
 
+// Process records a block-page reference as Evidence/Timeline only. A ref by
+// itself is never a ban decision — the CrowdSec/OpenResty alert it
+// corresponds to already went through its own reporting path with its own
+// classification. This call exists purely so the ref is searchable and
+// correlates to that alert by IP/timestamp/URI; it must never reach
+// AbuseIPDB/Spamhaus or feed auto-ban.
 func (s *Service) Process(ctx context.Context, raw RawEvent) (reporting.Result, error) {
 	normalized, err := Normalize(raw)
 	if err != nil {
@@ -24,11 +30,8 @@ func (s *Service) Process(ctx context.Context, raw RawEvent) (reporting.Result, 
 		return reporting.Result{}, nil
 	}
 	return s.reporting.Process(ctx, reporting.Request{
-		Source: abuseformat.SourceCrowdSecWAF,
-		Event:  normalized,
-		// A detection-only alert (Coraza/CRS match with no CrowdSec ban
-		// decision attached) must never reach AbuseIPDB/Spamhaus/auto-ban —
-		// record it as evidence only.
-		EvidenceOnly: raw.Action == "detected",
+		Source:       abuseformat.SourceCrowdSecWAF,
+		Event:        normalized,
+		EvidenceOnly: true,
 	})
 }

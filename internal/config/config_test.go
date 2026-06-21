@@ -78,6 +78,80 @@ abuseipdb:
 	}
 }
 
+func TestConfig_HTTPErrorIntel_DefaultsSurviveOmittedYAML(t *testing.T) {
+	os.Setenv("CF_API_TOKEN", "env-token")
+	os.Setenv("CF_ZONE_ID", "test-zone")
+	defer os.Unsetenv("CF_API_TOKEN")
+	defer os.Unsetenv("CF_ZONE_ID")
+
+	// A YAML file that says nothing about http_error_intel must not disable
+	// nginxerrors ingestion for existing deployments — Load overlays YAML
+	// onto DefaultConfig(), so the section's defaults (Enabled=true,
+	// EnforceMode=false) must survive untouched.
+	content := `
+version: v1
+global:
+  app_env: development
+`
+	tmpfile, _ := os.CreateTemp("", "config*.yaml")
+	defer os.Remove(tmpfile.Name())
+	tmpfile.Write([]byte(content))
+	tmpfile.Close()
+
+	cfg, err := Load(tmpfile.Name())
+	if err != nil {
+		t.Fatalf("failed to load YAML config: %v", err)
+	}
+	if !cfg.HTTPErrorIntel.Enabled {
+		t.Error("expected http_error_intel.enabled to default true when omitted from YAML")
+	}
+	if cfg.HTTPErrorIntel.EnforceMode {
+		t.Error("expected http_error_intel.enforce_mode to default false when omitted from YAML")
+	}
+	if cfg.HTTPErrorIntel.MinBurst != 3 {
+		t.Errorf("expected default min_burst 3, got %d", cfg.HTTPErrorIntel.MinBurst)
+	}
+	if cfg.HTTPErrorIntel.BanThreshold != 20 {
+		t.Errorf("expected default ban_threshold 20, got %d", cfg.HTTPErrorIntel.BanThreshold)
+	}
+}
+
+func TestConfig_HTTPErrorIntel_YAMLOverridesEnforceMode(t *testing.T) {
+	os.Setenv("CF_API_TOKEN", "env-token")
+	os.Setenv("CF_ZONE_ID", "test-zone")
+	defer os.Unsetenv("CF_API_TOKEN")
+	defer os.Unsetenv("CF_ZONE_ID")
+
+	content := `
+version: v1
+http_error_intel:
+  enforce_mode: true
+  min_burst: 5
+  ban_threshold: 50
+`
+	tmpfile, _ := os.CreateTemp("", "config*.yaml")
+	defer os.Remove(tmpfile.Name())
+	tmpfile.Write([]byte(content))
+	tmpfile.Close()
+
+	cfg, err := Load(tmpfile.Name())
+	if err != nil {
+		t.Fatalf("failed to load YAML config: %v", err)
+	}
+	if !cfg.HTTPErrorIntel.Enabled {
+		t.Error("expected enabled to remain true (untouched default) when only enforce_mode is set in YAML")
+	}
+	if !cfg.HTTPErrorIntel.EnforceMode {
+		t.Error("expected enforce_mode=true from explicit YAML opt-in")
+	}
+	if cfg.HTTPErrorIntel.MinBurst != 5 {
+		t.Errorf("expected min_burst 5 from YAML, got %d", cfg.HTTPErrorIntel.MinBurst)
+	}
+	if cfg.HTTPErrorIntel.BanThreshold != 50 {
+		t.Errorf("expected ban_threshold 50 from YAML, got %d", cfg.HTTPErrorIntel.BanThreshold)
+	}
+}
+
 func TestConfig_Validation(t *testing.T) {
 	// Cloudflare bootstrap secrets are optional at startup now.
 	cfg, err := Load("")

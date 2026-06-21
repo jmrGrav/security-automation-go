@@ -226,6 +226,39 @@ func TestPipelineHealthMatrixShowsLastEventAndState(t *testing.T) {
 	}
 }
 
+func TestPipelineHealthMatrixIncludesHTTPErrorSource(t *testing.T) {
+	store := &stubEvidenceStore{
+		items: []reporting.DecisionEvidence{
+			{EvidenceID: "e1", Source: "nginx_http_error"},
+			{EvidenceID: "e2", Source: "nginx_http_error", Suppressed: true},
+		},
+	}
+
+	srv, _, _ := newTestServer(t, nil)
+	srv.evidence = store
+
+	view := srv.buildPipelineHealthView(context.Background())
+	if view.Error != "" {
+		t.Fatalf("unexpected error: %s", view.Error)
+	}
+
+	bySource := make(map[string]PipelineHealthRow, len(view.Rows))
+	for _, r := range view.Rows {
+		bySource[r.Source] = r
+	}
+
+	row, ok := bySource["HTTP Errors (4xx/5xx)"]
+	if !ok {
+		t.Fatalf("expected an HTTP Errors row in pipeline health matrix, got rows: %+v", view.Rows)
+	}
+	if row.Classified != 2 {
+		t.Errorf("http error classified: want 2, got %d", row.Classified)
+	}
+	if row.Suppressed != 1 {
+		t.Errorf("http error suppressed: want 1, got %d", row.Suppressed)
+	}
+}
+
 func TestPipelineHealthMatrixNoEvidence(t *testing.T) {
 	srv, _, _ := newTestServer(t, nil)
 	// srv.evidence is nil — daemon not started

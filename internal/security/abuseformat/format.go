@@ -18,6 +18,7 @@ const (
 	SourceCrowdSecWAF   Source = "crowdsec_waf"
 	SourceOpenRestyWAF  Source = "openresty_waf"
 	SourceCloudflareWAF Source = "cloudflare_waf"
+	SourceNginxError    Source = "nginx_http_error"
 )
 
 type Input struct {
@@ -104,6 +105,8 @@ func sourcePrefix(source Source) string {
 		return "CrowdSec WAF"
 	case SourceOpenRestyWAF:
 		return "OpenResty WAF"
+	case SourceNginxError:
+		return "Nginx HTTP Error"
 	default:
 		return "Cloudflare WAF"
 	}

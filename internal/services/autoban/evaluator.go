@@ -45,7 +45,7 @@ type IPEnricher interface {
 type BanDecision struct {
 	IP         string
 	ShouldBan  bool
-	Reason     string // "confidence_100" or "burst_malicious"
+	Reason     string // "confidence_100", "burst_malicious", or "http_error_burst"
 	SkipReason string // non-empty when skipped
 	Shadow     bool   // true when live mutations are disabled
 }
@@ -162,6 +162,26 @@ func (e *Evaluator) EvaluateBurst(ip string) BanDecision {
 		IP:        ip,
 		ShouldBan: true,
 		Reason:    "burst_malicious",
+		Shadow:    !e.liveMode,
+	}
+}
+
+// EvaluateExternalBurst authorizes a ban for ip on behalf of a caller that has
+// already aggregated its own significance signal (e.g. an HTTP-error burst
+// counted by an unrelated polling window). It does not consult this
+// evaluator's internal burst counter — callers own their own threshold
+// decision — but it still applies every standard safety guard (public IP
+// only, trust-registry protection, dedup, shadow mode) via guardIP, so a
+// caller can never bypass those guarantees just because its signal source
+// is different.
+func (e *Evaluator) EvaluateExternalBurst(ip, reason string) BanDecision {
+	if skip := e.guardIP(ip, e.now()); skip != "" {
+		return BanDecision{IP: ip, SkipReason: skip}
+	}
+	return BanDecision{
+		IP:        ip,
+		ShouldBan: true,
+		Reason:    reason,
 		Shadow:    !e.liveMode,
 	}
 }

@@ -88,6 +88,7 @@ type OpenRestyConfig struct {
 	LuaStatePath       string `yaml:"lua_state_path"`         // default: /run/crowdsec-lua/bans.json
 	LuaStatePushEnable bool   `yaml:"lua_state_push_enabled"` // default: false (opt-in)
 	ShadowLuaStatePath string `yaml:"shadow_lua_state_path"`  // write path when shadow mode
+	WAFRefsFile        string `yaml:"waf_refs_file"`          // default: /run/crowdsec-lua/waf_refs.jsonl
 }
 
 type AbuseIPDBConfig struct {
@@ -127,27 +128,48 @@ type EnrichmentConfig struct {
 	CacheTTL   time.Duration `yaml:"cache_ttl"`
 }
 
+// HTTPErrorIntelConfig governs the nginxerrors adapter (HTTP status >= 400
+// burst intelligence). Ingestion is evidence-only by default — EnforceMode
+// must be explicitly set to true before a qualifying burst can ever reach
+// the auto-ban evaluator, per the standing rule that WAF/HTTP-error signals
+// must never trigger a ban except through an explicit, strict opt-in.
+type HTTPErrorIntelConfig struct {
+	Enabled bool `yaml:"enabled"` // default true: evidence-only ingestion runs
+	// EnforceMode opts a qualifying burst into auto-ban evaluation (still
+	// subject to autoban's trust-registry/dedup guards and Cloudflare
+	// MutationsEnabled+AutoBanEnabled shadow gating). Default false.
+	EnforceMode bool `yaml:"enforce_mode"`
+	// MinBurst is the number of same-IP/same-status errors within one poll
+	// window required before the burst is even recorded as evidence. A
+	// single stray error is noise, not signal.
+	MinBurst int `yaml:"min_burst"`
+	// BanThreshold is the (higher) burst count required before EnforceMode
+	// will consider escalating to the auto-ban evaluator. Must be > 1.
+	BanThreshold int `yaml:"ban_threshold"`
+}
+
 type BetterStackConfig struct {
 	SourceToken   string `yaml:"source_token"`
 	IngestingHost string `yaml:"ingesting_host"`
 }
 
 type Config struct {
-	Version     string            `yaml:"version"`
-	Global      GlobalConfig      `yaml:"global"`
-	Runtime     RuntimeConfig     `yaml:"runtime"`
-	UI          UIBoolConfig      `yaml:"ui"`
-	Enrichment  EnrichmentConfig  `yaml:"enrichment"`
-	Cloudflare  CloudflareConfig  `yaml:"cloudflare"`
-	CrowdSec    CrowdSecConfig    `yaml:"crowdsec"`
-	OpenResty   OpenRestyConfig   `yaml:"openresty"`
-	AbuseIPDB   AbuseIPDBConfig   `yaml:"abuseipdb"`
-	Spamhaus    SpamhausConfig    `yaml:"spamhaus"`
-	VirusTotal  VirusTotalConfig  `yaml:"virustotal"`
-	BetterStack BetterStackConfig `yaml:"betterstack"`
-	Policies    []PolicyConfig    `yaml:"policies"`
-	StateDir    string            `yaml:"state_dir"`
-	Interval    time.Duration     `yaml:"interval"`
+	Version        string               `yaml:"version"`
+	Global         GlobalConfig         `yaml:"global"`
+	Runtime        RuntimeConfig        `yaml:"runtime"`
+	UI             UIBoolConfig         `yaml:"ui"`
+	Enrichment     EnrichmentConfig     `yaml:"enrichment"`
+	Cloudflare     CloudflareConfig     `yaml:"cloudflare"`
+	CrowdSec       CrowdSecConfig       `yaml:"crowdsec"`
+	OpenResty      OpenRestyConfig      `yaml:"openresty"`
+	AbuseIPDB      AbuseIPDBConfig      `yaml:"abuseipdb"`
+	HTTPErrorIntel HTTPErrorIntelConfig `yaml:"http_error_intel"`
+	Spamhaus       SpamhausConfig       `yaml:"spamhaus"`
+	VirusTotal     VirusTotalConfig     `yaml:"virustotal"`
+	BetterStack    BetterStackConfig    `yaml:"betterstack"`
+	Policies       []PolicyConfig       `yaml:"policies"`
+	StateDir       string               `yaml:"state_dir"`
+	Interval       time.Duration        `yaml:"interval"`
 }
 
 type PolicyConfig struct {
@@ -210,6 +232,12 @@ func DefaultConfig() *Config {
 		},
 		Spamhaus:   SpamhausConfig{},
 		VirusTotal: VirusTotalConfig{},
+		HTTPErrorIntel: HTTPErrorIntelConfig{
+			Enabled:      true,
+			EnforceMode:  false,
+			MinBurst:     3,
+			BanThreshold: 20,
+		},
 		CrowdSec: CrowdSecConfig{
 			DecisionsLog:  "/var/log/crowdsec/decisions.log",
 			NginxLogDir:   "/var/log/nginx",
@@ -218,7 +246,8 @@ func DefaultConfig() *Config {
 			AllowlistName: "my_allowlist",
 		},
 		OpenResty: OpenRestyConfig{
-			EventsFile: "/run/crowdsec-lua/events.jsonl",
+			EventsFile:  "/run/crowdsec-lua/events.jsonl",
+			WAFRefsFile: "/run/crowdsec-lua/waf_refs.jsonl",
 		},
 		StateDir: "/var/lib/security-automation-go",
 		Interval: 60 * time.Second,
@@ -304,6 +333,9 @@ func applyEnvOverrides(cfg *Config) {
 	}
 	if v := os.Getenv("LUA_EVENTS_FILE"); v != "" {
 		cfg.OpenResty.EventsFile = v
+	}
+	if v := os.Getenv("LUA_WAF_REFS_FILE"); v != "" {
+		cfg.OpenResty.WAFRefsFile = v
 	}
 	if v := os.Getenv("ABUSEIPDB_KEY"); v != "" {
 		cfg.AbuseIPDB.APIKey = v

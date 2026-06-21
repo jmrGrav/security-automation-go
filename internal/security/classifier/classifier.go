@@ -28,6 +28,11 @@ type Event struct {
 	EdgeResponseStatus int       `json:"edge_response_status,omitempty"`
 	Hits               int       `json:"hits"`
 	WindowSec          int       `json:"window_seconds"`
+
+	// Ref is an optional block-page reference string (e.g. from the
+	// OpenResty/Lua WAF bundle's waf_refs.jsonl) carried through to evidence
+	// for exact-match correlation. It does not affect classification.
+	Ref string `json:"ref,omitempty"`
 }
 
 type Classification struct {

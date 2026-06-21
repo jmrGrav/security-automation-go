@@ -132,6 +132,69 @@ func TestLiveSourceAcceptsCAPIDecisions(t *testing.T) {
 	}
 }
 
+// A detection-only alert (Coraza/CRS match blocked the request in-band, but
+// CrowdSec never created a ban decision) must now be ingested — previously
+// the "banned"-only filter silently dropped these, which is exactly what
+// happened to the live XSS demo alert (id 5016, decisions: null).
+func TestLiveSourceAcceptsDetectionOnlyAlertsWithRuleDetail(t *testing.T) {
+	dir := t.TempDir()
+	decisionsLog := filepath.Join(dir, "decisions.log")
+	now := time.Now().UTC().Format(time.RFC3339)
+	content := `{"dt":"` + now + `","cs":{"event_type":"alert","scenario":"crowdsecurity/http-appsec-block","ip":"194.126.177.86","id":5016,"action":"detected","has_decision":false,"waf":{"rule_id":"native_rule:941100","message":"XSS Attack Detected via libinjection","category":"xss","uri":"/?q=%3Cscript%3Ealert(1)%3C/script%3E%22","target_fqdn":"www.arleo.eu"}}}` + "\n"
+	if err := os.WriteFile(decisionsLog, []byte(content), 0644); err != nil {
+		t.Fatalf("write decisions log: %v", err)
+	}
+
+	source := NewLiveSource(decisionsLog, "", 24*time.Hour)
+	events, err := source.Read(context.Background())
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("expected 1 detection-only alert event, got %d", len(events))
+	}
+	ev := events[0]
+	if ev.Action != "detected" {
+		t.Errorf("Action = %q, want detected", ev.Action)
+	}
+	if ev.RuleID != "native_rule:941100" {
+		t.Errorf("RuleID = %q, want native_rule:941100", ev.RuleID)
+	}
+	if ev.RuleName != "XSS Attack Detected via libinjection" {
+		t.Errorf("RuleName = %q, want the WAF message", ev.RuleName)
+	}
+	if len(ev.URIs) == 0 || ev.URIs[0] != "/?q=%3Cscript%3Ealert(1)%3C/script%3E%22" {
+		t.Fatalf("expected the WAF URI to be preserved, got %+v", ev.URIs)
+	}
+	if ev.Hostname != "www.arleo.eu" {
+		t.Errorf("Hostname = %q, want www.arleo.eu", ev.Hostname)
+	}
+}
+
+// A confirmed ban (alert with action=banned) must still be tagged "block",
+// preserving the pre-existing reporting path for already-banned IPs.
+func TestLiveSourceConfirmedBanAlertKeepsBlockAction(t *testing.T) {
+	dir := t.TempDir()
+	decisionsLog := filepath.Join(dir, "decisions.log")
+	now := time.Now().UTC().Format(time.RFC3339)
+	content := `{"dt":"` + now + `","cs":{"event_type":"alert","scenario":"crowdsecurity/http-appsec-block","ip":"1.2.3.4","id":9001,"action":"banned","has_decision":true}}` + "\n"
+	if err := os.WriteFile(decisionsLog, []byte(content), 0644); err != nil {
+		t.Fatalf("write decisions log: %v", err)
+	}
+
+	source := NewLiveSource(decisionsLog, "", 24*time.Hour)
+	events, err := source.Read(context.Background())
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
+	}
+	if events[0].Action != "block" {
+		t.Errorf("Action = %q, want block for a confirmed ban", events[0].Action)
+	}
+}
+
 // Non-HTTP bans (SSH brute-force, raw TCP) have no nginx URI. Normalize must
 // substitute "unknown" so the event passes through the pipeline.
 func TestNormalizeEmptyURIsFallsBackToUnknown(t *testing.T) {
