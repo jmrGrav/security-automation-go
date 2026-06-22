@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net"
 	"strings"
 	"sync"
 	"time"
@@ -21,6 +22,7 @@ import (
 	cfpkg "github.com/jm/security-automation-go/internal/cloudflare"
 	"github.com/jm/security-automation-go/internal/cloudflare/banlifecycle"
 	"github.com/jm/security-automation-go/internal/cloudflare/client"
+	"github.com/jm/security-automation-go/internal/cloudflare/models"
 	"github.com/jm/security-automation-go/internal/config"
 	"github.com/jm/security-automation-go/internal/execution"
 	"github.com/jm/security-automation-go/internal/httpclient"
@@ -374,6 +376,16 @@ func buildAutoBanEvaluator(cfg *config.Config, hc httpclient.Client, trustReg *s
 // ExecuteBan still creates the Cloudflare rule but no lifecycle bookkeeping
 // happens and the rule will never be auto-cleaned — operators must rely on
 // the existing manual/CrowdSec cleanup paths in that degraded mode.
+//
+// When Cloudflare reports the IP already has a live rule (error code 10009,
+// "duplicate_of_existing" — e.g. after a restart re-attempts a ban that was
+// already applied in a prior process lifetime), ExecuteBan treats this as
+// idempotent success rather than a failure: the desired end state (the IP is
+// blocked) already holds. It resolves the existing rule's ID via
+// ListIPAccessRulesByNotePrefix and backfills/updates a banlifecycle.Entry
+// for it, so callers' "RecordBan only after ExecuteBan returns nil" pattern
+// marks the IP as banned in the dedup store and stops the retry storm that
+// would otherwise re-attempt this same IP on every poll cycle indefinitely.
 type cfBanExecutor struct {
 	client         cfpkg.EnforcementClient
 	zoneID         string
@@ -411,12 +423,55 @@ func (e *cfBanExecutor) ExecuteBan(ctx context.Context, decision autoban.BanDeci
 	tag := fmt.Sprintf("cf-sync:autoban:%s:exp=%s", decision.Reason, expiresAt.Format(time.RFC3339))
 	id, err := e.client.AddIPAccessRule(ctx, e.zoneID, decision.IP, tag, "ip")
 	if err != nil {
-		if e.logger != nil {
-			e.logger.Error("autoban: CF ban failed", "ip", decision.IP, "reason", decision.Reason, "error", err)
+		if !isCFDuplicateRuleError(err) {
+			if e.logger != nil {
+				e.logger.Error("autoban: CF ban failed", "ip", decision.IP, "reason", decision.Reason, "error", err)
+			}
+			return err
 		}
-		return err
-	}
-	if e.logger != nil {
+		// Cloudflare already has a live rule for this IP (error code 10009,
+		// "firewallaccessrules.api.duplicate_of_existing"). This is not a
+		// failure: the desired end state (IP is blocked at Cloudflare) is
+		// already true. Treat it as idempotent success so:
+		//   - the caller's `if ExecuteBan(...) == nil { RecordBan(ip) }`
+		//     pattern still marks the IP as banned in the dedup store
+		//     (see daemon_runtime.go, nginxerrors/service.go), preventing
+		//     the retry-storm where the same IP is re-attempted every poll
+		//     cycle forever.
+		//   - we backfill a banlifecycle.Entry for IPs that were banned
+		//     before the lifecycle feature existed, or whose entry was
+		//     lost (e.g. across a restart before this code path existed).
+		//
+		// We look up the existing rule's ID (and, when available, its real
+		// creation time) via ListIPAccessRulesByNotePrefix rather than
+		// ListIPAccessRulesByTag: the tag embeds the freshly-computed
+		// exp=<RFC3339> timestamp from THIS call, which will never equal
+		// the older rule's note (computed at its own original creation
+		// time), so an exact-match tag lookup would never find it.
+		if e.logger != nil {
+			e.logger.Info("autoban: CF rule already exists for IP, treating as idempotent success",
+				"ip", decision.IP, "reason", decision.Reason, "error", err)
+		}
+		existing, found := e.lookupExistingRule(ctx, decision.IP)
+		if !found && e.logger != nil {
+			e.logger.Warn("autoban: could not resolve existing CF rule ID for duplicate ban; lifecycle entry will be backfilled with empty rule_id",
+				"ip", decision.IP)
+		}
+		if found {
+			id = existing.ID
+		}
+		// Prefer the existing rule's real creation time when we can resolve
+		// it, so recidive-level escalation timing isn't reset by a restart
+		// or a re-attempted ban. If we can't resolve it (lookup failed, or
+		// the rule predates this code / wasn't created by cf-sync), "now"
+		// is used as a documented fallback below; this means the computed
+		// expires_at for a backfilled entry may not reflect when the IP
+		// was actually first blocked.
+		if found && !existing.CreatedOn.IsZero() {
+			createdAt = existing.CreatedOn
+			expiresAt = createdAt.Add(duration)
+		}
+	} else if e.logger != nil {
 		e.logger.Info("autoban: CF ban applied", "ip", decision.IP, "reason", decision.Reason, "rule_id", id,
 			"recidive_level", recidiveLevel, "duration", duration, "expires_at", expiresAt)
 	}
@@ -439,4 +494,69 @@ func (e *cfBanExecutor) ExecuteBan(ctx context.Context, decision autoban.BanDeci
 		}
 	}
 	return nil
+}
+
+// cfDuplicateRuleErrorSlug is the stable Cloudflare API error slug returned
+// alongside numeric code 10009 when AddIPAccessRule targets an IP that
+// already has a live access rule. The numeric code is not preserved as a
+// structured field by this point: cftransport.MutateAndDecode formats the
+// whole []models.ResponseError slice into the error message via %v (see
+// internal/cloudflare/transport/transport.go), so the code is only
+// recoverable here as a substring of err.Error(). The slug
+// ("firewallaccessrules.api.duplicate_of_existing") is stable across CF API
+// versions and is what the production journal evidence for this bug shows,
+// so we match on it directly rather than parsing out the numeric code.
+const cfDuplicateRuleErrorSlug = "duplicate_of_existing"
+
+// isCFDuplicateRuleError reports whether err represents Cloudflare's
+// "firewallaccessrules.api.duplicate_of_existing" (code 10009) response,
+// returned when an access rule already exists for the requested IP.
+func isCFDuplicateRuleError(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(err.Error(), cfDuplicateRuleErrorSlug)
+}
+
+// lookupExistingRule resolves the pre-existing Cloudflare access rule for ip,
+// used to backfill a banlifecycle.Entry (rule ID and, when available, real
+// creation time) when AddIPAccessRule reports a duplicate instead of
+// creating a new rule. Returns ok=false if the client is unavailable, the
+// lookup fails, or no matching rule is found (e.g. the existing rule wasn't
+// created by cf-sync's autoban path and so doesn't carry the
+// "cf-sync:autoban:" note prefix). It finds the rule among all rules
+// whose notes start with the "cf-sync:autoban:" prefix. It cannot use
+// ListIPAccessRulesByTag because that method requires an exact notes match
+// and the notes tag embeds an exp=<RFC3339> timestamp computed fresh on
+// every ExecuteBan call, which will never equal an existing rule's
+// (differently-timestamped) note.
+func (e *cfBanExecutor) lookupExistingRule(ctx context.Context, ip string) (models.IPAccessRule, bool) {
+	if e == nil || e.client == nil {
+		return models.IPAccessRule{}, false
+	}
+	rules, err := e.client.ListIPAccessRulesByNotePrefix(ctx, e.zoneID, "cf-sync:autoban:")
+	if err != nil {
+		if e.logger != nil {
+			e.logger.Warn("autoban: lookup of existing CF rule by note prefix failed", "ip", ip, "error", err)
+		}
+		return models.IPAccessRule{}, false
+	}
+	want := normalizeIPForCompare(ip)
+	for _, r := range rules {
+		if normalizeIPForCompare(r.Configuration.Value) == want {
+			return r, true
+		}
+	}
+	return models.IPAccessRule{}, false
+}
+
+// normalizeIPForCompare normalizes a plain IP string for comparison.
+// ListIPAccessRulesByNotePrefix returns raw configuration values (unlike
+// ListIPAccessRulesByTag, it does not net.ParseIP-normalize them), so both
+// sides of any comparison must be normalized the same way here.
+func normalizeIPForCompare(value string) string {
+	if parsed := net.ParseIP(value); parsed != nil {
+		return parsed.String()
+	}
+	return value
 }
