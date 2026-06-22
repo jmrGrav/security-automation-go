@@ -185,6 +185,9 @@ func runCFSync(configPath, mode string, dryRun bool, format string, metricsAddr 
 	if v, ok, _ := setupStore.GetSetting(ctx, "cf_zone_id"); ok && strings.TrimSpace(v) != "" {
 		cfg.Cloudflare.ZoneID = v
 	}
+	if v, ok, _ := setupStore.GetSetting(ctx, "crowdsec_lapi_url"); ok && strings.TrimSpace(v) != "" {
+		cfg.CrowdSec.PollerLAPIURL = v
+	}
 	if v, ok, _ := credentialStore.Lookup(ctx, "cloudflare.api_token"); ok {
 		cfg.Cloudflare.APIToken = v
 	}

@@ -90,13 +90,42 @@ func (s *Server) timelineView(r *http.Request) TimelineView {
 	}
 }
 
+// timelineCacheTTL bounds how often the full audit+evidence merge is
+// recomputed. Without this, an operator repeatedly refreshing /timeline
+// during a live incident forces a full re-merge, re-sort, and re-paginate of
+// the entire history on every single request — the cost grows with total
+// history instead of page size. A short TTL collapses bursts of refreshes
+// into a single recomputation while still keeping the view fresh.
+const timelineCacheTTL = 3 * time.Second
+
 // allTimelineEvents merges audit entries and WAF evidence records into a single
-// reverse-chronological stream, sorted by parsed wall-clock time.
+// reverse-chronological stream, sorted by parsed wall-clock time. The merged
+// result is cached for timelineCacheTTL to bound the cost of repeated
+// requests against a growing history (see timelineCacheTTL).
 //
 // Evidence is capped at 10000 rows (matches evidence_page.go). Runtime daemon
 // lifecycle events (startup, config reloads) require a dedicated capture
 // mechanism not yet wired — deferred to a follow-up.
 func (s *Server) allTimelineEvents(ctx context.Context) []audit.TimelineEvent {
+	s.timelineMu.Lock()
+	if !s.timelineCacheAt.IsZero() && time.Since(s.timelineCacheAt) < timelineCacheTTL {
+		cached := s.timelineCache
+		s.timelineMu.Unlock()
+		return cached
+	}
+	s.timelineMu.Unlock()
+
+	events := s.computeAllTimelineEvents(ctx)
+
+	s.timelineMu.Lock()
+	s.timelineCache = events
+	s.timelineCacheAt = time.Now()
+	s.timelineMu.Unlock()
+
+	return events
+}
+
+func (s *Server) computeAllTimelineEvents(ctx context.Context) []audit.TimelineEvent {
 	ctx, cancel := stableUIReadContext(ctx)
 	defer cancel()
 	var timed []timedEvent

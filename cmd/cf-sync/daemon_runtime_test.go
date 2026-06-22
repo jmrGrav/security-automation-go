@@ -3,9 +3,13 @@ package main
 import (
 	"context"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
+	"os/signal"
+	"runtime"
+	"syscall"
 	"testing"
 	"time"
 
@@ -18,6 +22,42 @@ import (
 	"github.com/jm/security-automation-go/internal/services/reporting"
 	"github.com/jm/security-automation-go/internal/telemetry/sinks"
 )
+
+// TestNewDaemonContextSignalGoroutineExitsOnManualCancel guards against the
+// goroutine leak described in GitHub issue #65: newDaemonContext started a
+// goroutine that blocked forever on <-sigChan, never observing the returned
+// context. A normal shutdown (parent cancels the context rather than
+// sending a signal) left that goroutine — and its signal.Notify
+// registration — running for the lifetime of the process. The goroutine
+// must now also select on ctx.Done() and exit promptly on manual cancel,
+// without ever receiving a signal.
+func TestNewDaemonContextSignalGoroutineExitsOnManualCancel(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	// os/signal.Notify's first call in a process starts an internal runtime
+	// housekeeping goroutine that persists for the program's lifetime — warm
+	// that up before taking the baseline so it isn't mistaken for the leak
+	// under test.
+	warmup := make(chan os.Signal, 1)
+	signal.Notify(warmup, syscall.SIGUSR1)
+	signal.Stop(warmup)
+
+	before := runtime.NumGoroutine()
+
+	_, cancel := newDaemonContext(context.Background(), logger, nil)
+	cancel()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if runtime.NumGoroutine() <= before {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	t.Fatalf("signal-handling goroutine still running after manual cancel (before=%d, after=%d)",
+		before, runtime.NumGoroutine())
+}
 
 type testWriter struct{ t *testing.T }
 

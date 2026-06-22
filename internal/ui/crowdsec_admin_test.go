@@ -205,6 +205,70 @@ func TestCrowdSecTestConnection_LAPIUnreachable(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// TestCrowdSecTestConnection_UsesConfiguredLAPIURL guards GitHub issue #66:
+// the wizard saved crowdsec_lapi_url, but the test-connection handler always
+// probed the hardcoded http://127.0.0.1:8080, regardless of what the
+// operator configured. That made the "test connection" button misleading
+// (it could report success/failure against a service that isn't CrowdSec at
+// all) and could send the LAPI key to the wrong local process. This test
+// spins up a fake LAPI on a non-default, ephemeral port, saves that as the
+// configured URL, and asserts the handler actually probes it.
+// ---------------------------------------------------------------------------
+
+func TestCrowdSecTestConnection_UsesConfiguredLAPIURL(t *testing.T) {
+	var gotPath string
+	fakeLAPI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer fakeLAPI.Close()
+
+	srv, _, db := newTestServerWithCrowdSec(t, nil)
+	storeCrowdSecKey(t, db, "test-lapi-key-xyz")
+	if err := srv.setupStore.SetSetting(context.Background(), "crowdsec_lapi_url", fakeLAPI.URL); err != nil {
+		t.Fatalf("SetSetting: %v", err)
+	}
+
+	cookie := loginCookie(t, srv, csTestSecret)
+	csrf := srv.csrfTokenFor(cookie.Value)
+
+	req := httptest.NewRequest(http.MethodPost, "/admin/crowdsec/test", strings.NewReader(""))
+	req.AddCookie(cookie)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("X-CSRF-Token", csrf)
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+
+	var result crowdSecTestResult
+	if err := json.NewDecoder(rr.Body).Decode(&result); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if result.Status != "ok" {
+		t.Fatalf("expected ok against the configured fake LAPI, got status=%q message=%q", result.Status, result.Message)
+	}
+	if gotPath != "/v1/decisions" {
+		t.Fatalf("expected the handler to probe the configured LAPI URL, got path=%q (request never reached fake server)", gotPath)
+	}
+}
+
+// TestResolveCrowdSecLAPIURL_FallsBackOnInvalidScheme guards against a
+// corrupted or tampered setting silently turning the test-connection (and,
+// by the same resolution logic used at runtime startup, the daemon poller)
+// into a request against an attacker-controlled non-HTTP target.
+func TestResolveCrowdSecLAPIURL_FallsBackOnInvalidScheme(t *testing.T) {
+	srv, _, db := newTestServerWithCrowdSec(t, nil)
+	_ = db
+	for _, bad := range []string{"", "   ", "file:///etc/passwd", "javascript:alert(1)"} {
+		if err := srv.setupStore.SetSetting(context.Background(), "crowdsec_lapi_url", bad); err != nil {
+			t.Fatalf("SetSetting(%q): %v", bad, err)
+		}
+		if got := srv.resolveCrowdSecLAPIURL(context.Background()); got != defaultCrowdSecLAPIURL {
+			t.Fatalf("input %q: expected fallback to default %q, got %q", bad, defaultCrowdSecLAPIURL, got)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
 // TestCrowdSecTestConnection_LAPIReachable (via httptest server)
 // ---------------------------------------------------------------------------
 

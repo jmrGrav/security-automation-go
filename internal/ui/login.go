@@ -108,6 +108,7 @@ func (s *Server) handleLoginJSON(w http.ResponseWriter, r *http.Request) {
 	sessionToken := generateSessionToken()
 	s.mu.Lock()
 	s.sessions[sessionToken] = time.Now().Add(sessionTTL)
+	s.pruneSessionsLocked(time.Now().UTC())
 	s.mu.Unlock()
 
 	// Set session cookie

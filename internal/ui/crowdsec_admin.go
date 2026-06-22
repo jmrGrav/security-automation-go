@@ -98,6 +98,30 @@ func writeCrowdSecJSON(w http.ResponseWriter, code int, status, message string) 
 	_ = json.NewEncoder(w).Encode(crowdSecTestResult{Status: status, Message: message})
 }
 
+const defaultCrowdSecLAPIURL = "http://127.0.0.1:8080"
+
+// resolveCrowdSecLAPIURL returns the operator-configured CrowdSec LAPI base
+// URL saved by the setup wizard (crowdsec_lapi_url), falling back to the
+// default loopback address. This must stay in sync with the runtime's own
+// resolution (cmd/cf-sync reads the same setting into
+// cfg.CrowdSec.PollerLAPIURL) so the "test connection" button always probes
+// the same endpoint the daemon actually polls — otherwise a stale hardcoded
+// URL could report success against a service that isn't CrowdSec at all.
+func (s *Server) resolveCrowdSecLAPIURL(ctx context.Context) string {
+	if s.setupStore == nil {
+		return defaultCrowdSecLAPIURL
+	}
+	v, ok, err := s.setupStore.GetSetting(ctx, "crowdsec_lapi_url")
+	if err != nil || !ok {
+		return defaultCrowdSecLAPIURL
+	}
+	v = strings.TrimSpace(v)
+	if v == "" || !(strings.HasPrefix(v, "http://") || strings.HasPrefix(v, "https://")) {
+		return defaultCrowdSecLAPIURL
+	}
+	return strings.TrimRight(v, "/")
+}
+
 // handleCrowdSecTestConnection tests reachability of the CrowdSec LAPI.
 // It uses net/http directly and never includes the key value in any response or log.
 func (s *Server) handleCrowdSecTestConnection(w http.ResponseWriter, r *http.Request) {
@@ -122,7 +146,8 @@ func (s *Server) handleCrowdSecTestConnection(w http.ResponseWriter, r *http.Req
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://127.0.0.1:8080/v1/decisions?limit=1", nil)
+	testURL := s.resolveCrowdSecLAPIURL(ctx) + "/v1/decisions?limit=1"
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, testURL, nil)
 	if err != nil {
 		writeCrowdSecJSON(w, http.StatusOK, "error", "failed to build request")
 		return
