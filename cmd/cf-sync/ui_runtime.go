@@ -20,6 +20,7 @@ import (
 	aianthropic "github.com/jm/security-automation-go/internal/ai/providers/anthropic"
 	aigemini "github.com/jm/security-automation-go/internal/ai/providers/gemini"
 	aiopenai "github.com/jm/security-automation-go/internal/ai/providers/openai"
+	"github.com/jm/security-automation-go/internal/cloudflare/banlifecycle"
 	"github.com/jm/security-automation-go/internal/config"
 	"github.com/jm/security-automation-go/internal/httpclient"
 	"github.com/jm/security-automation-go/internal/runtime/lock"
@@ -36,10 +37,10 @@ import (
 )
 
 func runUI(ctx context.Context, logger *slog.Logger, cfg *config.Config) error {
-	return runUIWithLocker(ctx, logger, cfg, true, nil, nil, nil)
+	return runUIWithLocker(ctx, logger, cfg, true, nil, nil, nil, nil)
 }
 
-func runUIWithLocker(ctx context.Context, logger *slog.Logger, cfg *config.Config, acquireLock bool, evidenceHolder *lazyEvidenceStore, sharedDB *sqlite.DB, trustedNetworksCache *trustednetworks.ReportCache) error {
+func runUIWithLocker(ctx context.Context, logger *slog.Logger, cfg *config.Config, acquireLock bool, evidenceHolder *lazyEvidenceStore, sharedDB *sqlite.DB, trustedNetworksCache *trustednetworks.ReportCache, banLifecycleHolder *lazyBanLifecycleStore) error {
 	if !cfg.UI.Enabled {
 		return errors.New("ui mode requires UI_ENABLED=1 or ui.enabled=true")
 	}
@@ -161,7 +162,20 @@ func runUIWithLocker(ctx context.Context, logger *slog.Logger, cfg *config.Confi
 	}
 
 	enrichmentSvc := buildEnrichmentService(ctx, cfg, credentialStore)
-	banLifecycleStore := sqlite.NewBanLifecycleStore(setupDB)
+	// In the daemon+UI co-process (banLifecycleHolder != nil), the real
+	// lifecycle entries live in the scoped runtime DB the daemon opens AFTER
+	// this UI goroutine has already started — setupDB is the unscoped
+	// bootstrap DB and never receives lifecycle writes. Use the holder so
+	// reads resolve against the scoped store once the daemon calls
+	// banLifecycleHolder.set(...). In standalone -mode ui (no daemon),
+	// setupDB IS the only DB this process has, so it is also the correct
+	// (and only) source for lifecycle data.
+	var banLifecycleStore banlifecycle.Store
+	if banLifecycleHolder != nil {
+		banLifecycleStore = banLifecycleHolder
+	} else {
+		banLifecycleStore = sqlite.NewBanLifecycleStore(setupDB)
+	}
 
 	server, err := ui.NewServer(cfg, ui.Options{
 		SetupStore:           setupStore,
