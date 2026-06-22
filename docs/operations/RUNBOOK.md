@@ -161,6 +161,45 @@ API server) is listening:
 ss -tlnp | grep 9092
 ```
 
+## /run/crowdsec-lua permissions — restart required after group changes
+
+`cf-sync` (running as the unprivileged `security-automation` user) exchanges
+files with the OpenResty/Lua CrowdSec bouncer (running as `www-data`) via the
+shared runtime directory `/run/crowdsec-lua` — `bans.json` (written by
+cf-sync, read by Lua) and `events.jsonl` / `waf_refs.jsonl` (written by Lua,
+read and atomically renamed by cf-sync's `openrestyevent.LiveSource`). That
+directory is `root:www-data 0775` — group `www-data` has read/write,
+everyone else has read-only. The package's `postinst` adds
+`security-automation` to the `www-data` group (`usermod -aG www-data
+security-automation`) specifically so the rename in `LiveSource` is
+permitted, without granting `cf-sync` any broader access than that one
+shared directory.
+
+**Linux does not re-evaluate a running process's supplementary groups.** A
+process keeps the group list it had at `exec()` time for its entire
+lifetime — `usermod -aG` only affects *new* processes/sessions started after
+it runs. If `cf-sync` was already running when the `www-data` group
+membership was added or changed (e.g. across an upgrade, or because the
+service was started before `postinst` ran on a fresh install), the running
+process keeps stale credentials and `LiveSource` fails with `permission
+denied` on every rename — even though `id security-automation` correctly
+shows `www-data` as a supplementary group.
+
+**Action required after any change to `security-automation`'s group
+membership** (fresh install, upgrade, or manual `usermod`):
+
+```bash
+sudo systemctl restart cf-sync
+```
+
+**Verify the fix took effect** — group membership of the actual running
+process must include `www-data` (gid 33), not just the user account:
+
+```bash
+sudo cat /proc/$(systemctl show cf-sync -p MainPID --value)/status | grep ^Groups
+journalctl -u cf-sync --since "2 min ago" | grep "openresty live source read failed" # should be empty after restart
+```
+
 ## Admin password reset and account recovery
 
 All admin commands require local root access (`sudo`).
