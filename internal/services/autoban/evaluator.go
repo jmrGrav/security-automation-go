@@ -27,6 +27,7 @@ import (
 
 	"github.com/jm/security-automation-go/internal/security/enrichment"
 	"github.com/jm/security-automation-go/internal/security/quota"
+	"github.com/jm/security-automation-go/internal/security/reputation"
 	"github.com/jm/security-automation-go/internal/security/trust"
 )
 
@@ -48,6 +49,15 @@ type BanDecision struct {
 	Reason     string // "confidence_100", "burst_malicious", or "http_error_burst"
 	SkipReason string // non-empty when skipped
 	Shadow     bool   // true when live mutations are disabled
+	// Confidence is the AbuseIPDB confidence score (0-100) that justified
+	// this ban, when known. Only EvaluateConfidence sets this (it is the
+	// only path that consults AbuseIPDB before banning); burst-based paths
+	// leave it at 0 since they have no external corroboration. Callers must
+	// propagate this into banlifecycle.Entry.Confidence — autodeban relies
+	// on it to distinguish reputation-corroborated bans from local-only
+	// ones (see internal/security/autodeban.evaluateEntry's weak_signal_ban
+	// trigger).
+	Confidence int
 }
 
 // MaliciousEvent is a stripped-down record of a detected malicious event.
@@ -71,6 +81,26 @@ type Evaluator struct {
 	logger   *slog.Logger
 	liveMode bool // true = CF mutations allowed
 	now      func() time.Time
+
+	// reputationGate, when set, is consulted as an ADDITIONAL restriction
+	// after every other existing safety guard (guardIP, local evidence,
+	// quota) has already allowed a ban. It can only turn a ShouldBan=true
+	// decision into false (or into a shadow no-op) — it must never relax any
+	// pre-existing gate. A nil gate (the default) leaves EvaluateConfidence
+	// and EvaluateBurst behaving exactly as before this field existed.
+	reputationGate ReputationGate
+}
+
+// ReputationGate is the subset of *reputation.Gate the evaluator needs.
+type ReputationGate interface {
+	EvaluateBan(ctx context.Context, ip string, local reputation.LocalSignal) reputation.Decision
+}
+
+// SetReputationGate wires the cross-provider reputation gate
+// (internal/security/reputation) as an additional ban restriction. Pass nil
+// to disable (the default).
+func (e *Evaluator) SetReputationGate(gate ReputationGate) {
+	e.reputationGate = gate
 }
 
 // Config holds the options for NewEvaluator.
@@ -141,11 +171,19 @@ func (e *Evaluator) EvaluateConfidence(ctx context.Context, ip string) BanDecisi
 	if score < 100 {
 		return BanDecision{IP: ip, SkipReason: "confidence_below_100"}
 	}
+	// Reputation gate: ADDITIONAL restriction on top of every guard above.
+	// Local evidence is already confirmed (HasLocalEvidence, just above), so
+	// this is evaluated as a confirmed-hostile local signal — the gate can
+	// only tighten this decision further, never loosen it.
+	if skip := e.reputationSkip(ctx, ip, reputation.LocalSignal{Strength: reputation.SignalConfirmedHostile}); skip != "" {
+		return BanDecision{IP: ip, SkipReason: skip}
+	}
 	return BanDecision{
-		IP:        ip,
-		ShouldBan: true,
-		Reason:    "confidence_100",
-		Shadow:    !e.liveMode,
+		IP:         ip,
+		ShouldBan:  true,
+		Reason:     "confidence_100",
+		Shadow:     !e.liveMode,
+		Confidence: score,
 	}
 }
 
@@ -158,12 +196,48 @@ func (e *Evaluator) EvaluateBurst(ip string) BanDecision {
 	if !e.burst.DetectBurst(ip, BurstWindow, BurstThreshold, e.now()) {
 		return BanDecision{IP: ip, SkipReason: "burst_below_threshold"}
 	}
+	// Reputation gate: ADDITIONAL restriction. A burst above BurstThreshold
+	// is itself confirmed-hostile local evidence (RecordMalicious already
+	// filters out benign AbuseType values), so the gate is given
+	// SignalConfirmedHostile — it can only block this further (e.g. if both
+	// providers actively contradict it), never relax the burst threshold
+	// itself. context.Background() is used here because EvaluateBurst's
+	// public signature predates context-awareness and changing it would
+	// ripple through every existing caller/test for no safety benefit: the
+	// gate already fails open on any error/timeout.
+	if skip := e.reputationSkip(context.Background(), ip, reputation.LocalSignal{Strength: reputation.SignalConfirmedHostile}); skip != "" {
+		return BanDecision{IP: ip, SkipReason: skip}
+	}
 	return BanDecision{
 		IP:        ip,
 		ShouldBan: true,
 		Reason:    "burst_malicious",
 		Shadow:    !e.liveMode,
 	}
+}
+
+// reputationSkip consults the reputation gate (if configured) and returns a
+// non-empty skip reason when the gate's decision is a real (non-shadow)
+// suppression. It never returns a skip reason when the gate is nil, when the
+// gate is in shadow mode (decision is logged only), or when the gate allows
+// the ban — in every such case the pre-existing decision stands unchanged.
+func (e *Evaluator) reputationSkip(ctx context.Context, ip string, local reputation.LocalSignal) string {
+	if e.reputationGate == nil {
+		return ""
+	}
+	decision := e.reputationGate.EvaluateBan(ctx, ip, local)
+	if e.logger != nil {
+		e.logger.Debug("autoban: reputation gate decision",
+			"ip", ip, "action", decision.Action, "reason", decision.Reason,
+			"shadow", decision.Shadow, "provider_unavailable", decision.ProviderUnavailable)
+	}
+	if decision.Shadow {
+		return ""
+	}
+	if !decision.AllowBan {
+		return "reputation_gate:" + decision.Reason
+	}
+	return ""
 }
 
 // EvaluateExternalBurst authorizes a ban for ip on behalf of a caller that has

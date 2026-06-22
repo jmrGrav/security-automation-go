@@ -65,14 +65,15 @@ func (s *Service) Enrich(ctx context.Context, ip netip.Addr, opts LookupOptions)
 		summary.ASN = asnResult
 	}
 
+	manualTriggered := opts.ManualForensics || opts.ReputationCheck
 	for _, provider := range s.lookupProviders {
 		if provider == nil {
 			continue
 		}
-		if provider.Mode() == LookupModeManual && !opts.ManualForensics {
+		if provider.Mode() == LookupModeManual && !manualTriggered {
 			continue
 		}
-		if provider.Mode() == LookupModeAutomatic || opts.ManualForensics {
+		if provider.Mode() == LookupModeAutomatic || manualTriggered {
 			verdict, err := s.lookupProvider(ctx, provider, ip)
 			if err != nil {
 				continue
@@ -208,7 +209,7 @@ func (s *Service) lookupContext(ctx context.Context) (context.Context, context.C
 }
 
 func (s *Service) cacheKey(ip netip.Addr, opts LookupOptions) string {
-	return ip.String() + "|manual=" + fmt.Sprintf("%t", opts.ManualForensics)
+	return ip.String() + "|manual=" + fmt.Sprintf("%t", opts.ManualForensics) + "|repcheck=" + fmt.Sprintf("%t", opts.ReputationCheck)
 }
 
 func (s *Service) isTrustedHostname(hostname string) bool {

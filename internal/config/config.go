@@ -66,6 +66,11 @@ type CloudflareConfig struct {
 	// AutoBanEnabled gates automatic IP banning by the auto-ban evaluator.
 	// Requires MutationsEnabled=true. When false the evaluator runs in shadow mode.
 	AutoBanEnabled bool `yaml:"auto_ban_enabled"`
+	// CleanupInterval controls how often the autoban ban-lifecycle cleanup
+	// worker scans for expired Cloudflare access rules and removes them.
+	// Defaults to 5 minutes when unset/zero. Named to compose cleanly under
+	// a future `reputation_policy.cloudflare.cleanup_interval` block.
+	CleanupInterval time.Duration `yaml:"cleanup_interval"`
 }
 
 type CrowdSecConfig struct {
@@ -153,23 +158,79 @@ type BetterStackConfig struct {
 	IngestingHost string `yaml:"ingesting_host"`
 }
 
+// ReputationPolicyAbuseIPDBConfig governs how the reputation gate consults
+// AbuseIPDB Check before allowing a report or ban.
+type ReputationPolicyAbuseIPDBConfig struct {
+	CheckBeforeReport        bool `yaml:"check_before_report"`
+	MinConfidenceToReport    int  `yaml:"min_confidence_to_report"`
+	MinConfidenceToBan       int  `yaml:"min_confidence_to_ban"`
+	SuppressIfConfidenceZero bool `yaml:"suppress_if_confidence_zero"`
+}
+
+// ReputationPolicyVirusTotalConfig governs how the reputation gate consults
+// VirusTotal as a secondary corroborating signal.
+type ReputationPolicyVirusTotalConfig struct {
+	Enabled         bool `yaml:"enabled"`
+	SuppressIfClean bool `yaml:"suppress_if_clean"`
+}
+
+// ReputationPolicyCloudflareConfig governs ban durations and auto-deban
+// scheduling driven by the reputation gate / autodeban service.
+type ReputationPolicyCloudflareConfig struct {
+	DefaultBanDuration time.Duration `yaml:"default_ban_duration"`
+	Recidive2Duration  time.Duration `yaml:"recidive_2_duration"`
+	Recidive3Duration  time.Duration `yaml:"recidive_3_duration"`
+	AutoDebanEnabled   bool          `yaml:"auto_deban_enabled"`
+	CleanupInterval    time.Duration `yaml:"cleanup_interval"`
+}
+
+// ReputationPolicyConfig is the top-level reputation_policy YAML block. It
+// drives internal/security/reputation.Gate and internal/security/autodeban.
+//
+// Safety invariant: Mode MUST default to "shadow" — both when the entire
+// reputation_policy block is omitted from YAML (DefaultConfig sets it) and
+// when an operator writes the block but omits `mode:` (Load's strict-mode
+// YAML decoder will leave Mode as the zero value "" in that case; callers
+// must treat any Mode other than the literal string "enforce" as shadow —
+// see (*ReputationPolicyConfig).EffectiveMode). This file must never default
+// Mode to "enforce" under any circumstance.
+type ReputationPolicyConfig struct {
+	Enabled    bool                             `yaml:"enabled"`
+	Mode       string                           `yaml:"mode"` // "shadow" or "enforce"
+	AbuseIPDB  ReputationPolicyAbuseIPDBConfig  `yaml:"abuseipdb"`
+	VirusTotal ReputationPolicyVirusTotalConfig `yaml:"virustotal"`
+	Cloudflare ReputationPolicyCloudflareConfig `yaml:"cloudflare"`
+}
+
+// EffectiveMode returns "enforce" only when Mode is exactly that literal
+// string; every other value (including "", "shadow", or any typo) is
+// treated as shadow. This is the single choke point that guarantees the
+// safety invariant documented on ReputationPolicyConfig.
+func (r ReputationPolicyConfig) EffectiveMode() string {
+	if r.Mode == "enforce" {
+		return "enforce"
+	}
+	return "shadow"
+}
+
 type Config struct {
-	Version        string               `yaml:"version"`
-	Global         GlobalConfig         `yaml:"global"`
-	Runtime        RuntimeConfig        `yaml:"runtime"`
-	UI             UIBoolConfig         `yaml:"ui"`
-	Enrichment     EnrichmentConfig     `yaml:"enrichment"`
-	Cloudflare     CloudflareConfig     `yaml:"cloudflare"`
-	CrowdSec       CrowdSecConfig       `yaml:"crowdsec"`
-	OpenResty      OpenRestyConfig      `yaml:"openresty"`
-	AbuseIPDB      AbuseIPDBConfig      `yaml:"abuseipdb"`
-	HTTPErrorIntel HTTPErrorIntelConfig `yaml:"http_error_intel"`
-	Spamhaus       SpamhausConfig       `yaml:"spamhaus"`
-	VirusTotal     VirusTotalConfig     `yaml:"virustotal"`
-	BetterStack    BetterStackConfig    `yaml:"betterstack"`
-	Policies       []PolicyConfig       `yaml:"policies"`
-	StateDir       string               `yaml:"state_dir"`
-	Interval       time.Duration        `yaml:"interval"`
+	Version          string                 `yaml:"version"`
+	Global           GlobalConfig           `yaml:"global"`
+	Runtime          RuntimeConfig          `yaml:"runtime"`
+	UI               UIBoolConfig           `yaml:"ui"`
+	Enrichment       EnrichmentConfig       `yaml:"enrichment"`
+	Cloudflare       CloudflareConfig       `yaml:"cloudflare"`
+	CrowdSec         CrowdSecConfig         `yaml:"crowdsec"`
+	OpenResty        OpenRestyConfig        `yaml:"openresty"`
+	AbuseIPDB        AbuseIPDBConfig        `yaml:"abuseipdb"`
+	HTTPErrorIntel   HTTPErrorIntelConfig   `yaml:"http_error_intel"`
+	Spamhaus         SpamhausConfig         `yaml:"spamhaus"`
+	VirusTotal       VirusTotalConfig       `yaml:"virustotal"`
+	ReputationPolicy ReputationPolicyConfig `yaml:"reputation_policy"`
+	BetterStack      BetterStackConfig      `yaml:"betterstack"`
+	Policies         []PolicyConfig         `yaml:"policies"`
+	StateDir         string                 `yaml:"state_dir"`
+	Interval         time.Duration          `yaml:"interval"`
 }
 
 type PolicyConfig struct {
@@ -230,8 +291,35 @@ func DefaultConfig() *Config {
 			CacheTTL:       15 * time.Minute,
 			RequestTimeout: 2 * time.Second,
 		},
+		Cloudflare: CloudflareConfig{
+			CleanupInterval: 5 * time.Minute,
+		},
 		Spamhaus:   SpamhausConfig{},
 		VirusTotal: VirusTotalConfig{},
+		ReputationPolicy: ReputationPolicyConfig{
+			Enabled: true,
+			// Mode is intentionally "shadow" — never default to "enforce".
+			// See ReputationPolicyConfig's doc comment for the invariant
+			// this protects.
+			Mode: "shadow",
+			AbuseIPDB: ReputationPolicyAbuseIPDBConfig{
+				CheckBeforeReport:        true,
+				MinConfidenceToReport:    25,
+				MinConfidenceToBan:       50,
+				SuppressIfConfidenceZero: true,
+			},
+			VirusTotal: ReputationPolicyVirusTotalConfig{
+				Enabled:         true,
+				SuppressIfClean: true,
+			},
+			Cloudflare: ReputationPolicyCloudflareConfig{
+				DefaultBanDuration: time.Hour,
+				Recidive2Duration:  24 * time.Hour,
+				Recidive3Duration:  168 * time.Hour,
+				AutoDebanEnabled:   true,
+				CleanupInterval:    5 * time.Minute,
+			},
+		},
 		HTTPErrorIntel: HTTPErrorIntelConfig{
 			Enabled:      true,
 			EnforceMode:  false,
@@ -298,6 +386,9 @@ func (c *Config) FinalizePaths() {
 	}
 	if c.UI.ProviderStateFile == "" {
 		c.UI.ProviderStateFile = filepath.Join(c.StateDir, "runtime", "ai-providers.env")
+	}
+	if c.Cloudflare.CleanupInterval <= 0 {
+		c.Cloudflare.CleanupInterval = 5 * time.Minute
 	}
 }
 

@@ -44,6 +44,7 @@ var knownTables = map[string]struct{}{
 	"setup_state":                  {},
 	"ui_settings":                  {},
 	"admin_recovery_keys":          {},
+	"cf_ban_lifecycle":             {},
 }
 
 // DB manages a scoped SQLite connection with migrations.
@@ -416,6 +417,35 @@ func (s *DB) runMigrations() error {
 				);
 			`,
 		},
+		{
+			Version:     18,
+			Description: "Cloudflare autoban rule lifecycle (recidive-aware expiry + cleanup)",
+			SQL: `
+				CREATE TABLE IF NOT EXISTS cf_ban_lifecycle (
+					id INTEGER PRIMARY KEY AUTOINCREMENT,
+					ip TEXT NOT NULL,
+					source TEXT NOT NULL DEFAULT '',
+					reason TEXT NOT NULL DEFAULT '',
+					confidence INTEGER NOT NULL DEFAULT 0,
+					created_at TIMESTAMP NOT NULL,
+					expires_at TIMESTAMP NOT NULL,
+					duration_ns INTEGER NOT NULL DEFAULT 0,
+					rule_id TEXT NOT NULL DEFAULT '',
+					evidence_id TEXT NOT NULL DEFAULT '',
+					recidive_level INTEGER NOT NULL DEFAULT 1,
+					status TEXT NOT NULL DEFAULT 'active',
+					status_note TEXT NOT NULL DEFAULT '',
+					updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+				);
+				CREATE UNIQUE INDEX IF NOT EXISTS idx_cf_ban_lifecycle_active_ip
+				ON cf_ban_lifecycle(ip)
+				WHERE status = 'active';
+				CREATE INDEX IF NOT EXISTS idx_cf_ban_lifecycle_ip_created
+				ON cf_ban_lifecycle(ip, created_at DESC, id DESC);
+				CREATE INDEX IF NOT EXISTS idx_cf_ban_lifecycle_status_expires
+				ON cf_ban_lifecycle(status, expires_at);
+			`,
+		},
 	}
 
 	return m.Migrate(context.Background(), migrations)
@@ -627,6 +657,7 @@ func (s *DB) VerifySchema(ctx context.Context) error {
 		"credential_meta",
 		"setup_state",
 		"ui_settings",
+		"cf_ban_lifecycle",
 	}
 	for _, table := range requiredTables {
 		var exists int

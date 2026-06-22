@@ -219,6 +219,25 @@ type TrustedNetworksView struct {
 	Error   string
 }
 
+type BanLifecycleEntryView struct {
+	IP            string
+	Source        string
+	Reason        string
+	Confidence    int
+	CreatedAt     string
+	ExpiresAt     string
+	Duration      string
+	RuleID        string
+	RecidiveLevel int
+	Status        string
+}
+
+type BanLifecycleView struct {
+	Entries []BanLifecycleEntryView
+	Error   string
+	Wired   bool
+}
+
 type RuntimeStatusView struct {
 	CrowdSec   string
 	OpenResty  string

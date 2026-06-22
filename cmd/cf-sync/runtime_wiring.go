@@ -19,6 +19,7 @@ import (
 	"github.com/jm/security-automation-go/internal/adapters/wafref"
 	"github.com/jm/security-automation-go/internal/betterstack"
 	cfpkg "github.com/jm/security-automation-go/internal/cloudflare"
+	"github.com/jm/security-automation-go/internal/cloudflare/banlifecycle"
 	"github.com/jm/security-automation-go/internal/cloudflare/client"
 	"github.com/jm/security-automation-go/internal/config"
 	"github.com/jm/security-automation-go/internal/execution"
@@ -26,6 +27,7 @@ import (
 	"github.com/jm/security-automation-go/internal/runtime/providerstate"
 	"github.com/jm/security-automation-go/internal/security/enrichment/spamhaus"
 	fp_memory "github.com/jm/security-automation-go/internal/security/fp_memory"
+	"github.com/jm/security-automation-go/internal/security/quota"
 	"github.com/jm/security-automation-go/internal/security/reputation"
 	sectrust "github.com/jm/security-automation-go/internal/security/trust"
 	"github.com/jm/security-automation-go/internal/services/autoban"
@@ -99,12 +101,23 @@ type wafBundle struct {
 	er       *nginxerrors.Service
 	banEval  *autoban.Evaluator
 	banExec  autoban.BanExecutor
+
+	// banLifecycleStore is exposed so the daemon can start the cleanup
+	// worker against the same store the ban executor writes to.
+	banLifecycleStore banlifecycle.Store
+
+	// repGate is exposed so the daemon can also wire it into the autodeban
+	// scanner (it must be the SAME gate instance svc/banEval consult, so
+	// shadow/enforce mode and provider signals stay consistent everywhere).
+	repGate *reputation.Gate
 }
 
 // newWAFBundle creates all WAF event services sharing one reporting.Service.
 // The reporting executor is runtime-gated so AbuseIPDB can be enabled/disabled
-// and retested without restarting the binary.
-func newWAFBundle(cf *client.Client, abuse *abuseipdb.Client, hc httpclient.Client, creds credentialLooker, stateStore providerstate.Store, telemetry sinks.Sink, trustRegistry *sectrust.Registry, cfg *config.Config, stores *sqlite.ReportingStores, logger *slog.Logger) *wafBundle {
+// and retested without restarting the binary. lifecycleStore may be nil when
+// SQLite is unavailable; ban creation still works but autoban rules will
+// never be auto-expired in that degraded mode.
+func newWAFBundle(cf *client.Client, abuse *abuseipdb.Client, hc httpclient.Client, creds credentialLooker, stateStore providerstate.Store, telemetry sinks.Sink, trustRegistry *sectrust.Registry, cfg *config.Config, stores *sqlite.ReportingStores, lifecycleStore banlifecycle.Store, logger *slog.Logger) *wafBundle {
 	reportExecutor := newRuntimeAbuseExecutor(hc, creds, stateStore, cfg != nil && cfg.AbuseIPDB.Enabled, abuse)
 	svc := reporting.New(reportExecutor, telemetry, trustRegistry, cfg.AbuseIPDB.CacheTTL)
 	if stores != nil {
@@ -128,21 +141,48 @@ func newWAFBundle(cf *client.Client, abuse *abuseipdb.Client, hc httpclient.Clie
 		}
 	}
 	banEval := buildAutoBanEvaluator(cfg, hc, trustRegistry, abuseKey, logger)
+
+	// Reputation gate: built unconditionally (even with no AbuseIPDB key —
+	// FetchSignals degrades to Available=false and the Gate's Evaluate
+	// fail-open path still applies its own local-evidence-only logic) and
+	// wired into BOTH the reporting service (report path) and the autoban
+	// evaluator (ban path) so neither ever fires on AbuseIPDB/VirusTotal
+	// alone. cfg.ReputationPolicy.EffectiveMode() is the single choke point
+	// for shadow/enforce — see config.ReputationPolicyConfig's safety
+	// invariant doc comment.
+	repPolicy := reputationPolicyFromConfig(cfg)
+	var gateEnricher reputation.Enricher
+	if abuseKey != "" {
+		checker := &transportAbuseChecker{t: abtransport.New(hc, abuseKey)}
+		gateEnricher = autoban.NewCachedEnricher(checker, 6*time.Hour)
+	}
+	repGate := reputation.NewGate(gateEnricher, quota.DefaultRegistry(), repPolicy)
+	svc.SetReputationGate(repGate)
+	banEval.SetReputationGate(repGate)
+
 	var banExec autoban.BanExecutor
 	if cfg != nil && cfg.Cloudflare.MutationsEnabled && cfg.Cloudflare.AutoBanEnabled {
 		cfEnforcer := cfpkg.NewClient(hc, cfg.Cloudflare.APIToken)
-		banExec = &cfBanExecutor{client: cfEnforcer, zoneID: cfg.Cloudflare.ZoneID, logger: logger}
+		banExec = &cfBanExecutor{
+			client:         cfEnforcer,
+			zoneID:         cfg.Cloudflare.ZoneID,
+			logger:         logger,
+			lifecycleStore: lifecycleStore,
+			durations:      banlifecycle.DefaultDurationPolicy(),
+		}
 	}
 	bundle := &wafBundle{
-		cfWAF:    cloudflareevent.NewService(cf, svc),
-		csSource: crowdsecevent.NewLiveSource(cfg.CrowdSec.DecisionsLog, cfg.CrowdSec.NginxLogDir, 24*time.Hour),
-		cs:       crowdsecevent.NewService(svc),
-		orSource: openrestyevent.NewLiveSource(cfg.OpenResty.EventsFile),
-		or:       openrestyevent.NewService(svc),
-		wrSource: wafref.NewLiveSource(cfg.OpenResty.WAFRefsFile),
-		wr:       wafref.NewService(svc),
-		banEval:  banEval,
-		banExec:  banExec,
+		cfWAF:             cloudflareevent.NewService(cf, svc),
+		csSource:          crowdsecevent.NewLiveSource(cfg.CrowdSec.DecisionsLog, cfg.CrowdSec.NginxLogDir, 24*time.Hour),
+		cs:                crowdsecevent.NewService(svc),
+		orSource:          openrestyevent.NewLiveSource(cfg.OpenResty.EventsFile),
+		or:                openrestyevent.NewService(svc),
+		wrSource:          wafref.NewLiveSource(cfg.OpenResty.WAFRefsFile),
+		wr:                wafref.NewService(svc),
+		banEval:           banEval,
+		banExec:           banExec,
+		banLifecycleStore: lifecycleStore,
+		repGate:           repGate,
 	}
 	if cfg.HTTPErrorIntel.Enabled {
 		erSource := nginxerrors.NewLiveSource(cfg.CrowdSec.NginxLogDir)
@@ -255,6 +295,48 @@ func (b *wafBundle) banExecutorService() autoban.BanExecutor {
 	return b.banExec
 }
 
+// banLifecycleStoreService returns the Cloudflare autoban lifecycle store, or
+// nil when SQLite is unavailable.
+func (b *wafBundle) banLifecycleStoreService() banlifecycle.Store {
+	if b == nil {
+		return nil
+	}
+	return b.banLifecycleStore
+}
+
+// reputationGateService returns the shared reputation gate, or nil when the
+// bundle itself is nil.
+func (b *wafBundle) reputationGateService() *reputation.Gate {
+	if b == nil {
+		return nil
+	}
+	return b.repGate
+}
+
+// reputationPolicyFromConfig converts the YAML-driven
+// config.ReputationPolicyConfig into the pure reputation.Policy the Gate
+// consumes. EffectiveMode() is the single safety choke point: Mode is
+// "enforce" only on that exact literal, "shadow" for anything else
+// (including a missing/omitted block) — this function must never bypass it.
+func reputationPolicyFromConfig(cfg *config.Config) reputation.Policy {
+	if cfg == nil {
+		return reputation.DefaultPolicy()
+	}
+	rp := cfg.ReputationPolicy
+	return reputation.Policy{
+		Enabled: rp.Enabled,
+		Mode:    reputation.Mode(rp.EffectiveMode()),
+
+		AbuseIPDBCheckBeforeReport:     rp.AbuseIPDB.CheckBeforeReport,
+		AbuseIPDBMinConfidenceToReport: rp.AbuseIPDB.MinConfidenceToReport,
+		AbuseIPDBMinConfidenceToBan:    rp.AbuseIPDB.MinConfidenceToBan,
+		AbuseIPDBSuppressIfZero:        rp.AbuseIPDB.SuppressIfConfidenceZero,
+
+		VirusTotalEnabled:       rp.VirusTotal.Enabled,
+		VirusTotalSuppressClean: rp.VirusTotal.SuppressIfClean,
+	}
+}
+
 // transportAbuseChecker wraps the AbuseIPDB transport to satisfy autoban.AbuseIPDBChecker.
 type transportAbuseChecker struct {
 	t *abtransport.Transport
@@ -285,17 +367,48 @@ func buildAutoBanEvaluator(cfg *config.Config, hc httpclient.Client, trustReg *s
 
 // cfBanExecutor enacts ban decisions by creating a Cloudflare IP access rule.
 // It is only instantiated when both mutations_enabled and auto_ban_enabled are set.
+//
+// On success it also records a banlifecycle.Entry (when a store is wired)
+// so the recidive-aware cleanup worker can later expire and remove the
+// rule. lifecycleStore may be nil (e.g. SQLite unavailable); in that case
+// ExecuteBan still creates the Cloudflare rule but no lifecycle bookkeeping
+// happens and the rule will never be auto-cleaned — operators must rely on
+// the existing manual/CrowdSec cleanup paths in that degraded mode.
 type cfBanExecutor struct {
-	client cfpkg.EnforcementClient
-	zoneID string
-	logger *slog.Logger
+	client         cfpkg.EnforcementClient
+	zoneID         string
+	logger         *slog.Logger
+	lifecycleStore banlifecycle.Store
+	durations      banlifecycle.DurationPolicy
+	now            func() time.Time
 }
 
 func (e *cfBanExecutor) ExecuteBan(ctx context.Context, decision autoban.BanDecision) error {
 	if e == nil || e.client == nil {
 		return nil
 	}
-	tag := fmt.Sprintf("cf-sync:autoban:%s", decision.Reason)
+	now := time.Now
+	if e.now != nil {
+		now = e.now
+	}
+	createdAt := now().UTC()
+
+	recidiveLevel := 1
+	if e.lifecycleStore != nil {
+		if priorBans, err := e.lifecycleStore.RecidiveLevel(ctx, decision.IP); err == nil {
+			recidiveLevel = priorBans + 1
+		} else if e.logger != nil {
+			e.logger.Warn("autoban: recidive level lookup failed, defaulting to 1", "ip", decision.IP, "error", err)
+		}
+	}
+	durations := e.durations
+	if durations == (banlifecycle.DurationPolicy{}) {
+		durations = banlifecycle.DefaultDurationPolicy()
+	}
+	duration := durations.DurationFor(recidiveLevel)
+	expiresAt := createdAt.Add(duration)
+
+	tag := fmt.Sprintf("cf-sync:autoban:%s:exp=%s", decision.Reason, expiresAt.Format(time.RFC3339))
 	id, err := e.client.AddIPAccessRule(ctx, e.zoneID, decision.IP, tag, "ip")
 	if err != nil {
 		if e.logger != nil {
@@ -304,7 +417,26 @@ func (e *cfBanExecutor) ExecuteBan(ctx context.Context, decision autoban.BanDeci
 		return err
 	}
 	if e.logger != nil {
-		e.logger.Info("autoban: CF ban applied", "ip", decision.IP, "reason", decision.Reason, "rule_id", id)
+		e.logger.Info("autoban: CF ban applied", "ip", decision.IP, "reason", decision.Reason, "rule_id", id,
+			"recidive_level", recidiveLevel, "duration", duration, "expires_at", expiresAt)
+	}
+
+	if e.lifecycleStore != nil {
+		entry := banlifecycle.Entry{
+			IP:            decision.IP,
+			Source:        "autoban_" + decision.Reason,
+			Reason:        decision.Reason,
+			Confidence:    decision.Confidence,
+			CreatedAt:     createdAt,
+			ExpiresAt:     expiresAt,
+			Duration:      duration,
+			RuleID:        id,
+			RecidiveLevel: recidiveLevel,
+			Status:        banlifecycle.StatusActive,
+		}
+		if err := e.lifecycleStore.Upsert(ctx, entry); err != nil && e.logger != nil {
+			e.logger.Warn("autoban: ban lifecycle store upsert failed", "ip", decision.IP, "error", err)
+		}
 	}
 	return nil
 }

@@ -14,6 +14,7 @@ import (
 	"github.com/jm/security-automation-go/internal/security/classifier"
 	"github.com/jm/security-automation-go/internal/security/enrichment/spamhaus"
 	"github.com/jm/security-automation-go/internal/security/reportdedup"
+	"github.com/jm/security-automation-go/internal/security/reputation"
 	"github.com/jm/security-automation-go/internal/security/trust"
 	tmevents "github.com/jm/security-automation-go/internal/telemetry/events"
 	"github.com/jm/security-automation-go/internal/telemetry/sinks"
@@ -56,6 +57,20 @@ type Service struct {
 	spamhausClient    spamhaus.Client
 	spamhausDedup     *spamhausIPDedup
 	logger            *slog.Logger
+
+	// reputationGate, when set, is consulted after the pre-existing
+	// suppressionReason() short-circuit and before the report is reserved /
+	// submitted. It never replaces the existing local-confidence gate — it
+	// is an additional, later checkpoint. Fail-open: if SetReputationGate is
+	// never called, this is nil and Process behaves exactly as before.
+	reputationGate ReputationGate
+}
+
+// ReputationGate is the subset of *reputation.Gate the reporting service
+// needs. Kept as an interface so tests can fake it without standing up a
+// real enrichment.Service.
+type ReputationGate interface {
+	EvaluateReport(ctx context.Context, ip string, local reputation.LocalSignal) reputation.Decision
 }
 
 func New(reporter abexec.Executor, sink sinks.Sink, registry *trust.Registry, dedupTTL time.Duration) *Service {
@@ -90,6 +105,14 @@ func (s *Service) SetReportDedupStore(store reportdedup.Store) {
 
 func (s *Service) SetEvidenceStore(store EvidenceStore) {
 	s.evidenceStore = store
+}
+
+// SetReputationGate wires the cross-provider reputation gate
+// (internal/security/reputation) into Process(). A nil gate (the default)
+// disables this checkpoint entirely — pre-existing suppression/report
+// behavior is unaffected.
+func (s *Service) SetReputationGate(gate ReputationGate) {
+	s.reputationGate = gate
 }
 
 func (s *Service) SetReportReservationStore(store ReportReservationStore) {
@@ -131,6 +154,27 @@ func (s *Service) Process(ctx context.Context, req Request) (Result, error) {
 	suppressionReason := s.suppressionReason(req, cls)
 	if suppressionReason != "" {
 		return s.handleSuppressedDecision(ctx, req, cls, comment, telemetryEvent, suppressionReason)
+	}
+
+	// Reputation gate: an additional, later checkpoint consulted only after
+	// the pre-existing local-confidence suppression above has already
+	// allowed this report through. Fail-open by construction: any
+	// gate/provider error surfaces as reputation.ActionAllow (see
+	// EvaluateReport callers / Evaluate's provider_unavailable branch), so a
+	// gate failure can never crash or stall the outbox — at worst it falls
+	// back to pre-gate behavior. In shadow mode the gate's decision is
+	// observed but never applied: this is enforced by the gate itself
+	// (Decision.Shadow) rather than by hiding the call here.
+	if s.reputationGate != nil {
+		decision := s.reputationGate.EvaluateReport(ctx, req.Event.IP, reputationLocalSignal(cls))
+		if !decision.Shadow && !decision.AllowReport {
+			return s.handleSuppressedDecision(ctx, req, cls, comment, telemetryEvent, decision.Reason)
+		}
+		if s.logger != nil {
+			s.logger.Debug("reputation gate decision",
+				"ip", req.Event.IP, "action", decision.Action, "reason", decision.Reason,
+				"shadow", decision.Shadow, "provider_unavailable", decision.ProviderUnavailable)
+		}
 	}
 
 	// Spamhaus submit: independent from AbuseIPDB, fail-open, own 24h dedup per IP.

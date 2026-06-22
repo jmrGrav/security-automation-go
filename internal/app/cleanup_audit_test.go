@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"testing"
 
+	"github.com/jm/security-automation-go/internal/cloudflare/models"
 	"github.com/jm/security-automation-go/internal/config"
 	csmodels "github.com/jm/security-automation-go/internal/crowdsec/models"
 	"github.com/jm/security-automation-go/internal/snapshot"
@@ -38,6 +39,10 @@ func (f *cleanupFakeCloudflare) ListIPAccessRulesByTag(_ context.Context, zoneID
 		out[ip] = ruleID
 	}
 	return out, nil
+}
+
+func (f *cleanupFakeCloudflare) ListIPAccessRulesByNotePrefix(context.Context, string, string) ([]models.IPAccessRule, error) {
+	return nil, nil
 }
 
 func (f *cleanupFakeCloudflare) AddIPAccessRule(context.Context, string, string, string, string) (string, error) {
