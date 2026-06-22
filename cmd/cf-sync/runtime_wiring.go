@@ -367,6 +367,7 @@ func (e *cfBanExecutor) ExecuteBan(ctx context.Context, decision autoban.BanDeci
 			IP:            decision.IP,
 			Source:        "autoban_" + decision.Reason,
 			Reason:        decision.Reason,
+			Confidence:    decision.Confidence,
 			CreatedAt:     createdAt,
 			ExpiresAt:     expiresAt,
 			Duration:      duration,

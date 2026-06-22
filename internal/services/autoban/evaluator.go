@@ -49,6 +49,15 @@ type BanDecision struct {
 	Reason     string // "confidence_100", "burst_malicious", or "http_error_burst"
 	SkipReason string // non-empty when skipped
 	Shadow     bool   // true when live mutations are disabled
+	// Confidence is the AbuseIPDB confidence score (0-100) that justified
+	// this ban, when known. Only EvaluateConfidence sets this (it is the
+	// only path that consults AbuseIPDB before banning); burst-based paths
+	// leave it at 0 since they have no external corroboration. Callers must
+	// propagate this into banlifecycle.Entry.Confidence — autodeban relies
+	// on it to distinguish reputation-corroborated bans from local-only
+	// ones (see internal/security/autodeban.evaluateEntry's weak_signal_ban
+	// trigger).
+	Confidence int
 }
 
 // MaliciousEvent is a stripped-down record of a detected malicious event.
@@ -170,10 +179,11 @@ func (e *Evaluator) EvaluateConfidence(ctx context.Context, ip string) BanDecisi
 		return BanDecision{IP: ip, SkipReason: skip}
 	}
 	return BanDecision{
-		IP:        ip,
-		ShouldBan: true,
-		Reason:    "confidence_100",
-		Shadow:    !e.liveMode,
+		IP:         ip,
+		ShouldBan:  true,
+		Reason:     "confidence_100",
+		Shadow:     !e.liveMode,
+		Confidence: score,
 	}
 }
 
