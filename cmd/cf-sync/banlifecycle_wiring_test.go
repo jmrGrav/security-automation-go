@@ -55,6 +55,9 @@ func (s *fakeLifecycleStore) Active(_ context.Context) ([]banlifecycle.Entry, er
 func (s *fakeLifecycleStore) Expired(_ context.Context, _ time.Time) ([]banlifecycle.Entry, error) {
 	return nil, nil
 }
+func (s *fakeLifecycleStore) Recent(_ context.Context, _ int) ([]banlifecycle.Entry, error) {
+	return nil, nil
+}
 func (s *fakeLifecycleStore) MarkStatus(_ context.Context, ip, status, note string) error {
 	return nil
 }

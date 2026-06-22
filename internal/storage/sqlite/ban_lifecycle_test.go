@@ -240,3 +240,49 @@ func TestBanLifecycleStore_GetUnknownIPReturnsFalse(t *testing.T) {
 		t.Fatalf("expected ok=false for unknown IP")
 	}
 }
+
+func TestBanLifecycleStore_RecentReturnsFullHistoryAcrossStatuses(t *testing.T) {
+	db, err := New(t.TempDir())
+	if err != nil {
+		t.Fatalf("new db: %v", err)
+	}
+	defer db.Close()
+
+	store := NewBanLifecycleStore(db)
+	now := time.Date(2026, 6, 21, 12, 0, 0, 0, time.UTC)
+
+	entries := []banlifecycle.Entry{
+		{IP: "10.0.0.1", CreatedAt: now.Add(-3 * time.Hour), ExpiresAt: now.Add(-2 * time.Hour), Status: banlifecycle.StatusExpiredCleaned},
+		{IP: "10.0.0.2", CreatedAt: now.Add(-2 * time.Hour), ExpiresAt: now.Add(-1 * time.Hour), Status: banlifecycle.StatusAutoDebanned},
+		{IP: "10.0.0.3", CreatedAt: now.Add(-1 * time.Hour), ExpiresAt: now, Status: banlifecycle.StatusManualOverride},
+		{IP: "10.0.0.4", CreatedAt: now, ExpiresAt: now.Add(time.Hour), Status: banlifecycle.StatusActive},
+	}
+	for _, e := range entries {
+		if err := store.Upsert(context.Background(), e); err != nil {
+			t.Fatalf("Upsert(%s): %v", e.IP, err)
+		}
+	}
+
+	recent, err := store.Recent(context.Background(), 100)
+	if err != nil {
+		t.Fatalf("Recent: %v", err)
+	}
+	if len(recent) != 4 {
+		t.Fatalf("expected 4 entries across all statuses, got %d", len(recent))
+	}
+	// Newest first.
+	if recent[0].IP != "10.0.0.4" || recent[0].Status != banlifecycle.StatusActive {
+		t.Fatalf("expected newest entry first, got %+v", recent[0])
+	}
+	if recent[3].IP != "10.0.0.1" || recent[3].Status != banlifecycle.StatusExpiredCleaned {
+		t.Fatalf("expected oldest entry last, got %+v", recent[3])
+	}
+
+	limited, err := store.Recent(context.Background(), 2)
+	if err != nil {
+		t.Fatalf("Recent with limit: %v", err)
+	}
+	if len(limited) != 2 {
+		t.Fatalf("expected limit=2 to cap results, got %d", len(limited))
+	}
+}

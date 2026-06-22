@@ -846,6 +846,7 @@ func consoleNav(active string) []navItem {
 		{Label: "WAF Events", Href: "/evidence"},
 		{Label: "Pipeline Health", Href: "/pipeline"},
 		{Label: "CF Ban Sync", Href: "/sync"},
+		{Label: "Ban Lifecycle", Href: "/ban-lifecycle"},
 		{Label: "Security Intelligence", Href: "/intelligence"},
 		{Label: "Timeline", Href: "/timeline"},
 		{Label: "Audit Trail", Href: "/audit"},

@@ -125,6 +125,28 @@ func (s *BanLifecycleStore) Expired(ctx context.Context, now time.Time) ([]banli
 	return scanBanLifecycleEntries(op, rows)
 }
 
+// Recent returns the most recent entries across all statuses, newest first,
+// capped at limit. Used to render full lifecycle history (active, expired,
+// auto-debanned, manually overridden), not just currently-active bans.
+func (s *BanLifecycleStore) Recent(ctx context.Context, limit int) ([]banlifecycle.Entry, error) {
+	const op = "storage.sqlite.BanLifecycleStore.Recent"
+	if limit <= 0 {
+		limit = 100
+	}
+	rows, err := s.db.Conn().QueryContext(ctx, `
+		SELECT ip, source, reason, confidence, created_at, expires_at, duration_ns,
+		       rule_id, evidence_id, recidive_level, status
+		FROM cf_ban_lifecycle
+		ORDER BY created_at DESC, id DESC
+		LIMIT ?
+	`, limit)
+	if err != nil {
+		return nil, apperr.Wrap(op, err)
+	}
+	defer rows.Close()
+	return scanBanLifecycleEntries(op, rows)
+}
+
 // MarkStatus updates the status (and, as a note, the status_note) of the
 // current (most recent) entry for ip.
 func (s *BanLifecycleStore) MarkStatus(ctx context.Context, ip string, status string, note string) error {

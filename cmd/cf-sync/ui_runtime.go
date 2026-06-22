@@ -160,6 +160,7 @@ func runUIWithLocker(ctx context.Context, logger *slog.Logger, cfg *config.Confi
 	}
 
 	enrichmentSvc := buildEnrichmentService(ctx, cfg, credentialStore)
+	banLifecycleStore := sqlite.NewBanLifecycleStore(setupDB)
 
 	server, err := ui.NewServer(cfg, ui.Options{
 		SetupStore:        setupStore,
@@ -168,6 +169,7 @@ func runUIWithLocker(ctx context.Context, logger *slog.Logger, cfg *config.Confi
 		AuditSink:         auditSink,
 		Logger:            logger,
 		EvidenceStore:     evidenceStore,
+		BanLifecycleStore: banLifecycleStore,
 		ValidateAbuseIPDB: ui.ValidateAbuseIPDB,
 		AIExplainBuilder: func(effective ai.Config) aigateway.Gateway {
 			opts := []aigateway.ServiceOption{

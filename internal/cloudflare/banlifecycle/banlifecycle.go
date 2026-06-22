@@ -43,6 +43,10 @@ type Store interface {
 	Active(ctx context.Context) ([]Entry, error)
 	Expired(ctx context.Context, now time.Time) ([]Entry, error)
 	MarkStatus(ctx context.Context, ip string, status string, note string) error
+	// Recent returns the most recent entries across all statuses (active,
+	// expired_cleaned, auto_debanned, manual_override), newest first, capped
+	// at limit. Used to render full lifecycle history, not just current bans.
+	Recent(ctx context.Context, limit int) ([]Entry, error)
 	// RecidiveLevel returns the count of PRIOR completed (non-active) bans for
 	// this IP, for escalation calc. A new ban's RecidiveLevel = this value + 1.
 	RecidiveLevel(ctx context.Context, ip string) (int, error)

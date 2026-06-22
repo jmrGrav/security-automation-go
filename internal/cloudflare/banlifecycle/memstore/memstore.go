@@ -5,6 +5,7 @@ package memstore
 
 import (
 	"context"
+	"sort"
 	"sync"
 	"time"
 
@@ -99,6 +100,29 @@ func (s *Store) MarkStatus(_ context.Context, ip string, status string, _ string
 	entries[len(entries)-1].Status = status
 	s.history[ip] = entries
 	return nil
+}
+
+// Recent returns the most recent entries across all IPs and statuses,
+// newest (by CreatedAt) first, capped at limit.
+func (s *Store) Recent(_ context.Context, limit int) ([]banlifecycle.Entry, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if limit <= 0 {
+		limit = 100
+	}
+	var out []banlifecycle.Entry
+	for _, entries := range s.history {
+		for _, e := range entries {
+			out = append(out, cloneEntry(e))
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].CreatedAt.After(out[j].CreatedAt)
+	})
+	if len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
 }
 
 // RecidiveLevel returns the count of prior non-active entries for ip.

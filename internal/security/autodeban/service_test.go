@@ -54,6 +54,10 @@ func (s *fakeStore) Expired(_ context.Context, _ time.Time) ([]banlifecycle.Entr
 	return nil, nil
 }
 
+func (s *fakeStore) Recent(_ context.Context, _ int) ([]banlifecycle.Entry, error) {
+	return nil, nil
+}
+
 func (s *fakeStore) MarkStatus(_ context.Context, ip string, status string, _ string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

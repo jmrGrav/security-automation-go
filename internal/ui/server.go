@@ -23,6 +23,7 @@ import (
 
 	ai "github.com/jm/security-automation-go/internal/ai"
 	aigateway "github.com/jm/security-automation-go/internal/ai/gateway"
+	"github.com/jm/security-automation-go/internal/cloudflare/banlifecycle"
 	"github.com/jm/security-automation-go/internal/config"
 	"github.com/jm/security-automation-go/internal/detect"
 	"github.com/jm/security-automation-go/internal/health"
@@ -69,6 +70,7 @@ type Options struct {
 	Logger              *slog.Logger
 	Enrichment          *enrichment.Service
 	EvidenceStore       reporting.EvidenceStore
+	BanLifecycleStore   banlifecycle.Store
 	AIExplain           aigateway.Gateway
 	AIExplainBuilder    func(ai.Config) aigateway.Gateway
 	AIConfig            ai.Config
@@ -104,6 +106,7 @@ type Server struct {
 	providerFactories   map[string]ProviderFactory
 	setupStore          SetupStorer
 	evidence            reporting.EvidenceStore
+	banLifecycleStore   banlifecycle.Store
 	validateCloudflare  func(context.Context, string, string) error
 	validateAbuseIPDB   func(context.Context, string) error
 	validateBetterStack func(context.Context, string) error
@@ -147,6 +150,7 @@ func NewServer(cfg *config.Config, opts Options) (*Server, error) {
 		uiSecret:            uiSecret,
 		enrichment:          opts.Enrichment,
 		evidence:            opts.EvidenceStore,
+		banLifecycleStore:   opts.BanLifecycleStore,
 		aiBaseConfig:        opts.AIConfig,
 		aiConfig:            effectiveAIConfig,
 		aiExplainBuilder:    opts.AIExplainBuilder,
@@ -227,6 +231,7 @@ func (s *Server) routes() {
 	s.mux.Handle("GET /pipeline", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handlePipelineHealthPage)))))
 	s.mux.Handle("GET /nginx-access", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleNginxAccessPage)))))
 	s.mux.Handle("GET /sync", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleCFSyncPage)))))
+	s.mux.Handle("GET /ban-lifecycle", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleBanLifecyclePage)))))
 	s.mux.Handle("GET /about", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleAboutPage)))))
 	s.mux.Handle("GET /system", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleAboutPage)))))
 	s.mux.Handle("GET /audit", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleAuditTrailPage)))))
