@@ -45,6 +45,7 @@ var knownTables = map[string]struct{}{
 	"ui_settings":                  {},
 	"admin_recovery_keys":          {},
 	"cf_ban_lifecycle":             {},
+	"trusted_networks":             {},
 }
 
 // DB manages a scoped SQLite connection with migrations.
@@ -446,6 +447,21 @@ func (s *DB) runMigrations() error {
 				ON cf_ban_lifecycle(status, expires_at);
 			`,
 		},
+		{
+			Version:     19,
+			Description: "Trusted networks registry (hub-and-spoke source of truth)",
+			SQL: `
+					CREATE TABLE IF NOT EXISTS trusted_networks (
+						id INTEGER PRIMARY KEY AUTOINCREMENT,
+						value TEXT NOT NULL UNIQUE,
+						label TEXT NOT NULL DEFAULT '',
+						source TEXT NOT NULL DEFAULT '',
+						comment TEXT NOT NULL DEFAULT '',
+						created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+						updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+					);
+				`,
+		},
 	}
 
 	return m.Migrate(context.Background(), migrations)
@@ -658,6 +674,7 @@ func (s *DB) VerifySchema(ctx context.Context) error {
 		"setup_state",
 		"ui_settings",
 		"cf_ban_lifecycle",
+		"trusted_networks",
 	}
 	for _, table := range requiredTables {
 		var exists int

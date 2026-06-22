@@ -31,14 +31,15 @@ import (
 	"github.com/jm/security-automation-go/internal/services/reporting"
 	"github.com/jm/security-automation-go/internal/startupcheck"
 	"github.com/jm/security-automation-go/internal/storage/sqlite"
+	"github.com/jm/security-automation-go/internal/trustednetworks"
 	"github.com/jm/security-automation-go/internal/ui"
 )
 
 func runUI(ctx context.Context, logger *slog.Logger, cfg *config.Config) error {
-	return runUIWithLocker(ctx, logger, cfg, true, nil, nil)
+	return runUIWithLocker(ctx, logger, cfg, true, nil, nil, nil)
 }
 
-func runUIWithLocker(ctx context.Context, logger *slog.Logger, cfg *config.Config, acquireLock bool, evidenceHolder *lazyEvidenceStore, sharedDB *sqlite.DB) error {
+func runUIWithLocker(ctx context.Context, logger *slog.Logger, cfg *config.Config, acquireLock bool, evidenceHolder *lazyEvidenceStore, sharedDB *sqlite.DB, trustedNetworksCache *trustednetworks.ReportCache) error {
 	if !cfg.UI.Enabled {
 		return errors.New("ui mode requires UI_ENABLED=1 or ui.enabled=true")
 	}
@@ -163,14 +164,15 @@ func runUIWithLocker(ctx context.Context, logger *slog.Logger, cfg *config.Confi
 	banLifecycleStore := sqlite.NewBanLifecycleStore(setupDB)
 
 	server, err := ui.NewServer(cfg, ui.Options{
-		SetupStore:        setupStore,
-		CredentialStore:   credentialStore,
-		SecretProvider:    ui.NewFileSecretProvider(cfg.UI.SecretFile),
-		AuditSink:         auditSink,
-		Logger:            logger,
-		EvidenceStore:     evidenceStore,
-		BanLifecycleStore: banLifecycleStore,
-		ValidateAbuseIPDB: ui.ValidateAbuseIPDB,
+		SetupStore:           setupStore,
+		CredentialStore:      credentialStore,
+		SecretProvider:       ui.NewFileSecretProvider(cfg.UI.SecretFile),
+		AuditSink:            auditSink,
+		Logger:               logger,
+		EvidenceStore:        evidenceStore,
+		BanLifecycleStore:    banLifecycleStore,
+		TrustedNetworksCache: trustedNetworksCache,
+		ValidateAbuseIPDB:    ui.ValidateAbuseIPDB,
 		AIExplainBuilder: func(effective ai.Config) aigateway.Gateway {
 			opts := []aigateway.ServiceOption{
 				aigateway.WithEvidenceReader(evidenceStore),

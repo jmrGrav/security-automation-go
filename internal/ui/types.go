@@ -215,8 +215,9 @@ type TrustedNetworkEntryView struct {
 }
 
 type TrustedNetworksView struct {
-	Entries []TrustedNetworkEntryView
-	Error   string
+	Entries  []TrustedNetworkEntryView
+	SyncMode string // "shadow", "enforce", or "" if the sync registry has never run
+	Error    string
 }
 
 type BanLifecycleEntryView struct {

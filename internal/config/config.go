@@ -227,10 +227,59 @@ type Config struct {
 	Spamhaus         SpamhausConfig         `yaml:"spamhaus"`
 	VirusTotal       VirusTotalConfig       `yaml:"virustotal"`
 	ReputationPolicy ReputationPolicyConfig `yaml:"reputation_policy"`
+	TrustedNetworks  TrustedNetworksConfig  `yaml:"trusted_networks"`
 	BetterStack      BetterStackConfig      `yaml:"betterstack"`
 	Policies         []PolicyConfig         `yaml:"policies"`
 	StateDir         string                 `yaml:"state_dir"`
 	Interval         time.Duration          `yaml:"interval"`
+}
+
+// TrustedNetworksCrowdSecConfig governs the CrowdSec spoke of the trusted
+// networks hub-and-spoke registry.
+type TrustedNetworksCrowdSecConfig struct {
+	Enabled bool `yaml:"enabled"`
+	// AllowlistName is the cscli allowlist the registry pushes to. Defaults
+	// to the same allowlist already read by CrowdSecConfig.AllowlistName so
+	// existing shadow/drift reporting that reads it benefits automatically.
+	AllowlistName string `yaml:"allowlist_name"`
+}
+
+// TrustedNetworksCloudflareConfig governs the Cloudflare spoke of the
+// trusted networks hub-and-spoke registry.
+type TrustedNetworksCloudflareConfig struct {
+	Enabled bool `yaml:"enabled"`
+	// ZoneID defaults to CloudflareConfig.ZoneID when empty.
+	ZoneID string `yaml:"zone_id"`
+}
+
+// TrustedNetworksConfig is the top-level trusted_networks YAML block. It
+// drives internal/trustednetworks.Registry: a hub-and-spoke source of truth
+// pushed independently to CrowdSec and Cloudflare allowlists. CrowdSec and
+// Cloudflare must never sync directly to each other — every change flows
+// through this registry.
+//
+// Safety invariant: Mode MUST default to "shadow", mirroring
+// ReputationPolicyConfig's invariant — detect and report drift only, never
+// push or remove anything, until an operator explicitly opts into
+// "enforce". Even in enforce mode the registry never removes a remote
+// entry automatically (see internal/trustednetworks.Registry doc comment).
+type TrustedNetworksConfig struct {
+	Enabled      bool                            `yaml:"enabled"`
+	Mode         string                          `yaml:"mode"` // "shadow" or "enforce"
+	SyncInterval time.Duration                   `yaml:"sync_interval"`
+	CrowdSec     TrustedNetworksCrowdSecConfig   `yaml:"crowdsec"`
+	Cloudflare   TrustedNetworksCloudflareConfig `yaml:"cloudflare"`
+}
+
+// EffectiveMode returns "enforce" only when Mode is exactly that literal
+// string; every other value (including "", "shadow", or any typo) is
+// treated as shadow — the single choke point guaranteeing the safety
+// invariant documented on TrustedNetworksConfig.
+func (t TrustedNetworksConfig) EffectiveMode() string {
+	if t.Mode == "enforce" {
+		return "enforce"
+	}
+	return "shadow"
 }
 
 type PolicyConfig struct {
@@ -325,6 +374,21 @@ func DefaultConfig() *Config {
 			EnforceMode:  false,
 			MinBurst:     3,
 			BanThreshold: 20,
+		},
+		TrustedNetworks: TrustedNetworksConfig{
+			Enabled: true,
+			// Mode is intentionally "shadow" — never default to "enforce".
+			// See TrustedNetworksConfig's doc comment for the invariant
+			// this protects.
+			Mode:         "shadow",
+			SyncInterval: 10 * time.Minute,
+			CrowdSec: TrustedNetworksCrowdSecConfig{
+				Enabled:       true,
+				AllowlistName: "my_allowlist",
+			},
+			Cloudflare: TrustedNetworksCloudflareConfig{
+				Enabled: true,
+			},
 		},
 		CrowdSec: CrowdSecConfig{
 			DecisionsLog:  "/var/log/crowdsec/decisions.log",
