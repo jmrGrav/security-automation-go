@@ -2,6 +2,24 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v1.7.4] — 2026-06-22
+
+### Summary
+
+Two missions plus a hardening pass. Mission 1 closes the Cloudflare ban lifecycle loop: bans now expire and auto-deban, and auto-ban decisions require corroborating local evidence in addition to AbuseIPDB confidence — confidence=100 alone is never sufficient. Mission 2 introduces the Trusted Networks registry, a hub-and-spoke source of truth for allowlisted ASNs/CIDRs consumed by every ban/report decision point. Also includes local WAF/HTTP-error-burst evidence-only signals, four Codex-audit fixes (#64, #65, #66, #69), and HTTP-level test coverage for the first-run setup wizard (#67).
+
+### Added
+
+- **Cloudflare ban lifecycle** — `internal/services/cfbanlifecycle` tracks ban expiry and runs a cleanup worker that lifts expired bans automatically.
+- **Reputation-gated auto-ban/auto-deban** — auto-ban requires AbuseIPDB confidence=100 **and** a corroborating local evidence signal (burst counter ≥ 1); confidence alone is rejected. Auto-deban runs on improved reputation. New `reputation_policy` config block and a Cloudflare Ban Lifecycle UI page.
+- **Trusted Networks registry** — `internal/runtime/providerstate` hub-and-spoke ASN/CIDR allowlist, single source of truth consumed by ban/report decisions, with an import/export UI.
+- **Local WAF / HTTP-error intelligence** — `internal/adapters/wafref` and `internal/adapters/nginxerrors` ingest local WAF references and Nginx 4xx/5xx error bursts as evidence-only signals (shadow/enforce gated), surfaced in a new dashboard section.
+- **Setup-wizard test coverage** — HTTP-level tests drive the full first-run wizard (steps 1-9) through real session/CSRF-gated handlers, closing the coverage gaps reported in #67.
+
+### Fixes
+
+- **#64/#65/#66/#69 — Codex audit findings** — see PR #70 for the four individual fixes, including the `/timeline` full-history recomputation on every request (#69), now cached with a bounded TTL.
+
 ## [v1.7.3] — 2026-06-16
 
 ### Summary
