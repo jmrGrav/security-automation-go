@@ -27,6 +27,7 @@ import (
 	"github.com/jm/security-automation-go/internal/runtime/providerstate"
 	"github.com/jm/security-automation-go/internal/security/enrichment/spamhaus"
 	fp_memory "github.com/jm/security-automation-go/internal/security/fp_memory"
+	"github.com/jm/security-automation-go/internal/security/quota"
 	"github.com/jm/security-automation-go/internal/security/reputation"
 	sectrust "github.com/jm/security-automation-go/internal/security/trust"
 	"github.com/jm/security-automation-go/internal/services/autoban"
@@ -104,6 +105,11 @@ type wafBundle struct {
 	// banLifecycleStore is exposed so the daemon can start the cleanup
 	// worker against the same store the ban executor writes to.
 	banLifecycleStore banlifecycle.Store
+
+	// repGate is exposed so the daemon can also wire it into the autodeban
+	// scanner (it must be the SAME gate instance svc/banEval consult, so
+	// shadow/enforce mode and provider signals stay consistent everywhere).
+	repGate *reputation.Gate
 }
 
 // newWAFBundle creates all WAF event services sharing one reporting.Service.
@@ -135,6 +141,25 @@ func newWAFBundle(cf *client.Client, abuse *abuseipdb.Client, hc httpclient.Clie
 		}
 	}
 	banEval := buildAutoBanEvaluator(cfg, hc, trustRegistry, abuseKey, logger)
+
+	// Reputation gate: built unconditionally (even with no AbuseIPDB key —
+	// FetchSignals degrades to Available=false and the Gate's Evaluate
+	// fail-open path still applies its own local-evidence-only logic) and
+	// wired into BOTH the reporting service (report path) and the autoban
+	// evaluator (ban path) so neither ever fires on AbuseIPDB/VirusTotal
+	// alone. cfg.ReputationPolicy.EffectiveMode() is the single choke point
+	// for shadow/enforce — see config.ReputationPolicyConfig's safety
+	// invariant doc comment.
+	repPolicy := reputationPolicyFromConfig(cfg)
+	var gateEnricher reputation.Enricher
+	if abuseKey != "" {
+		checker := &transportAbuseChecker{t: abtransport.New(hc, abuseKey)}
+		gateEnricher = autoban.NewCachedEnricher(checker, 6*time.Hour)
+	}
+	repGate := reputation.NewGate(gateEnricher, quota.DefaultRegistry(), repPolicy)
+	svc.SetReputationGate(repGate)
+	banEval.SetReputationGate(repGate)
+
 	var banExec autoban.BanExecutor
 	if cfg != nil && cfg.Cloudflare.MutationsEnabled && cfg.Cloudflare.AutoBanEnabled {
 		cfEnforcer := cfpkg.NewClient(hc, cfg.Cloudflare.APIToken)
@@ -157,6 +182,7 @@ func newWAFBundle(cf *client.Client, abuse *abuseipdb.Client, hc httpclient.Clie
 		banEval:           banEval,
 		banExec:           banExec,
 		banLifecycleStore: lifecycleStore,
+		repGate:           repGate,
 	}
 	if cfg.HTTPErrorIntel.Enabled {
 		erSource := nginxerrors.NewLiveSource(cfg.CrowdSec.NginxLogDir)
@@ -276,6 +302,39 @@ func (b *wafBundle) banLifecycleStoreService() banlifecycle.Store {
 		return nil
 	}
 	return b.banLifecycleStore
+}
+
+// reputationGateService returns the shared reputation gate, or nil when the
+// bundle itself is nil.
+func (b *wafBundle) reputationGateService() *reputation.Gate {
+	if b == nil {
+		return nil
+	}
+	return b.repGate
+}
+
+// reputationPolicyFromConfig converts the YAML-driven
+// config.ReputationPolicyConfig into the pure reputation.Policy the Gate
+// consumes. EffectiveMode() is the single safety choke point: Mode is
+// "enforce" only on that exact literal, "shadow" for anything else
+// (including a missing/omitted block) — this function must never bypass it.
+func reputationPolicyFromConfig(cfg *config.Config) reputation.Policy {
+	if cfg == nil {
+		return reputation.DefaultPolicy()
+	}
+	rp := cfg.ReputationPolicy
+	return reputation.Policy{
+		Enabled: rp.Enabled,
+		Mode:    reputation.Mode(rp.EffectiveMode()),
+
+		AbuseIPDBCheckBeforeReport:     rp.AbuseIPDB.CheckBeforeReport,
+		AbuseIPDBMinConfidenceToReport: rp.AbuseIPDB.MinConfidenceToReport,
+		AbuseIPDBMinConfidenceToBan:    rp.AbuseIPDB.MinConfidenceToBan,
+		AbuseIPDBSuppressIfZero:        rp.AbuseIPDB.SuppressIfConfidenceZero,
+
+		VirusTotalEnabled:       rp.VirusTotal.Enabled,
+		VirusTotalSuppressClean: rp.VirusTotal.SuppressIfClean,
+	}
 }
 
 // transportAbuseChecker wraps the AbuseIPDB transport to satisfy autoban.AbuseIPDBChecker.

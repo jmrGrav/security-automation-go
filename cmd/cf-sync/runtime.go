@@ -376,7 +376,7 @@ func runCFSync(configPath, mode string, dryRun bool, format string, metricsAddr 
 		if cfg.Cloudflare.MutationsEnabled && cfg.Cloudflare.APIToken != "" {
 			cfEnforcer = cfpkg.NewClient(hc, cfg.Cloudflare.APIToken)
 		}
-		runDaemonWithLocker(ctx, logger, orch, collector, jsonlJournal, qStore, stateStore, sm, driftMem, cooldownMgr, evidenceRecorder, bundleReg, activationMgr, fedRes, admController, reportingStores.Evidence, ownershipRepo, s.GetPool(), outboxWorker, scopeDir, cfg.Interval, metricsAddr, cfg.Cloudflare.ZoneID, bundle.cfWAFService(), cursorStore, quotaRefreshers, bundle, false, cfEnforcer, cfg.Cloudflare.CleanupInterval)
+		runDaemonWithLocker(ctx, logger, orch, collector, jsonlJournal, qStore, stateStore, sm, driftMem, cooldownMgr, evidenceRecorder, bundleReg, activationMgr, fedRes, admController, reportingStores.Evidence, ownershipRepo, s.GetPool(), outboxWorker, scopeDir, cfg.Interval, metricsAddr, cfg.Cloudflare.ZoneID, bundle.cfWAFService(), cursorStore, quotaRefreshers, bundle, false, cfEnforcer, cfg.Cloudflare.CleanupInterval, cfg, trustRegistry)
 		// In ui mode the HTTP server runs in a goroutine above. If runDaemonWithLocker
 		// returns early (e.g. API token not configured) while the context is still live,
 		// keep the process alive so the UI goroutine can continue serving.
