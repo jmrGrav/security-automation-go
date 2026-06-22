@@ -417,7 +417,7 @@ func runWAFReplayIteration(ctx context.Context, logger *slog.Logger, zoneID stri
 			banEval.Log(burstDecision)
 			if burstDecision.ShouldBan && !burstDecision.Shadow {
 				if banExec == nil || banExec.ExecuteBan(ctx, burstDecision) == nil {
-					banEval.RecordBan(ip)
+					recordBanAfterExecute(ctx, banEval, banExec, ip)
 				}
 			}
 			// Evaluate confidence-100 rule (calls AbuseIPDB with 6h cache).
@@ -425,7 +425,7 @@ func runWAFReplayIteration(ctx context.Context, logger *slog.Logger, zoneID stri
 			banEval.Log(confDecision)
 			if confDecision.ShouldBan && !confDecision.Shadow {
 				if banExec == nil || banExec.ExecuteBan(ctx, confDecision) == nil {
-					banEval.RecordBan(ip)
+					recordBanAfterExecute(ctx, banEval, banExec, ip)
 				}
 			}
 		}

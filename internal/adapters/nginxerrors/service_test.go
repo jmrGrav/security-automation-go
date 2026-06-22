@@ -123,10 +123,11 @@ func TestSetMinBurstIgnoresNonPositive(t *testing.T) {
 // --- SetEnforcement tests ---
 
 type fakeBanEvaluator struct {
-	shadow    bool
-	skip      string
-	decisions []autoban.BanDecision
-	banned    []string
+	shadow     bool
+	skip       string
+	decisions  []autoban.BanDecision
+	banned     []string
+	bannedWith []time.Duration // ttl passed to each RecordBanWithDuration call
 }
 
 func (f *fakeBanEvaluator) EvaluateExternalBurst(ip, reason string) autoban.BanDecision {
@@ -144,6 +145,11 @@ func (f *fakeBanEvaluator) RecordBan(ip string) {
 	f.banned = append(f.banned, ip)
 }
 
+func (f *fakeBanEvaluator) RecordBanWithDuration(ip string, ttl time.Duration) {
+	f.banned = append(f.banned, ip)
+	f.bannedWith = append(f.bannedWith, ttl)
+}
+
 type fakeBanExecutor struct {
 	executed []string
 	err      error
@@ -156,6 +162,20 @@ func (f *fakeBanExecutor) ExecuteBan(_ context.Context, decision autoban.BanDeci
 	f.executed = append(f.executed, decision.IP)
 	return nil
 }
+
+// fakeBanExecutorWithDuration additionally implements banDurationLookup, so
+// recordBanAfterExecute can be tested taking the real-duration path rather
+// than always falling back to the fixed legacy TTL.
+type fakeBanExecutorWithDuration struct {
+	fakeBanExecutor
+	duration time.Duration
+}
+
+func (f *fakeBanExecutorWithDuration) LastBanDuration(_ context.Context, _ string) (time.Duration, bool) {
+	return f.duration, true
+}
+
+var _ banDurationLookup = (*fakeBanExecutorWithDuration)(nil)
 
 func newReportingService() *reporting.Service {
 	return reporting.New(&fakeReporter{}, &sinks.RecorderSink{}, trust.DefaultRegistry(), time.Minute)
@@ -186,6 +206,37 @@ func TestSetEnforcementBansWhenThresholdMetAndLive(t *testing.T) {
 	}
 	if len(evalr.banned) != 1 {
 		t.Fatalf("expected RecordBan to be called once, got %v", evalr.banned)
+	}
+}
+
+// TestSetEnforcementUsesRealDurationWhenExecutorSupportsLookup confirms
+// that when banExec exposes LastBanDuration (as cmd/cf-sync's cfBanExecutor
+// does via banlifecycle), the nginx-error-burst ban path records the dedup
+// guard with the REAL applied duration rather than the fixed legacy TTL —
+// this path creates real banlifecycle entries with real durations via the
+// same cfBanExecutor, so it must get the same fix as the WAF replay path.
+func TestSetEnforcementUsesRealDurationWhenExecutorSupportsLookup(t *testing.T) {
+	ip := mustAddr(t, "9.9.9.9")
+	base := time.Now().UTC()
+	events := make([]RawEvent, 0, 5)
+	for i := 0; i < 5; i++ {
+		events = append(events, RawEvent{IP: ip, Timestamp: base.Add(time.Duration(i) * time.Second), URI: "/admin", Status: 404})
+	}
+	svc := NewService(fakeErrorSource{events: events}, newReportingService())
+	svc.SetMinBurst(1)
+	evalr := &fakeBanEvaluator{shadow: false}
+	exec := &fakeBanExecutorWithDuration{duration: 1 * time.Hour}
+	svc.SetEnforcement(evalr, exec, 5)
+
+	report, err := svc.ProcessSince(context.Background(), time.Time{})
+	if err != nil {
+		t.Fatalf("ProcessSince: %v", err)
+	}
+	if report.Banned != 1 {
+		t.Fatalf("expected exactly one ban, got %+v", report)
+	}
+	if len(evalr.bannedWith) != 1 || evalr.bannedWith[0] != 1*time.Hour {
+		t.Fatalf("expected RecordBanWithDuration to be called with the real 1h duration, got %v", evalr.bannedWith)
 	}
 }
 

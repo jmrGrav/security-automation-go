@@ -55,14 +55,37 @@ type Store interface {
 // Default recidive-aware ban durations. RecidiveLevel 1 = first ban,
 // 2 = second, 3+ = third-or-more (all bans at level 3+ share the same
 // duration).
+//
+// Escalation is intentionally capped at 24h — there is no week-long (168h)
+// tier. Operator decision (2026-06): escalate starting at 1h up to a 24h
+// maximum, never beyond. The chosen curve is:
+//
+//	1st ban (level 1)   ->  1h  (DefaultFirstBanDuration)
+//	2nd ban (level 2)   ->  6h  (DefaultSecondBanDuration)
+//	3rd+ ban (level 3+) -> 24h  (DefaultThirdPlusBanDuration — hard cap)
+//
+// The 6h middle step is a deliberate, simple, monotonically increasing
+// midpoint between the 1h start and the 24h cap. The operator specified
+// only the two endpoints (1h start, 24h ceiling) and left the intermediate
+// step(s) to engineering judgement; adjust DefaultSecondBanDuration if a
+// different curve is wanted later. No duration produced by this policy may
+// ever exceed MaxBanDuration (24h).
 const (
-	DefaultFirstBanDuration  = 1 * time.Hour
-	DefaultSecondBanDuration = 24 * time.Hour
-	DefaultThirdBanDuration  = 168 * time.Hour
+	DefaultFirstBanDuration     = 1 * time.Hour
+	DefaultSecondBanDuration    = 6 * time.Hour
+	DefaultThirdPlusBanDuration = 24 * time.Hour
+
+	// MaxBanDuration is the hard ceiling enforced by DurationFor on every
+	// tier, regardless of recidive level or how DurationPolicy was
+	// constructed. This guarantees the "never exceed 24h" requirement holds
+	// even for an operator-overridden or zero-value DurationPolicy.
+	MaxBanDuration = 24 * time.Hour
 )
 
 // DurationPolicy maps a recidive level to a ban duration. It is configurable
-// so operators can override the defaults without code changes.
+// so operators can override the defaults without code changes. Regardless of
+// the values configured here, DurationFor clamps every result to
+// MaxBanDuration (24h) — see that method's doc comment.
 type DurationPolicy struct {
 	First     time.Duration
 	Second    time.Duration
@@ -70,24 +93,31 @@ type DurationPolicy struct {
 }
 
 // DefaultDurationPolicy returns the mission-mandated default durations:
-// 1st ban → 1h, 2nd → 24h, 3rd+ → 168h.
+// 1st ban → 1h, 2nd → 6h, 3rd+ → 24h (hard cap, see MaxBanDuration).
 func DefaultDurationPolicy() DurationPolicy {
 	return DurationPolicy{
 		First:     DefaultFirstBanDuration,
 		Second:    DefaultSecondBanDuration,
-		ThirdPlus: DefaultThirdBanDuration,
+		ThirdPlus: DefaultThirdPlusBanDuration,
 	}
 }
 
 // DurationFor returns the ban duration for the given recidive level.
-// Levels <= 1 use First, level 2 uses Second, level >= 3 uses ThirdPlus.
+// Levels <= 1 use First, level 2 uses Second, level >= 3 uses ThirdPlus. The
+// result is always clamped to MaxBanDuration (24h): no recidive level, and
+// no operator-configured policy, can ever produce a ban longer than 24h.
 func (p DurationPolicy) DurationFor(recidiveLevel int) time.Duration {
+	var d time.Duration
 	switch {
 	case recidiveLevel <= 1:
-		return p.First
+		d = p.First
 	case recidiveLevel == 2:
-		return p.Second
+		d = p.Second
 	default:
-		return p.ThirdPlus
+		d = p.ThirdPlus
 	}
+	if d > MaxBanDuration {
+		return MaxBanDuration
+	}
+	return d
 }
