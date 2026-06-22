@@ -299,9 +299,20 @@ func (e *Evaluator) Log(decision BanDecision) {
 	if decision.Shadow {
 		level = slog.LevelInfo
 	}
+	// local_evidence is always true here by construction, not just for this
+	// decision: every caller that can set ShouldBan=true already required a
+	// locally-observed signal before reaching this point — EvaluateConfidence
+	// checks HasLocalEvidence before consulting AbuseIPDB (confidence alone is
+	// never sufficient), EvaluateBurst's DetectBurst only fires on locally
+	// recorded malicious events, and EvaluateExternalBurst trusts a caller that
+	// has already aggregated its own local signal (e.g. HTTP-error bursts).
+	// Logged explicitly so the corroboration requirement is auditable from the
+	// log line alone, without reading the evaluator source.
 	e.logger.Log(context.Background(), level, "autoban: ban decision",
 		"ip", decision.IP,
 		"reason", decision.Reason,
+		"confidence", decision.Confidence,
+		"local_evidence", true,
 		"shadow", decision.Shadow,
 		"live_mode", e.liveMode,
 	)
