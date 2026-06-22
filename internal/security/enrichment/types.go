@@ -26,8 +26,17 @@ type Config struct {
 }
 
 type LookupOptions struct {
-	ManualForensics  bool
-	SpamhausReport   bool
+	ManualForensics bool
+	SpamhausReport  bool
+	// ReputationCheck triggers manual-mode lookup providers (AbuseIPDB,
+	// VirusTotal, ...) from the automated reputation gate
+	// (internal/security/reputation), independent of ManualForensics. This
+	// lets the gate call Check/Lookup endpoints explicitly without weakening
+	// the existing ManualForensics-only restriction used by the Forensic /
+	// Security Intelligence UI pages. ManualForensics and ReputationCheck are
+	// both "manual-mode" triggers but are kept as separate fields so the two
+	// call sites can be reasoned about (and disabled) independently.
+	ReputationCheck  bool
 	LocalSignalScore int
 }
 
