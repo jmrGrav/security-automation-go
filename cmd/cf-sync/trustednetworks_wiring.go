@@ -8,7 +8,6 @@ import (
 
 	cfpkg "github.com/jm/security-automation-go/internal/cloudflare"
 	"github.com/jm/security-automation-go/internal/config"
-	"github.com/jm/security-automation-go/internal/crowdsec"
 	"github.com/jm/security-automation-go/internal/runtime/journal"
 	runtimemodels "github.com/jm/security-automation-go/internal/runtime/models"
 	"github.com/jm/security-automation-go/internal/security/enrichment/asn"
@@ -91,6 +90,17 @@ var _ trustednetworks.AuditSink = (*trustedNetworksJournalAuditSink)(nil)
 // registry must never run against a missing source of truth — see
 // Registry.Sync's doc comment on why a load failure is a hard abort, not an
 // empty-registry no-op).
+//
+// The CrowdSec spoke is deliberately NEVER wired here (reg.CrowdSec stays
+// nil). The cf-sync daemon runs as the unprivileged security-automation
+// user and cannot read /etc/crowdsec/local_api_credentials.yaml
+// (root:root 0600), so it must never attempt to invoke cscli itself. The
+// CrowdSec spoke's reconcile now runs entirely inside the separate
+// root-owned cf-allowlist-sync helper (see cmd/cf-allowlist-sync), which
+// persists its result to SQLite via trustednetworks.CrowdSecStatusStore.
+// This registry's Sync calls only ever touch the Cloudflare spoke; CrowdSec
+// status is read independently from that persisted record (see
+// trustedNetworksView in internal/ui).
 func buildTrustedNetworksRegistry(cfg *config.Config, store trustednetworks.Store, cfEnforcer cfpkg.EnforcementClient, auditJournal journal.JournalStore, logger *slog.Logger, cache *trustednetworks.ReportCache) *trustednetworks.Registry {
 	if cfg == nil || !cfg.TrustedNetworks.Enabled || store == nil {
 		return nil
@@ -105,13 +115,6 @@ func buildTrustedNetworksRegistry(cfg *config.Config, store trustednetworks.Stor
 		Audit:  &trustedNetworksJournalAuditSink{journal: auditJournal},
 		Logger: logger,
 		Cache:  cache,
-	}
-
-	if cfg.TrustedNetworks.CrowdSec.Enabled && cfg.TrustedNetworks.CrowdSec.AllowlistName != "" {
-		if cfg.CrowdSec.DecisionsLog != "" || cfg.CrowdSec.BinPath != "" {
-			reg.CrowdSec = crowdsec.NewClientFromConfig(cfg.CrowdSec.BinPath, cfg.CrowdSec.DecisionsLog, cfg.CrowdSec.Timeout)
-			reg.CrowdSecAllowlistName = cfg.TrustedNetworks.CrowdSec.AllowlistName
-		}
 	}
 
 	if cfg.TrustedNetworks.Cloudflare.Enabled && cfEnforcer != nil {

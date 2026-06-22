@@ -170,3 +170,44 @@ func TestStartTrustedNetworksSync_NilRegistryIsNoOp(t *testing.T) {
 	// panics or hangs, the test runner will catch it.
 	startTrustedNetworksSync(ctx, discardLogger(), nil, 0)
 }
+
+// TestBuildTrustedNetworksRegistry_NeverWiresCrowdSecSpoke is the runtime
+// guard for the architectural change in this package: the cf-sync daemon
+// runs as the unprivileged security-automation user and can never read
+// /etc/crowdsec/local_api_credentials.yaml, so it must never invoke cscli
+// itself. reg.CrowdSec must always be nil regardless of config — the
+// CrowdSec spoke's reconcile now runs exclusively inside the separate
+// root-owned cf-allowlist-sync helper. This is the strong guarantee: a
+// static grep for ListAllowlist/AddAllowlistEntry call sites is brittle
+// (registry.go and internal/app legitimately reference them as the shared
+// implementation), but "who supplies the spoke" is unambiguous here.
+func TestBuildTrustedNetworksRegistry_NeverWiresCrowdSecSpoke(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.TrustedNetworks.Enabled = true
+	cfg.TrustedNetworks.Mode = "enforce"
+	cfg.TrustedNetworks.CrowdSec.Enabled = true
+	cfg.TrustedNetworks.CrowdSec.AllowlistName = "my_allowlist"
+	cfg.CrowdSec.BinPath = "cscli"
+	store := memstore.New()
+
+	reg := buildTrustedNetworksRegistry(cfg, store, nil, nil, discardLogger(), nil)
+	if reg == nil {
+		t.Fatal("expected non-nil registry under enabled config")
+	}
+	if reg.CrowdSec != nil {
+		t.Fatalf("cf-sync daemon must never wire a CrowdSec spoke (no cscli permission) — got non-nil CrowdSec spoke: %#v", reg.CrowdSec)
+	}
+	if reg.CrowdSecAllowlistName != "" {
+		t.Fatalf("expected empty CrowdSecAllowlistName on the daemon's registry, got %q", reg.CrowdSecAllowlistName)
+	}
+
+	// Sanity: Sync must therefore report the CrowdSec spoke as disabled,
+	// never silently "enabled with zero entries".
+	report, err := reg.Sync(context.Background())
+	if err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+	if report.CrowdSec.Enabled {
+		t.Fatalf("expected report.CrowdSec.Enabled=false from the daemon's own Sync pass, got %#v", report.CrowdSec)
+	}
+}
