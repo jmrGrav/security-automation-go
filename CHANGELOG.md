@@ -20,6 +20,12 @@ Two missions plus a hardening pass. Mission 1 closes the Cloudflare ban lifecycl
 
 - **#64/#65/#66/#69 — Codex audit findings** — see PR #70 for the four individual fixes, including the `/timeline` full-history recomputation on every request (#69), now cached with a bounded TTL.
 
+- **`/run/crowdsec-lua` permission denied after `www-data` group grant (PR #74)** — `cf-sync` exchanges files with the OpenResty/Lua CrowdSec bouncer via the shared `root:www-data 0775` directory `/run/crowdsec-lua`; `postinst` adds `security-automation` to the `www-data` group so `openrestyevent.LiveSource` can rename `events.jsonl`/`waf_refs.jsonl`. Linux processes keep the supplementary groups they had at `exec()` time, so a `cf-sync` instance already running when that group membership is granted or changed keeps failing with `permission denied` until restarted. Added a packaging regression test (`TestPostinst_CrowdsecLuaGroupGrant`) and documented the restart/verification steps in `docs/operations/RUNBOOK.md`.
+
+### Operational note
+
+- **Upgrades may require a service restart for group membership to take effect.** If an upgrade or manual `usermod` changes which groups `security-automation` belongs to (e.g. the `www-data` grant above), the already-running `cf-sync` process does not pick up the change automatically — run `sudo systemctl restart cf-sync` afterward. See `docs/operations/RUNBOOK.md`, "`/run/crowdsec-lua` permissions — restart required after group changes".
+
 ## [v1.7.3] — 2026-06-16
 
 ### Summary
