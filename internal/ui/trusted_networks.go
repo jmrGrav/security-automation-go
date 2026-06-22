@@ -10,6 +10,7 @@ import (
 
 	"github.com/a-h/templ"
 	"github.com/jm/security-automation-go/internal/security/enrichment/asn"
+	"github.com/jm/security-automation-go/internal/trustednetworks"
 )
 
 func (s *Server) handleTrustedNetworksPage(w http.ResponseWriter, r *http.Request) {
@@ -103,6 +104,9 @@ func TrustedNetworksPage(view TrustedNetworksView) templ.Component {
 			if _, err := fmt.Fprint(w, `<section class="stack"><div class="panel"><p class="muted">Registry data is rendered read-only from the local source of truth. Refresh, diff, and export remain dry-run or read-only only.</p><div class="stack" style="margin-top:.75rem"><a class="badge dryrun" href="/trusted-networks/refresh">Refresh source</a><a class="badge" href="/trusted-networks/diff">View diff</a><a class="badge live" href="/trusted-networks/export">Export registry</a><button type="button" disabled>Approve update</button></div></div>`); err != nil {
 				return err
 			}
+			if err := writeTrustedNetworksSyncBanner(w, view.SyncMode); err != nil {
+				return err
+			}
 			if view.Error != "" {
 				if _, err := fmt.Fprintf(w, `<div class="panel"><p class="error">%s</p></div>`, html.EscapeString(view.Error)); err != nil {
 					return err
@@ -129,6 +133,24 @@ func TrustedNetworksPage(view TrustedNetworksView) templ.Component {
 	})
 }
 
+// writeTrustedNetworksSyncBanner renders the hub-and-spoke registry's
+// current Sync mode (shadow/enforce) so operators can see at a glance
+// whether the CF/CrowdSec allowlist columns below reflect live state or
+// have never run yet.
+func writeTrustedNetworksSyncBanner(w io.Writer, syncMode string) error {
+	switch syncMode {
+	case "enforce":
+		_, err := fmt.Fprint(w, `<div class="panel"><span class="badge live">sync: enforce</span> <span class="muted" style="font-size:.85rem">CrowdSec/Cloudflare allowlist sync is actively pushing missing entries.</span></div>`)
+		return err
+	case "shadow":
+		_, err := fmt.Fprint(w, `<div class="panel"><span class="badge dryrun">sync: shadow</span> <span class="muted" style="font-size:.85rem">CrowdSec/Cloudflare allowlist sync is detect-only — no remote mutations are made.</span></div>`)
+		return err
+	default:
+		_, err := fmt.Fprint(w, `<div class="panel"><span class="badge disabled">sync: not running</span> <span class="muted" style="font-size:.85rem">The trusted-networks sync registry has not completed a pass yet (daemon not running or feature disabled).</span></div>`)
+		return err
+	}
+}
+
 func trustedNetworksPlaceholderPage(title, description, active string) templ.Component {
 	return ConsoleLayout(shellView{
 		Title:    title,
@@ -145,9 +167,12 @@ func trustedNetworksPlaceholderPage(title, description, active string) templ.Com
 }
 
 func (s *Server) trustedNetworksView() TrustedNetworksView {
+	report, hasReport := s.trustedNetworksCache.Get()
+
 	entries := asn.DefaultRegistry()
 	views := make([]TrustedNetworkEntryView, 0, len(entries))
 	for _, entry := range entries {
+		cf, cs, allowlisted := trustedNetworkSyncStatus(report, hasReport, entry.CIDRs)
 		views = append(views, TrustedNetworkEntryView{
 			Organization:        entry.Organization,
 			Kind:                string(entry.Kind),
@@ -159,12 +184,75 @@ func (s *Server) trustedNetworksView() TrustedNetworksView {
 			Notes:               trustedNetworkNotes(entry),
 			NoHardBan:           true,
 			HardBanAllowed:      false,
-			Allowlisted:         false,
-			CloudflareWhitelist: "not synced",
-			CrowdSecAllowlist:   "not synced",
+			Allowlisted:         allowlisted,
+			CloudflareWhitelist: cf,
+			CrowdSecAllowlist:   cs,
 		})
 	}
-	return TrustedNetworksView{Entries: views}
+	syncMode := ""
+	if hasReport {
+		syncMode = report.Mode
+	}
+	return TrustedNetworksView{Entries: views, SyncMode: syncMode}
+}
+
+// trustedNetworkSyncStatus derives per-organization Cloudflare/CrowdSec
+// whitelist status from the trustednetworks.Registry's most recent
+// SyncReport. cidrs with no loaded CIDRs (e.g. too-volatile entries that
+// were never seeded into the registry) always report "not seeded" since
+// they were deliberately excluded from seedTrustedNetworksFromASN.
+func trustedNetworkSyncStatus(report trustednetworks.SyncReport, hasReport bool, cidrs []string) (cloudflare, crowdsec string, allowlisted bool) {
+	if len(cidrs) == 0 {
+		return "not seeded", "not seeded", false
+	}
+	if !hasReport {
+		return "awaiting first sync", "awaiting first sync", false
+	}
+
+	cfStatus := spokeStatusForValues(report.Cloudflare, cidrs)
+	csStatus := spokeStatusForValues(report.CrowdSec, cidrs)
+	return spokeStatusLabel(cfStatus, report.Mode), spokeStatusLabel(csStatus, report.Mode), cfStatus == spokeSynced && csStatus == spokeSynced
+}
+
+type spokeSyncState int
+
+const (
+	spokeDisabled spokeSyncState = iota
+	spokePendingShadow
+	spokeSynced
+)
+
+func spokeStatusForValues(res trustednetworks.SpokeResult, cidrs []string) spokeSyncState {
+	if !res.Enabled {
+		return spokeDisabled
+	}
+	synced := make(map[string]bool, len(res.AlreadySynced)+len(res.Pushed))
+	for _, v := range res.AlreadySynced {
+		synced[v] = true
+	}
+	for _, v := range res.Pushed {
+		synced[v] = true
+	}
+	for _, cidr := range cidrs {
+		if !synced[cidr] {
+			return spokePendingShadow
+		}
+	}
+	return spokeSynced
+}
+
+func spokeStatusLabel(state spokeSyncState, mode string) string {
+	switch state {
+	case spokeSynced:
+		return "synced"
+	case spokePendingShadow:
+		if mode == "enforce" {
+			return "pending"
+		}
+		return "pending (shadow mode)"
+	default:
+		return "disabled"
+	}
 }
 
 func renderTrustedNetworkRow(w io.Writer, entry TrustedNetworkEntryView) error {

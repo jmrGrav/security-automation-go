@@ -31,6 +31,7 @@ import (
 	"github.com/jm/security-automation-go/internal/security"
 	"github.com/jm/security-automation-go/internal/security/enrichment"
 	"github.com/jm/security-automation-go/internal/services/reporting"
+	"github.com/jm/security-automation-go/internal/trustednetworks"
 )
 
 const (
@@ -64,52 +65,54 @@ type CredentialStorer interface {
 var legacySecretsDirPath = "/etc/security-automation-go/secrets"
 
 type Options struct {
-	SecretProvider      SecretProvider
-	CredentialStore     CredentialStorer
-	AuditSink           AuditSink
-	Logger              *slog.Logger
-	Enrichment          *enrichment.Service
-	EvidenceStore       reporting.EvidenceStore
-	BanLifecycleStore   banlifecycle.Store
-	AIExplain           aigateway.Gateway
-	AIExplainBuilder    func(ai.Config) aigateway.Gateway
-	AIConfig            ai.Config
-	ProviderFactories   map[string]ProviderFactory
-	SetupStore          SetupStorer
-	ValidateCloudflare  func(context.Context, string, string) error
-	ValidateAbuseIPDB   func(context.Context, string) error
-	ValidateBetterStack func(context.Context, string) error
+	SecretProvider       SecretProvider
+	CredentialStore      CredentialStorer
+	AuditSink            AuditSink
+	Logger               *slog.Logger
+	Enrichment           *enrichment.Service
+	EvidenceStore        reporting.EvidenceStore
+	BanLifecycleStore    banlifecycle.Store
+	TrustedNetworksCache *trustednetworks.ReportCache
+	AIExplain            aigateway.Gateway
+	AIExplainBuilder     func(ai.Config) aigateway.Gateway
+	AIConfig             ai.Config
+	ProviderFactories    map[string]ProviderFactory
+	SetupStore           SetupStorer
+	ValidateCloudflare   func(context.Context, string, string) error
+	ValidateAbuseIPDB    func(context.Context, string) error
+	ValidateBetterStack  func(context.Context, string) error
 }
 
 type Server struct {
-	cfg                 *config.Config
-	secretProvider      SecretProvider
-	credentialStore     CredentialStorer
-	audit               AuditSink
-	logger              *slog.Logger
-	mux                 *http.ServeMux
-	sessions            map[string]time.Time
-	mu                  sync.Mutex
-	authEpoch           atomic.Int64
-	sessionMax          int
-	lastSessionSweep    time.Time
-	sessionSweepEvery   time.Duration
-	limiter             *rateLimiter
-	aiLimiter           *rateLimiter
-	aiMu                sync.RWMutex
-	uiSecret            string
-	enrichment          *enrichment.Service
-	aiBaseConfig        ai.Config
-	aiExplain           aigateway.Gateway
-	aiConfig            ai.Config
-	aiExplainBuilder    func(ai.Config) aigateway.Gateway
-	providerFactories   map[string]ProviderFactory
-	setupStore          SetupStorer
-	evidence            reporting.EvidenceStore
-	banLifecycleStore   banlifecycle.Store
-	validateCloudflare  func(context.Context, string, string) error
-	validateAbuseIPDB   func(context.Context, string) error
-	validateBetterStack func(context.Context, string) error
+	cfg                  *config.Config
+	secretProvider       SecretProvider
+	credentialStore      CredentialStorer
+	audit                AuditSink
+	logger               *slog.Logger
+	mux                  *http.ServeMux
+	sessions             map[string]time.Time
+	mu                   sync.Mutex
+	authEpoch            atomic.Int64
+	sessionMax           int
+	lastSessionSweep     time.Time
+	sessionSweepEvery    time.Duration
+	limiter              *rateLimiter
+	aiLimiter            *rateLimiter
+	aiMu                 sync.RWMutex
+	uiSecret             string
+	enrichment           *enrichment.Service
+	aiBaseConfig         ai.Config
+	aiExplain            aigateway.Gateway
+	aiConfig             ai.Config
+	aiExplainBuilder     func(ai.Config) aigateway.Gateway
+	providerFactories    map[string]ProviderFactory
+	setupStore           SetupStorer
+	evidence             reporting.EvidenceStore
+	banLifecycleStore    banlifecycle.Store
+	trustedNetworksCache *trustednetworks.ReportCache
+	validateCloudflare   func(context.Context, string, string) error
+	validateAbuseIPDB    func(context.Context, string) error
+	validateBetterStack  func(context.Context, string) error
 }
 
 func NewServer(cfg *config.Config, opts Options) (*Server, error) {
@@ -137,28 +140,29 @@ func NewServer(cfg *config.Config, opts Options) (*Server, error) {
 	}
 	effectiveAIConfig := applyAIProviderState(opts.AIConfig, state, loaded)
 	s := &Server{
-		cfg:                 cfg,
-		secretProvider:      opts.SecretProvider,
-		credentialStore:     opts.CredentialStore,
-		audit:               opts.AuditSink,
-		logger:              opts.Logger,
-		mux:                 http.NewServeMux(),
-		sessions:            make(map[string]time.Time),
-		sessionMax:          4096,
-		sessionSweepEvery:   time.Minute,
-		limiter:             newRateLimiter(20, time.Minute),
-		uiSecret:            uiSecret,
-		enrichment:          opts.Enrichment,
-		evidence:            opts.EvidenceStore,
-		banLifecycleStore:   opts.BanLifecycleStore,
-		aiBaseConfig:        opts.AIConfig,
-		aiConfig:            effectiveAIConfig,
-		aiExplainBuilder:    opts.AIExplainBuilder,
-		providerFactories:   opts.ProviderFactories,
-		setupStore:          opts.SetupStore,
-		validateCloudflare:  opts.ValidateCloudflare,
-		validateAbuseIPDB:   opts.ValidateAbuseIPDB,
-		validateBetterStack: opts.ValidateBetterStack,
+		cfg:                  cfg,
+		secretProvider:       opts.SecretProvider,
+		credentialStore:      opts.CredentialStore,
+		audit:                opts.AuditSink,
+		logger:               opts.Logger,
+		mux:                  http.NewServeMux(),
+		sessions:             make(map[string]time.Time),
+		sessionMax:           4096,
+		sessionSweepEvery:    time.Minute,
+		limiter:              newRateLimiter(20, time.Minute),
+		uiSecret:             uiSecret,
+		enrichment:           opts.Enrichment,
+		evidence:             opts.EvidenceStore,
+		banLifecycleStore:    opts.BanLifecycleStore,
+		trustedNetworksCache: opts.TrustedNetworksCache,
+		aiBaseConfig:         opts.AIConfig,
+		aiConfig:             effectiveAIConfig,
+		aiExplainBuilder:     opts.AIExplainBuilder,
+		providerFactories:    opts.ProviderFactories,
+		setupStore:           opts.SetupStore,
+		validateCloudflare:   opts.ValidateCloudflare,
+		validateAbuseIPDB:    opts.ValidateAbuseIPDB,
+		validateBetterStack:  opts.ValidateBetterStack,
 	}
 	if s.aiConfig.MaxContextBytes <= 0 {
 		s.aiConfig.MaxContextBytes = 12_000

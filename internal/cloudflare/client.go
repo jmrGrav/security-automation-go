@@ -43,6 +43,9 @@ type EnforcementClient interface {
 	ListIPAccessRulesByNotePrefix(ctx context.Context, zoneID, prefix string) ([]models.IPAccessRule, error)
 	// AddIPAccessRule creates a block rule. target is "ip" or "ip_range".
 	AddIPAccessRule(ctx context.Context, zoneID, value, notes, target string) (string, error)
+	// AddIPAccessRuleWithMode creates a rule with an explicit mode (e.g.
+	// "whitelist" for the trusted-networks registry's Cloudflare spoke).
+	AddIPAccessRuleWithMode(ctx context.Context, zoneID, value, notes, target, mode string) (string, error)
 	// DeleteIPAccessRule removes a rule by its CF rule ID.
 	DeleteIPAccessRule(ctx context.Context, zoneID, ruleID string) error
 }
@@ -190,8 +193,20 @@ type addIPAccessRulePayload struct {
 // target is "ip" or "ip_range". Returns the new rule ID.
 // Mirrors Python's add_cf_rule().
 func (c *Client) AddIPAccessRule(ctx context.Context, zoneID, value, notes, target string) (string, error) {
+	return c.AddIPAccessRuleWithMode(ctx, zoneID, value, notes, target, "block")
+}
+
+// AddIPAccessRuleWithMode creates a Cloudflare IP access rule with an
+// explicit mode ("block", "whitelist", "challenge", "js_challenge",
+// "managed_challenge"). target is "ip" or "ip_range". Returns the new rule
+// ID. Used by both the ban-lifecycle autoban path (mode=block) and the
+// trusted-networks registry (mode=whitelist) — the two paths are kept
+// distinguishable solely via note prefix (cf-sync:autoban: vs
+// cf-sync:trusted:), never by mode alone, so cleanup/reconcile workers must
+// always filter by their own note prefix before mutating anything.
+func (c *Client) AddIPAccessRuleWithMode(ctx context.Context, zoneID, value, notes, target, mode string) (string, error) {
 	payload := addIPAccessRulePayload{
-		Mode:  "block",
+		Mode:  mode,
 		Notes: notes,
 		Configuration: models.RuleConfiguration{
 			Target: target,
@@ -200,14 +215,14 @@ func (c *Client) AddIPAccessRule(ctx context.Context, zoneID, value, notes, targ
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
-		return "", fmt.Errorf("cloudflare.Client.AddIPAccessRule: marshal: %w", err)
+		return "", fmt.Errorf("cloudflare.Client.AddIPAccessRuleWithMode: marshal: %w", err)
 	}
 	path := fmt.Sprintf("/zones/%s/firewall/access_rules/rules", zoneID)
 	rule, _, err := cftransport.MutateAndDecode[models.IPAccessRule](
 		ctx, c.t, http.MethodPost, path, bytes.NewReader(body), "",
 	)
 	if err != nil {
-		return "", fmt.Errorf("cloudflare.Client.AddIPAccessRule %s: %w", value, err)
+		return "", fmt.Errorf("cloudflare.Client.AddIPAccessRuleWithMode %s: %w", value, err)
 	}
 	return rule.ID, nil
 }

@@ -30,6 +30,9 @@ func (f *fakeEnforcementClient) ListIPAccessRulesByNotePrefix(ctx context.Contex
 func (f *fakeEnforcementClient) AddIPAccessRule(ctx context.Context, zoneID, value, notes, target string) (string, error) {
 	return f.ruleID, nil
 }
+func (f *fakeEnforcementClient) AddIPAccessRuleWithMode(ctx context.Context, zoneID, value, notes, target, mode string) (string, error) {
+	return f.ruleID, nil
+}
 func (f *fakeEnforcementClient) DeleteIPAccessRule(ctx context.Context, zoneID, ruleID string) error {
 	return nil
 }

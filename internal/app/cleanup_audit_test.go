@@ -50,6 +50,11 @@ func (f *cleanupFakeCloudflare) AddIPAccessRule(context.Context, string, string,
 	return "rule-id", nil
 }
 
+func (f *cleanupFakeCloudflare) AddIPAccessRuleWithMode(context.Context, string, string, string, string, string) (string, error) {
+	f.addCalls++
+	return "rule-id", nil
+}
+
 func (f *cleanupFakeCloudflare) DeleteIPAccessRule(_ context.Context, zoneID, ruleID string) error {
 	f.zoneIDs = append(f.zoneIDs, zoneID)
 	f.deleteCalls = append(f.deleteCalls, ruleID)
