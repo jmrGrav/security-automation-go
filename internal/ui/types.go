@@ -8,21 +8,43 @@ import (
 	"github.com/jm/security-automation-go/internal/services/reporting"
 )
 
-// CFSyncView is the view model for the /sync (Cloudflare ban sync) page.
+// CFSyncView is the view model for the /sync (CF Ban Sync) page. It reflects
+// the real enforcement engine state (cfBanExecutor + the banlifecycle
+// cleanup worker) rather than a periodic comparison cycle — bans are
+// applied immediately per-decision, there is no batch "sync cycle"
+// abstraction in this architecture.
 type CFSyncView struct {
-	HasData       bool
-	CycleAt       time.Time
-	AgreementPct  float64
-	InSync        bool
-	ToAdd         []string // IPs Go would add to CF
-	ToDelete      []string // IPs Go would remove from CF
-	ActiveBans    int
-	CFRules       int
-	CycleCount    int // total cycles in store
-	Error         string
-	NoCycleReason string // explains why HasData is false (no error)
-	MutationsOn   bool   // true when Cloudflare mutations are enabled
-	DryRun        bool   // true when CF mutations are disabled (observation-only)
+	Wired bool // false when neither store is configured (should not happen in production)
+	Error string
+
+	MutationsOn bool // true when Cloudflare mutations are enabled
+	DryRun      bool // true when CF mutations are disabled (observation-only)
+
+	ActiveBanCount     int
+	ExpirationsHandled int // count of expired_cleaned entries in lifecycle history
+
+	HasLastSuccess    bool
+	LastSuccessAt     time.Time
+	LastSuccessIP     string
+	LastSuccessAction string
+
+	HasLastFailure   bool
+	LastFailureAt    time.Time
+	LastFailureIP    string
+	LastFailureError string
+
+	Events []CFEnforcementEventView // recent history, newest first
+}
+
+// CFEnforcementEventView is one row in the /sync recent-activity table.
+type CFEnforcementEventView struct {
+	OccurredAt time.Time
+	Action     string
+	IP         string
+	Reason     string
+	Duration   time.Duration
+	Success    bool
+	Error      string
 }
 
 type ProviderView struct {

@@ -22,7 +22,7 @@ func TestNewWAFBundle_ReputationGateDefaultsToShadow(t *testing.T) {
 	trustRegistry := sectrust.DefaultRegistry()
 	logger := slog.Default()
 
-	bundle := newWAFBundle(nil, nil, nil, nil, nil, nil, trustRegistry, cfg, nil, nil, logger)
+	bundle := newWAFBundle(nil, nil, nil, nil, nil, nil, trustRegistry, cfg, nil, nil, nil, logger)
 
 	gate := bundle.reputationGateService()
 	if gate == nil {

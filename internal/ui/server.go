@@ -24,6 +24,7 @@ import (
 	ai "github.com/jm/security-automation-go/internal/ai"
 	aigateway "github.com/jm/security-automation-go/internal/ai/gateway"
 	"github.com/jm/security-automation-go/internal/cloudflare/banlifecycle"
+	"github.com/jm/security-automation-go/internal/cloudflare/enforcementlog"
 	"github.com/jm/security-automation-go/internal/config"
 	"github.com/jm/security-automation-go/internal/detect"
 	"github.com/jm/security-automation-go/internal/health"
@@ -66,14 +67,15 @@ type CredentialStorer interface {
 var legacySecretsDirPath = "/etc/security-automation-go/secrets"
 
 type Options struct {
-	SecretProvider       SecretProvider
-	CredentialStore      CredentialStorer
-	AuditSink            AuditSink
-	Logger               *slog.Logger
-	Enrichment           *enrichment.Service
-	EvidenceStore        reporting.EvidenceStore
-	BanLifecycleStore    banlifecycle.Store
-	TrustedNetworksCache *trustednetworks.ReportCache
+	SecretProvider        SecretProvider
+	CredentialStore       CredentialStorer
+	AuditSink             AuditSink
+	Logger                *slog.Logger
+	Enrichment            *enrichment.Service
+	EvidenceStore         reporting.EvidenceStore
+	BanLifecycleStore     banlifecycle.Store
+	EnforcementEventStore enforcementlog.Store
+	TrustedNetworksCache  *trustednetworks.ReportCache
 	// CrowdSecStatusStore is the read-only source for the CrowdSec spoke's
 	// status (configured/auth_ok/last_sync_at/last_error/counts), persisted
 	// by the separate root-owned cf-allowlist-sync helper. The UI never
@@ -116,6 +118,7 @@ type Server struct {
 	setupStore            SetupStorer
 	evidence              reporting.EvidenceStore
 	banLifecycleStore     banlifecycle.Store
+	enforcementEventStore enforcementlog.Store
 	trustedNetworksCache  *trustednetworks.ReportCache
 	crowdSecStatusStore   trustednetworks.CrowdSecStatusStore
 	crowdSecAllowlistName string
@@ -166,6 +169,7 @@ func NewServer(cfg *config.Config, opts Options) (*Server, error) {
 		enrichment:            opts.Enrichment,
 		evidence:              opts.EvidenceStore,
 		banLifecycleStore:     opts.BanLifecycleStore,
+		enforcementEventStore: opts.EnforcementEventStore,
 		trustedNetworksCache:  opts.TrustedNetworksCache,
 		crowdSecStatusStore:   opts.CrowdSecStatusStore,
 		crowdSecAllowlistName: opts.CrowdSecAllowlistName,

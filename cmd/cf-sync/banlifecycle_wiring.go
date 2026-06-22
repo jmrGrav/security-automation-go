@@ -9,6 +9,7 @@ import (
 	cfpkg "github.com/jm/security-automation-go/internal/cloudflare"
 	"github.com/jm/security-automation-go/internal/cloudflare/banlifecycle"
 	"github.com/jm/security-automation-go/internal/cloudflare/banlifecycle/cleanup"
+	"github.com/jm/security-automation-go/internal/cloudflare/enforcementlog"
 	"github.com/jm/security-automation-go/internal/runtime/journal"
 	runtimemodels "github.com/jm/security-automation-go/internal/runtime/models"
 	"github.com/jm/security-automation-go/internal/services/reporting"
@@ -18,7 +19,15 @@ import (
 // translating the autoban note prefix lookup into the underlying
 // cloudflare client call.
 type cfCleanupAdapter struct {
-	client cfpkg.EnforcementClient
+	client     cfpkg.EnforcementClient
+	eventStore enforcementlog.Store
+}
+
+func (a *cfCleanupAdapter) recordEnforcementEvent(ctx context.Context, ev enforcementlog.Event) {
+	if a == nil || a.eventStore == nil {
+		return
+	}
+	_ = a.eventStore.Append(ctx, ev)
 }
 
 func (a *cfCleanupAdapter) ListAutobanRules(ctx context.Context, zoneID string) ([]cleanup.CFRule, error) {
@@ -34,7 +43,18 @@ func (a *cfCleanupAdapter) ListAutobanRules(ctx context.Context, zoneID string) 
 }
 
 func (a *cfCleanupAdapter) DeleteIPAccessRule(ctx context.Context, zoneID, ruleID string) error {
-	return a.client.DeleteIPAccessRule(ctx, zoneID, ruleID)
+	start := time.Now()
+	err := a.client.DeleteIPAccessRule(ctx, zoneID, ruleID)
+	if err != nil {
+		a.recordEnforcementEvent(ctx, enforcementlog.Event{
+			Action:   enforcementlog.ActionDebanFailed,
+			RuleID:   ruleID,
+			Success:  false,
+			Error:    err.Error(),
+			Duration: time.Since(start),
+		})
+	}
+	return err
 }
 
 var _ cleanup.CFClient = (*cfCleanupAdapter)(nil)
@@ -43,10 +63,20 @@ var _ cleanup.CFClient = (*cfCleanupAdapter)(nil)
 // writing one audit.jsonl entry per deban so the action is traceable
 // alongside every other runtime audit event.
 type journalAuditSink struct {
-	journal journal.JournalStore
+	journal    journal.JournalStore
+	eventStore enforcementlog.Store
 }
 
-func (s *journalAuditSink) RecordDeban(_ context.Context, e banlifecycle.Entry, reason string) error {
+func (s *journalAuditSink) RecordDeban(ctx context.Context, e banlifecycle.Entry, reason string) error {
+	if s != nil && s.eventStore != nil {
+		_ = s.eventStore.Append(ctx, enforcementlog.Event{
+			Action:  enforcementlog.ActionBanRemoved,
+			IP:      e.IP,
+			Reason:  reason,
+			RuleID:  e.RuleID,
+			Success: true,
+		})
+	}
 	if s == nil || s.journal == nil {
 		return nil
 	}
@@ -105,7 +135,7 @@ var _ cleanup.EvidenceSink = (*reportingEvidenceSink)(nil)
 // startBanLifecycleCleanup launches the periodic Cloudflare autoban rule
 // cleanup worker. It is a no-op if store or cf is nil (e.g. SQLite or the
 // Cloudflare enforcement client is unavailable).
-func startBanLifecycleCleanup(ctx context.Context, logger *slog.Logger, store banlifecycle.Store, cf cfpkg.EnforcementClient, zoneID string, interval time.Duration, auditJournal journal.JournalStore, evidenceStore reporting.EvidenceStore) {
+func startBanLifecycleCleanup(ctx context.Context, logger *slog.Logger, store banlifecycle.Store, cf cfpkg.EnforcementClient, zoneID string, interval time.Duration, auditJournal journal.JournalStore, evidenceStore reporting.EvidenceStore, eventStore enforcementlog.Store) {
 	if store == nil || cf == nil {
 		return
 	}
@@ -117,9 +147,9 @@ func startBanLifecycleCleanup(ctx context.Context, logger *slog.Logger, store ba
 	}
 	worker := &cleanup.Worker{
 		Store:    store,
-		CF:       &cfCleanupAdapter{client: cf},
+		CF:       &cfCleanupAdapter{client: cf, eventStore: eventStore},
 		ZoneID:   zoneID,
-		Audit:    &journalAuditSink{journal: auditJournal},
+		Audit:    &journalAuditSink{journal: auditJournal, eventStore: eventStore},
 		Evidence: &reportingEvidenceSink{store: evidenceStore},
 		Logger:   logger,
 	}

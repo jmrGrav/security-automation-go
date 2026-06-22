@@ -1,192 +1,251 @@
 package ui
 
 import (
-	"encoding/json"
+	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/jm/security-automation-go/internal/shadow"
+	"github.com/jm/security-automation-go/internal/cloudflare/banlifecycle"
+	"github.com/jm/security-automation-go/internal/cloudflare/enforcementlog"
 )
 
-// writeShadowCycle writes one shadow.Cycle as a JSONL record to the state dir.
-func writeShadowCycle(t *testing.T, stateDir string, c shadow.Cycle) {
-	t.Helper()
-	store := shadow.NewStore(stateDir)
-	if err := store.Append(c); err != nil {
-		t.Fatalf("write shadow cycle: %v", err)
-	}
+type fakeEnforcementEventStore struct {
+	events      []enforcementlog.Event
+	lastSuccess enforcementlog.Event
+	hasSuccess  bool
+	lastFailure enforcementlog.Event
+	hasFailure  bool
+	err         error
 }
 
-func TestCFSyncView_NoData(t *testing.T) {
-	srv, _, _ := newTestServer(t, nil)
-	view := srv.buildCFSyncView()
-	if view.HasData {
-		t.Error("expected HasData=false when no cycles recorded")
+func (s *fakeEnforcementEventStore) Append(context.Context, enforcementlog.Event) error { return nil }
+
+func (s *fakeEnforcementEventStore) Recent(context.Context, int) ([]enforcementlog.Event, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
+	return s.events, nil
+}
+
+func (s *fakeEnforcementEventStore) LastSuccess(context.Context) (enforcementlog.Event, bool, error) {
+	return s.lastSuccess, s.hasSuccess, nil
+}
+
+func (s *fakeEnforcementEventStore) LastFailure(context.Context) (enforcementlog.Event, bool, error) {
+	return s.lastFailure, s.hasFailure, nil
+}
+
+func TestCFSyncView_NotWired(t *testing.T) {
+	s := &Server{}
+	view := s.buildCFSyncView(context.Background())
+	if view.Wired {
+		t.Error("expected Wired=false when neither store is configured")
 	}
 	if view.Error != "" {
 		t.Errorf("unexpected error: %s", view.Error)
 	}
 }
 
-func TestCFSyncView_WithData(t *testing.T) {
-	srv, _, _ := newTestServer(t, nil)
+func TestCFSyncView_NoShadowDataNoRegression(t *testing.T) {
+	// With cf-shadow fully decommissioned, the lifecycle + event stores
+	// are wired but empty (no bans yet). The page must reflect this real
+	// "no activity yet" state, not regress to "waiting forever".
+	lifecycle := &fakeBanLifecycleStore{}
+	events := &fakeEnforcementEventStore{}
+	s := &Server{banLifecycleStore: lifecycle, enforcementEventStore: events}
 
-	cycle := shadow.Cycle{
-		CycleAt:        time.Now().UTC(),
-		ActiveBanCount: 42,
-		CFRuleCount:    40,
-		PlannedAdds:    []string{"1.2.3.4", "5.6.7.8"},
-		PlannedDeletes: []string{"9.10.11.12"},
-		AgreementPct:   95.0,
-		InSync:         false,
+	view := s.buildCFSyncView(context.Background())
+	if !view.Wired {
+		t.Fatal("expected Wired=true when stores are configured, even with no data yet")
 	}
-	writeShadowCycle(t, srv.cfg.StateDir, cycle)
-
-	view := srv.buildCFSyncView()
-	if !view.HasData {
-		t.Fatal("expected HasData=true when cycle recorded")
+	if view.ActiveBanCount != 0 {
+		t.Errorf("expected ActiveBanCount=0, got %d", view.ActiveBanCount)
 	}
-	if len(view.ToAdd) != 2 {
-		t.Errorf("expected 2 ToAdd entries, got %d", len(view.ToAdd))
+	if len(view.Events) != 0 {
+		t.Errorf("expected no events, got %d", len(view.Events))
 	}
-	if len(view.ToDelete) != 1 {
-		t.Errorf("expected 1 ToDelete entry, got %d", len(view.ToDelete))
-	}
-	if view.ActiveBans != 42 {
-		t.Errorf("expected ActiveBans=42, got %d", view.ActiveBans)
-	}
-	if view.InSync {
-		t.Error("expected InSync=false")
+	if view.HasLastSuccess || view.HasLastFailure {
+		t.Error("expected no last-success/last-failure with empty store")
 	}
 }
 
-func TestCFSyncView_InSync(t *testing.T) {
-	srv, _, _ := newTestServer(t, nil)
-
-	cycle := shadow.Cycle{
-		CycleAt:        time.Now().UTC(),
-		ActiveBanCount: 10,
-		CFRuleCount:    10,
-		PlannedAdds:    nil,
-		PlannedDeletes: nil,
-		AgreementPct:   100.0,
-		InSync:         true,
+func TestCFSyncView_RealBanRecorded(t *testing.T) {
+	now := time.Now().UTC()
+	lifecycle := &fakeBanLifecycleStore{entries: []banlifecycle.Entry{
+		{IP: "203.0.113.5", Status: banlifecycle.StatusActive, CreatedAt: now, ExpiresAt: now.Add(time.Hour)},
+	}}
+	events := &fakeEnforcementEventStore{
+		events: []enforcementlog.Event{
+			{OccurredAt: now, Action: enforcementlog.ActionBanApplied, IP: "203.0.113.5", Reason: "confidence_100", Success: true, Duration: 120 * time.Millisecond},
+		},
+		lastSuccess: enforcementlog.Event{OccurredAt: now, Action: enforcementlog.ActionBanApplied, IP: "203.0.113.5"},
+		hasSuccess:  true,
 	}
-	writeShadowCycle(t, srv.cfg.StateDir, cycle)
+	s := &Server{banLifecycleStore: lifecycle, enforcementEventStore: events}
 
-	view := srv.buildCFSyncView()
-	if !view.InSync {
-		t.Error("expected InSync=true")
+	view := s.buildCFSyncView(context.Background())
+	if view.ActiveBanCount != 1 {
+		t.Errorf("expected ActiveBanCount=1, got %d", view.ActiveBanCount)
 	}
-	if len(view.ToAdd) != 0 || len(view.ToDelete) != 0 {
-		t.Errorf("expected empty add/delete lists, got add=%v delete=%v", view.ToAdd, view.ToDelete)
+	if !view.HasLastSuccess || view.LastSuccessIP != "203.0.113.5" {
+		t.Errorf("expected last success for 203.0.113.5, got %+v", view)
+	}
+	if len(view.Events) != 1 || view.Events[0].IP != "203.0.113.5" {
+		t.Errorf("expected 1 event for 203.0.113.5, got %v", view.Events)
 	}
 }
 
-func TestCFSyncView_LatestCycleReturned(t *testing.T) {
-	srv, _, _ := newTestServer(t, nil)
+func TestCFSyncView_BanExpiredAndCleaned(t *testing.T) {
+	// buildCFSyncView counts expirations from Recent (full history, all
+	// statuses), not from Active (which fakeBanLifecycleStore — like the
+	// real BanLifecycleStore.Active query — only ever contains active
+	// entries in production; the fake just returns whatever was seeded).
+	now := time.Now().UTC()
+	lifecycle := &fakeBanLifecycleStore{entries: []banlifecycle.Entry{
+		{IP: "198.51.100.9", Status: banlifecycle.StatusExpiredCleaned, CreatedAt: now.Add(-2 * time.Hour), ExpiresAt: now.Add(-time.Hour)},
+	}}
+	events := &fakeEnforcementEventStore{
+		events: []enforcementlog.Event{
+			{OccurredAt: now, Action: enforcementlog.ActionBanRemoved, IP: "198.51.100.9", Reason: "ban expired", Success: true},
+		},
+	}
+	s := &Server{banLifecycleStore: lifecycle, enforcementEventStore: events}
 
-	first := shadow.Cycle{
-		CycleAt:      time.Now().UTC().Add(-1 * time.Hour),
-		PlannedAdds:  []string{"old.ip"},
-		AgreementPct: 50.0,
+	view := s.buildCFSyncView(context.Background())
+	if view.ExpirationsHandled != 1 {
+		t.Errorf("expected ExpirationsHandled=1, got %d", view.ExpirationsHandled)
 	}
-	second := shadow.Cycle{
-		CycleAt:      time.Now().UTC(),
-		PlannedAdds:  []string{"new.ip"},
-		AgreementPct: 99.0,
-	}
-	writeShadowCycle(t, srv.cfg.StateDir, first)
-	writeShadowCycle(t, srv.cfg.StateDir, second)
-
-	view := srv.buildCFSyncView()
-	if view.CycleCount != 2 {
-		t.Errorf("expected CycleCount=2, got %d", view.CycleCount)
-	}
-	if len(view.ToAdd) != 1 || view.ToAdd[0] != "new.ip" {
-		t.Errorf("expected latest cycle ToAdd=[new.ip], got %v", view.ToAdd)
+	if len(view.Events) != 1 || view.Events[0].Action != enforcementlog.ActionBanRemoved {
+		t.Errorf("expected 1 ban_removed event, got %v", view.Events)
 	}
 }
 
-func TestCFSyncPage_RendersNoData(t *testing.T) {
-	view := CFSyncView{HasData: false}
+func TestCFSyncView_BanRemoved(t *testing.T) {
+	now := time.Now().UTC()
+	events := &fakeEnforcementEventStore{
+		events: []enforcementlog.Event{
+			{OccurredAt: now, Action: enforcementlog.ActionBanRemoved, IP: "10.0.0.5", Success: true},
+		},
+	}
+	s := &Server{banLifecycleStore: &fakeBanLifecycleStore{}, enforcementEventStore: events}
+
+	view := s.buildCFSyncView(context.Background())
+	if len(view.Events) != 1 || view.Events[0].IP != "10.0.0.5" {
+		t.Errorf("expected ban_removed event for 10.0.0.5, got %v", view.Events)
+	}
+}
+
+func TestCFSyncView_FailedEnforcementCall(t *testing.T) {
+	now := time.Now().UTC()
+	events := &fakeEnforcementEventStore{
+		lastFailure: enforcementlog.Event{OccurredAt: now, IP: "203.0.113.99", Error: "cloudflare: 500 internal error"},
+		hasFailure:  true,
+	}
+	s := &Server{banLifecycleStore: &fakeBanLifecycleStore{}, enforcementEventStore: events}
+
+	view := s.buildCFSyncView(context.Background())
+	if !view.HasLastFailure {
+		t.Fatal("expected HasLastFailure=true")
+	}
+	if view.LastFailureIP != "203.0.113.99" || view.LastFailureError == "" {
+		t.Errorf("unexpected failure view: %+v", view)
+	}
+}
+
+func TestCFSyncView_StoreError(t *testing.T) {
+	events := &fakeEnforcementEventStore{err: errors.New("db unavailable")}
+	s := &Server{banLifecycleStore: &fakeBanLifecycleStore{}, enforcementEventStore: events}
+
+	view := s.buildCFSyncView(context.Background())
+	if !view.Wired {
+		t.Fatal("expected Wired=true even on a query error")
+	}
+	if view.Error == "" {
+		t.Error("expected Error to be set when Recent fails")
+	}
+}
+
+func TestCFSyncPage_RendersNotWired(t *testing.T) {
+	view := CFSyncView{Wired: false}
 	comp := CFSyncPage(view)
 	w := httptest.NewRecorder()
-	_ = comp.Render(nil, w)
+	_ = comp.Render(context.Background(), w)
 	body := w.Body.String()
 
 	if !strings.Contains(body, "CF Ban Sync") {
 		t.Error("expected page title in body")
 	}
-	if !strings.Contains(body, "No sync cycles recorded") {
-		t.Error("expected no-data message")
+	if !strings.Contains(body, "not available") {
+		t.Error("expected not-wired message")
 	}
 }
 
-func TestCFSyncPage_RendersDriftDetected(t *testing.T) {
+func TestCFSyncPage_RendersActivity(t *testing.T) {
+	now := time.Now().UTC()
 	view := CFSyncView{
-		HasData:      true,
-		CycleAt:      time.Now().UTC(),
-		AgreementPct: 80.0,
-		InSync:       false,
-		ToAdd:        []string{"1.2.3.4"},
-		ToDelete:     []string{"9.8.7.6"},
-		ActiveBans:   20,
-		CFRules:      19,
-		CycleCount:   5,
+		Wired:          true,
+		MutationsOn:    true,
+		ActiveBanCount: 3,
+		HasLastSuccess: true,
+		LastSuccessAt:  now,
+		LastSuccessIP:  "1.2.3.4",
+		Events: []CFEnforcementEventView{
+			{OccurredAt: now, Action: enforcementlog.ActionBanApplied, IP: "1.2.3.4", Reason: "confidence_100", Success: true, Duration: 50 * time.Millisecond},
+		},
 	}
 	comp := CFSyncPage(view)
 	w := httptest.NewRecorder()
-	_ = comp.Render(nil, w)
+	_ = comp.Render(context.Background(), w)
 	body := w.Body.String()
 
-	if !strings.Contains(body, "DRIFT DETECTED") {
-		t.Error("expected DRIFT DETECTED badge")
-	}
 	if !strings.Contains(body, "1.2.3.4") {
-		t.Error("expected ToAdd IP in body")
+		t.Error("expected IP in body")
 	}
-	if !strings.Contains(body, "9.8.7.6") {
-		t.Error("expected ToDelete IP in body")
+	if !strings.Contains(body, "MUTATIONS ON") {
+		t.Error("expected mutations-on badge")
 	}
 }
 
-func TestCFSyncPage_RendersInSync(t *testing.T) {
+func TestCFSyncPage_RendersFailure(t *testing.T) {
+	now := time.Now().UTC()
 	view := CFSyncView{
-		HasData:      true,
-		CycleAt:      time.Now().UTC(),
-		AgreementPct: 100.0,
-		InSync:       true,
-		ToAdd:        nil,
-		ToDelete:     nil,
-		ActiveBans:   15,
-		CFRules:      15,
-		CycleCount:   3,
+		Wired:            true,
+		HasLastFailure:   true,
+		LastFailureAt:    now,
+		LastFailureIP:    "9.9.9.9",
+		LastFailureError: "cloudflare: rate limited",
+		Events: []CFEnforcementEventView{
+			{OccurredAt: now, Action: enforcementlog.ActionBanFailed, IP: "9.9.9.9", Success: false, Error: "cloudflare: rate limited"},
+		},
 	}
 	comp := CFSyncPage(view)
 	w := httptest.NewRecorder()
-	_ = comp.Render(nil, w)
+	_ = comp.Render(context.Background(), w)
 	body := w.Body.String()
 
-	if !strings.Contains(body, "IN SYNC") {
-		t.Error("expected IN SYNC badge")
+	if !strings.Contains(body, "9.9.9.9") {
+		t.Error("expected failed IP in body")
+	}
+	if !strings.Contains(body, "FAILED") {
+		t.Error("expected FAILED badge")
 	}
 }
 
 func TestHandleCFSyncPage_HTTPIntegration(t *testing.T) {
 	srv, _, _ := newTestServer(t, nil)
-
-	cycle := shadow.Cycle{
-		CycleAt:      time.Now().UTC(),
-		PlannedAdds:  []string{"10.0.0.1"},
-		AgreementPct: 98.0,
-		InSync:       false,
+	now := time.Now().UTC()
+	srv.banLifecycleStore = &fakeBanLifecycleStore{entries: []banlifecycle.Entry{
+		{IP: "10.0.0.1", Status: banlifecycle.StatusActive, CreatedAt: now, ExpiresAt: now.Add(time.Hour)},
+	}}
+	srv.enforcementEventStore = &fakeEnforcementEventStore{
+		events: []enforcementlog.Event{
+			{OccurredAt: now, Action: enforcementlog.ActionBanApplied, IP: "10.0.0.1", Success: true},
+		},
 	}
-	writeShadowCycle(t, srv.cfg.StateDir, cycle)
 
 	cookie := loginCookie(t, srv, "test-password-123!@#")
 	req := httptest.NewRequest(http.MethodGet, "/sync", nil)
@@ -203,48 +262,5 @@ func TestHandleCFSyncPage_HTTPIntegration(t *testing.T) {
 	}
 	if !strings.Contains(body, "10.0.0.1") {
 		t.Error("expected IP in sync page")
-	}
-}
-
-func TestCFSyncView_CorruptCycleFile(t *testing.T) {
-	srv, _, _ := newTestServer(t, nil)
-
-	// Write a corrupt JSONL file
-	path := srv.cfg.StateDir + "/shadow-cycles.jsonl"
-	if err := os.WriteFile(path, []byte("not valid json\n"), 0644); err != nil {
-		t.Fatalf("write corrupt file: %v", err)
-	}
-
-	view := srv.buildCFSyncView()
-	// Corrupt lines are skipped by the store — no data returned, no error
-	if view.Error != "" {
-		t.Errorf("unexpected error for corrupt file: %s", view.Error)
-	}
-	if view.HasData {
-		t.Error("expected HasData=false when all lines are corrupt")
-	}
-}
-
-func TestCFSyncView_MixedValidAndCorruptLines(t *testing.T) {
-	srv, _, _ := newTestServer(t, nil)
-
-	path := srv.cfg.StateDir + "/shadow-cycles.jsonl"
-	validCycle := shadow.Cycle{
-		CycleAt:      time.Now().UTC(),
-		PlannedAdds:  []string{"1.1.1.1"},
-		AgreementPct: 90.0,
-	}
-	line, _ := json.Marshal(validCycle)
-	content := "corrupt line\n" + string(line) + "\n"
-	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
-		t.Fatalf("write file: %v", err)
-	}
-
-	view := srv.buildCFSyncView()
-	if !view.HasData {
-		t.Error("expected HasData=true when at least one valid cycle exists")
-	}
-	if len(view.ToAdd) != 1 || view.ToAdd[0] != "1.1.1.1" {
-		t.Errorf("expected ToAdd=[1.1.1.1], got %v", view.ToAdd)
 	}
 }

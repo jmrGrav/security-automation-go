@@ -21,6 +21,7 @@ import (
 	aigemini "github.com/jm/security-automation-go/internal/ai/providers/gemini"
 	aiopenai "github.com/jm/security-automation-go/internal/ai/providers/openai"
 	"github.com/jm/security-automation-go/internal/cloudflare/banlifecycle"
+	"github.com/jm/security-automation-go/internal/cloudflare/enforcementlog"
 	"github.com/jm/security-automation-go/internal/config"
 	"github.com/jm/security-automation-go/internal/httpclient"
 	"github.com/jm/security-automation-go/internal/runtime/lock"
@@ -37,10 +38,10 @@ import (
 )
 
 func runUI(ctx context.Context, logger *slog.Logger, cfg *config.Config) error {
-	return runUIWithLocker(ctx, logger, cfg, true, nil, nil, nil, nil)
+	return runUIWithLocker(ctx, logger, cfg, true, nil, nil, nil, nil, nil)
 }
 
-func runUIWithLocker(ctx context.Context, logger *slog.Logger, cfg *config.Config, acquireLock bool, evidenceHolder *lazyEvidenceStore, sharedDB *sqlite.DB, trustedNetworksCache *trustednetworks.ReportCache, banLifecycleHolder *lazyBanLifecycleStore) error {
+func runUIWithLocker(ctx context.Context, logger *slog.Logger, cfg *config.Config, acquireLock bool, evidenceHolder *lazyEvidenceStore, sharedDB *sqlite.DB, trustedNetworksCache *trustednetworks.ReportCache, banLifecycleHolder *lazyBanLifecycleStore, enforcementEventHolder *lazyEnforcementEventStore) error {
 	if !cfg.UI.Enabled {
 		return errors.New("ui mode requires UI_ENABLED=1 or ui.enabled=true")
 	}
@@ -176,17 +177,24 @@ func runUIWithLocker(ctx context.Context, logger *slog.Logger, cfg *config.Confi
 	} else {
 		banLifecycleStore = sqlite.NewBanLifecycleStore(setupDB)
 	}
+	var enforcementEventStore enforcementlog.Store
+	if enforcementEventHolder != nil {
+		enforcementEventStore = enforcementEventHolder
+	} else {
+		enforcementEventStore = sqlite.NewEnforcementEventStore(setupDB)
+	}
 
 	server, err := ui.NewServer(cfg, ui.Options{
-		SetupStore:           setupStore,
-		CredentialStore:      credentialStore,
-		SecretProvider:       ui.NewFileSecretProvider(cfg.UI.SecretFile),
-		AuditSink:            auditSink,
-		Logger:               logger,
-		EvidenceStore:        evidenceStore,
-		BanLifecycleStore:    banLifecycleStore,
-		TrustedNetworksCache: trustedNetworksCache,
-		ValidateAbuseIPDB:    ui.ValidateAbuseIPDB,
+		SetupStore:            setupStore,
+		CredentialStore:       credentialStore,
+		SecretProvider:        ui.NewFileSecretProvider(cfg.UI.SecretFile),
+		AuditSink:             auditSink,
+		Logger:                logger,
+		EvidenceStore:         evidenceStore,
+		BanLifecycleStore:     banLifecycleStore,
+		EnforcementEventStore: enforcementEventStore,
+		TrustedNetworksCache:  trustedNetworksCache,
+		ValidateAbuseIPDB:     ui.ValidateAbuseIPDB,
 		AIExplainBuilder: func(effective ai.Config) aigateway.Gateway {
 			opts := []aigateway.ServiceOption{
 				aigateway.WithEvidenceReader(evidenceStore),

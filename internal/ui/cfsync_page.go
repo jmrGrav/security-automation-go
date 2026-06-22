@@ -9,46 +9,75 @@ import (
 	"time"
 
 	"github.com/a-h/templ"
-	"github.com/jm/security-automation-go/internal/shadow"
 )
 
-func (s *Server) buildCFSyncView() CFSyncView {
+// buildCFSyncView reads the real enforcement state (cfBanExecutor's
+// enforcement event log, plus the banlifecycle store for active-ban and
+// expiration counts) rather than a periodic shadow-comparison cycle: bans
+// are applied immediately per-decision in this architecture, there is no
+// batch "sync cycle" to report on.
+func (s *Server) buildCFSyncView(ctx context.Context) CFSyncView {
 	mutationsOn := s.cfg != nil && s.cfg.Cloudflare.MutationsEnabled
 	dryRun := !mutationsOn
-	store := shadow.NewStore(s.cfg.StateDir)
-	all, err := store.ReadAll()
-	if err != nil {
-		return CFSyncView{Error: err.Error(), MutationsOn: mutationsOn, DryRun: dryRun}
+	view := CFSyncView{MutationsOn: mutationsOn, DryRun: dryRun}
+
+	if s.banLifecycleStore == nil && s.enforcementEventStore == nil {
+		view.Wired = false
+		return view
 	}
-	if len(all) == 0 {
-		reason := "No sync cycles recorded yet."
-		if dryRun {
-			reason = "Running in dry-run mode (Cloudflare mutations disabled). The daemon observes bans but does not write to Cloudflare. Enable cloudflare.mutations_enabled to activate enforcement."
-		} else if s.cfg != nil && s.cfg.CrowdSec.DecisionsLog == "" {
-			reason = "No CrowdSec decisions source configured. Set crowdsec.decisions_log to enable ban sync."
+	view.Wired = true
+
+	if s.banLifecycleStore != nil {
+		if active, err := s.banLifecycleStore.Active(ctx); err != nil {
+			view.Error = err.Error()
 		} else {
-			reason = "Waiting for first enforcement cycle. The daemon will record sync plans here once it processes active CrowdSec bans."
+			view.ActiveBanCount = len(active)
 		}
-		return CFSyncView{CycleCount: 0, NoCycleReason: reason, MutationsOn: mutationsOn, DryRun: dryRun}
+		if recent, err := s.banLifecycleStore.Recent(ctx, 500); err == nil {
+			for _, e := range recent {
+				if e.Status == "expired_cleaned" {
+					view.ExpirationsHandled++
+				}
+			}
+		}
 	}
-	latest := all[len(all)-1]
-	return CFSyncView{
-		HasData:      true,
-		CycleAt:      latest.CycleAt,
-		AgreementPct: latest.AgreementPct,
-		InSync:       latest.InSync,
-		ToAdd:        latest.PlannedAdds,
-		ToDelete:     latest.PlannedDeletes,
-		ActiveBans:   latest.ActiveBanCount,
-		CFRules:      latest.CFRuleCount,
-		CycleCount:   len(all),
-		MutationsOn:  mutationsOn,
-		DryRun:       dryRun,
+
+	if s.enforcementEventStore != nil {
+		if e, ok, err := s.enforcementEventStore.LastSuccess(ctx); err == nil && ok {
+			view.HasLastSuccess = true
+			view.LastSuccessAt = e.OccurredAt
+			view.LastSuccessIP = e.IP
+			view.LastSuccessAction = e.Action
+		}
+		if e, ok, err := s.enforcementEventStore.LastFailure(ctx); err == nil && ok {
+			view.HasLastFailure = true
+			view.LastFailureAt = e.OccurredAt
+			view.LastFailureIP = e.IP
+			view.LastFailureError = e.Error
+		}
+		if events, err := s.enforcementEventStore.Recent(ctx, 50); err == nil {
+			view.Events = make([]CFEnforcementEventView, 0, len(events))
+			for _, e := range events {
+				view.Events = append(view.Events, CFEnforcementEventView{
+					OccurredAt: e.OccurredAt,
+					Action:     e.Action,
+					IP:         e.IP,
+					Reason:     e.Reason,
+					Duration:   e.Duration,
+					Success:    e.Success,
+					Error:      e.Error,
+				})
+			}
+		} else if view.Error == "" {
+			view.Error = err.Error()
+		}
 	}
+
+	return view
 }
 
 func (s *Server) handleCFSyncPage(w http.ResponseWriter, r *http.Request) {
-	view := s.buildCFSyncView()
+	view := s.buildCFSyncView(r.Context())
 	_ = CFSyncPage(view).Render(r.Context(), w)
 }
 
@@ -57,7 +86,7 @@ func CFSyncPage(view CFSyncView) templ.Component {
 	return ConsoleLayout(shellView{
 		Title:    "CF Ban Sync",
 		Headline: "Cloudflare Ban Sync",
-		Subtitle: "Latest computed sync plan: IPs to add/remove in the next enforcement cycle.",
+		Subtitle: "Real-time Cloudflare enforcement state: bans are applied immediately per CrowdSec/autoban decision, not on a batch cycle.",
 		Active:   "/sync",
 		Body: templ.ComponentFunc(func(ctx context.Context, w io.Writer) error {
 			return renderCFSyncBody(w, view)
@@ -68,115 +97,121 @@ func CFSyncPage(view CFSyncView) templ.Component {
 func renderCFSyncBody(w io.Writer, view CFSyncView) error {
 	if view.Error != "" {
 		_, err := fmt.Fprintf(w,
-			`<div class="panel"><p class="error">Error loading sync data: %s</p></div>`,
+			`<div class="panel"><p class="error">Error loading enforcement data: %s</p></div>`,
 			html.EscapeString(view.Error),
 		)
 		return err
 	}
 
-	if !view.HasData {
-		badge := ""
-		if view.DryRun {
-			badge = `<span class="badge warning" style="margin-bottom:.5rem">DRY-RUN</span> `
-		}
-		msg := html.EscapeString(view.NoCycleReason)
-		if msg == "" {
-			msg = "No sync cycles recorded yet."
-		}
-		_, err := fmt.Fprintf(w,
-			`<div class="panel">%s<p class="muted">%s</p></div>`,
-			badge, msg,
+	if !view.Wired {
+		_, err := fmt.Fprint(w,
+			`<div class="panel"><p class="muted">Enforcement state is not available — neither the ban lifecycle store nor the enforcement event log is configured for this process.</p></div>`,
 		)
 		return err
 	}
 
-	syncBadge := `<span class="badge healthy">IN SYNC</span>`
-	if !view.InSync {
-		syncBadge = `<span class="badge error">DRIFT DETECTED</span>`
-	}
 	modeBadge := `<span class="badge healthy">MUTATIONS ON</span>`
 	if view.DryRun {
 		modeBadge = `<span class="badge warning">DRY-RUN</span>`
 	}
 
-	age := time.Since(view.CycleAt).Truncate(time.Second)
-	if _, err := fmt.Fprintf(w,
-		`<div class="panel"><h2>Last Cycle Summary</h2>`+
-			`<div class="badges" style="margin-bottom:.75rem">%s %s</div>`+
-			`<div class="kv">`+
-			`<div class="row"><span>Last cycle</span><span>%s (%s ago)</span></div>`+
-			`<div class="row"><span>Agreement</span><span>%.2f%%</span></div>`+
-			`<div class="row"><span>Active CrowdSec bans</span><span>%d</span></div>`+
-			`<div class="row"><span>Cloudflare rules (watched tag)</span><span>%d</span></div>`+
-			`<div class="row"><span>Total cycles recorded</span><span>%d</span></div>`+
-			`</div></div>`,
-		syncBadge,
-		modeBadge,
-		html.EscapeString(view.CycleAt.UTC().Format(time.RFC3339)),
-		html.EscapeString(age.String()),
-		view.AgreementPct,
-		view.ActiveBans,
-		view.CFRules,
-		view.CycleCount,
-	); err != nil {
+	if err := renderCFSyncSummary(w, view, modeBadge); err != nil {
 		return err
 	}
-
-	if err := renderSyncIPList(w, "To Add", "IPs Go would add to Cloudflare (active bans not yet in CF)", view.ToAdd, "healthy"); err != nil {
+	if err := renderCFSyncLastActivity(w, view); err != nil {
 		return err
 	}
-	return renderSyncIPList(w, "To Delete", "IPs Go would remove from Cloudflare (CF rules with no active ban)", view.ToDelete, "error")
+	return renderCFSyncHistory(w, view)
 }
 
-func renderSyncIPList(w io.Writer, title, desc string, ips []string, badgeClass string) error {
-	count := len(ips)
-	countBadge := fmt.Sprintf(`<span class="badge %s">%d</span>`, badgeClass, count)
-	if count == 0 {
-		countBadge = `<span class="badge">0</span>`
+func renderCFSyncSummary(w io.Writer, view CFSyncView, modeBadge string) error {
+	_, err := fmt.Fprintf(w,
+		`<div class="panel"><h2>Current Cloudflare Enforcement State</h2>`+
+			`<div class="badges" style="margin-bottom:.75rem">%s</div>`+
+			`<div class="kv">`+
+			`<div class="row"><span>Active bans</span><span>%d</span></div>`+
+			`<div class="row"><span>Expirations processed</span><span>%d</span></div>`+
+			`</div></div>`,
+		modeBadge,
+		view.ActiveBanCount,
+		view.ExpirationsHandled,
+	)
+	return err
+}
+
+func renderCFSyncLastActivity(w io.Writer, view CFSyncView) error {
+	successRow := `<div class="row"><span>Last successful CF call</span><span class="muted">None recorded yet.</span></div>`
+	if view.HasLastSuccess {
+		age := time.Since(view.LastSuccessAt).Truncate(time.Second)
+		successRow = fmt.Sprintf(
+			`<div class="row"><span>Last successful CF call</span><span>%s (%s ago) — %s %s</span></div>`,
+			html.EscapeString(view.LastSuccessAt.UTC().Format(time.RFC3339)),
+			html.EscapeString(age.String()),
+			html.EscapeString(view.LastSuccessAction),
+			html.EscapeString(view.LastSuccessIP),
+		)
 	}
 
+	failureRow := `<div class="row"><span>Last failed CF call</span><span class="muted">None recorded.</span></div>`
+	if view.HasLastFailure {
+		age := time.Since(view.LastFailureAt).Truncate(time.Second)
+		failureRow = fmt.Sprintf(
+			`<div class="row"><span>Last failed CF call</span><span class="error">%s (%s ago) — %s: %s</span></div>`,
+			html.EscapeString(view.LastFailureAt.UTC().Format(time.RFC3339)),
+			html.EscapeString(age.String()),
+			html.EscapeString(view.LastFailureIP),
+			html.EscapeString(view.LastFailureError),
+		)
+	}
+
+	_, err := fmt.Fprintf(w,
+		`<div class="panel"><h2>Last Enforcement Activity</h2><div class="kv">%s%s</div></div>`,
+		successRow, failureRow,
+	)
+	return err
+}
+
+func renderCFSyncHistory(w io.Writer, view CFSyncView) error {
+	count := len(view.Events)
+	countBadge := fmt.Sprintf(`<span class="badge">%d</span>`, count)
+
 	if _, err := fmt.Fprintf(w,
-		`<div class="panel"><h2>%s %s</h2><p class="muted">%s</p>`,
-		html.EscapeString(title), countBadge, html.EscapeString(desc),
+		`<div class="panel"><h2>Recent Enforcement Events %s</h2><p class="muted">Most recent ban/deban attempts against Cloudflare, newest first.</p>`,
+		countBadge,
 	); err != nil {
 		return err
 	}
 
 	if count == 0 {
-		if _, err := fmt.Fprint(w, `<p class="muted">None.</p>`); err != nil {
-			return err
+		_, err := fmt.Fprint(w, `<p class="muted">No enforcement events recorded yet.</p></div>`)
+		return err
+	}
+
+	if _, err := fmt.Fprint(w, `<table class="data-table"><thead><tr>`+
+		`<th>Time</th><th>Action</th><th>IP</th><th>Reason</th><th>Duration</th><th>Result</th>`+
+		`</tr></thead><tbody>`); err != nil {
+		return err
+	}
+	for _, e := range view.Events {
+		resultBadge := `<span class="badge healthy">OK</span>`
+		errCell := ""
+		if !e.Success {
+			resultBadge = `<span class="badge error">FAILED</span>`
+			errCell = fmt.Sprintf(`<div class="muted">%s</div>`, html.EscapeString(e.Error))
 		}
-	} else {
-		if _, err := fmt.Fprint(w, `<div class="kv">`); err != nil {
-			return err
-		}
-		display := ips
-		truncated := false
-		if len(display) > 200 {
-			display = display[:200]
-			truncated = true
-		}
-		for _, ip := range display {
-			if _, err := fmt.Fprintf(w,
-				`<div class="row"><span><code>%s</code></span></div>`,
-				html.EscapeString(ip),
-			); err != nil {
-				return err
-			}
-		}
-		if truncated {
-			if _, err := fmt.Fprintf(w,
-				`<div class="row"><span class="muted">… and %d more (showing first 200)</span></div>`,
-				len(ips)-200,
-			); err != nil {
-				return err
-			}
-		}
-		if _, err := fmt.Fprint(w, `</div>`); err != nil {
+		if _, err := fmt.Fprintf(w,
+			`<tr><td>%s</td><td>%s</td><td><code>%s</code></td><td>%s</td><td>%s</td><td>%s%s</td></tr>`,
+			html.EscapeString(e.OccurredAt.UTC().Format(time.RFC3339)),
+			html.EscapeString(e.Action),
+			html.EscapeString(e.IP),
+			html.EscapeString(e.Reason),
+			html.EscapeString(e.Duration.Truncate(time.Millisecond).String()),
+			resultBadge,
+			errCell,
+		); err != nil {
 			return err
 		}
 	}
-
-	_, err := fmt.Fprint(w, `</div>`)
+	_, err := fmt.Fprint(w, `</tbody></table></div>`)
 	return err
 }

@@ -517,7 +517,7 @@ func runDaemonWithLocker(ctx context.Context, logger *slog.Logger, orch *pipelin
 	defer cancel()
 	startWAFReplayPoller(childCtx, logger, interval, zoneID, wafReplay, cursorStore, bundle.banEvalService(), bundle.banExecutorService())
 	startCrowdSecOpenRestyPoller(childCtx, logger, interval, bundle, cursorStore)
-	startBanLifecycleCleanup(childCtx, logger, bundle.banLifecycleStoreService(), cfEnforcer, zoneID, banLifecycleCleanupInterval, j, evidence)
+	startBanLifecycleCleanup(childCtx, logger, bundle.banLifecycleStoreService(), cfEnforcer, zoneID, banLifecycleCleanupInterval, j, evidence, bundle.enforcementEventStoreService())
 	startAutoDeban(childCtx, logger, cfg, bundle.reputationGateService(), bundle.banLifecycleStoreService(), cfEnforcer, zoneID, evidence, j, trustReg)
 	startTrustedNetworksSync(childCtx, logger, trustedNetworksReg, cfg.TrustedNetworks.SyncInterval)
 	if quotaRefreshers != nil {

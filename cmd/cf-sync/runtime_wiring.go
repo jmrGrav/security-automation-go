@@ -22,6 +22,7 @@ import (
 	cfpkg "github.com/jm/security-automation-go/internal/cloudflare"
 	"github.com/jm/security-automation-go/internal/cloudflare/banlifecycle"
 	"github.com/jm/security-automation-go/internal/cloudflare/client"
+	"github.com/jm/security-automation-go/internal/cloudflare/enforcementlog"
 	"github.com/jm/security-automation-go/internal/cloudflare/models"
 	"github.com/jm/security-automation-go/internal/config"
 	"github.com/jm/security-automation-go/internal/execution"
@@ -108,6 +109,12 @@ type wafBundle struct {
 	// worker against the same store the ban executor writes to.
 	banLifecycleStore banlifecycle.Store
 
+	// enforcementEventStore is exposed so the daemon can wire the same
+	// event log the ban executor writes to into the cleanup worker's
+	// audit/CF-client adapters, giving /sync a single real-time stream of
+	// every ban/deban attempt (success and failure).
+	enforcementEventStore enforcementlog.Store
+
 	// repGate is exposed so the daemon can also wire it into the autodeban
 	// scanner (it must be the SAME gate instance svc/banEval consult, so
 	// shadow/enforce mode and provider signals stay consistent everywhere).
@@ -119,7 +126,7 @@ type wafBundle struct {
 // and retested without restarting the binary. lifecycleStore may be nil when
 // SQLite is unavailable; ban creation still works but autoban rules will
 // never be auto-expired in that degraded mode.
-func newWAFBundle(cf *client.Client, abuse *abuseipdb.Client, hc httpclient.Client, creds credentialLooker, stateStore providerstate.Store, telemetry sinks.Sink, trustRegistry *sectrust.Registry, cfg *config.Config, stores *sqlite.ReportingStores, lifecycleStore banlifecycle.Store, logger *slog.Logger) *wafBundle {
+func newWAFBundle(cf *client.Client, abuse *abuseipdb.Client, hc httpclient.Client, creds credentialLooker, stateStore providerstate.Store, telemetry sinks.Sink, trustRegistry *sectrust.Registry, cfg *config.Config, stores *sqlite.ReportingStores, lifecycleStore banlifecycle.Store, eventStore enforcementlog.Store, logger *slog.Logger) *wafBundle {
 	reportExecutor := newRuntimeAbuseExecutor(hc, creds, stateStore, cfg != nil && cfg.AbuseIPDB.Enabled, abuse)
 	svc := reporting.New(reportExecutor, telemetry, trustRegistry, cfg.AbuseIPDB.CacheTTL)
 	if stores != nil {
@@ -170,21 +177,23 @@ func newWAFBundle(cf *client.Client, abuse *abuseipdb.Client, hc httpclient.Clie
 			zoneID:         cfg.Cloudflare.ZoneID,
 			logger:         logger,
 			lifecycleStore: lifecycleStore,
+			eventStore:     eventStore,
 			durations:      banlifecycle.DefaultDurationPolicy(),
 		}
 	}
 	bundle := &wafBundle{
-		cfWAF:             cloudflareevent.NewService(cf, svc),
-		csSource:          crowdsecevent.NewLiveSource(cfg.CrowdSec.DecisionsLog, cfg.CrowdSec.NginxLogDir, 24*time.Hour),
-		cs:                crowdsecevent.NewService(svc),
-		orSource:          openrestyevent.NewLiveSource(cfg.OpenResty.EventsFile),
-		or:                openrestyevent.NewService(svc),
-		wrSource:          wafref.NewLiveSource(cfg.OpenResty.WAFRefsFile),
-		wr:                wafref.NewService(svc),
-		banEval:           banEval,
-		banExec:           banExec,
-		banLifecycleStore: lifecycleStore,
-		repGate:           repGate,
+		cfWAF:                 cloudflareevent.NewService(cf, svc),
+		csSource:              crowdsecevent.NewLiveSource(cfg.CrowdSec.DecisionsLog, cfg.CrowdSec.NginxLogDir, 24*time.Hour),
+		cs:                    crowdsecevent.NewService(svc),
+		orSource:              openrestyevent.NewLiveSource(cfg.OpenResty.EventsFile),
+		or:                    openrestyevent.NewService(svc),
+		wrSource:              wafref.NewLiveSource(cfg.OpenResty.WAFRefsFile),
+		wr:                    wafref.NewService(svc),
+		banEval:               banEval,
+		banExec:               banExec,
+		banLifecycleStore:     lifecycleStore,
+		enforcementEventStore: eventStore,
+		repGate:               repGate,
 	}
 	if cfg.HTTPErrorIntel.Enabled {
 		erSource := nginxerrors.NewLiveSource(cfg.CrowdSec.NginxLogDir)
@@ -306,6 +315,15 @@ func (b *wafBundle) banLifecycleStoreService() banlifecycle.Store {
 	return b.banLifecycleStore
 }
 
+// enforcementEventStoreService returns the Cloudflare enforcement event log,
+// or nil when the bundle is nil.
+func (b *wafBundle) enforcementEventStoreService() enforcementlog.Store {
+	if b == nil {
+		return nil
+	}
+	return b.enforcementEventStore
+}
+
 // reputationGateService returns the shared reputation gate, or nil when the
 // bundle itself is nil.
 func (b *wafBundle) reputationGateService() *reputation.Gate {
@@ -391,8 +409,21 @@ type cfBanExecutor struct {
 	zoneID         string
 	logger         *slog.Logger
 	lifecycleStore banlifecycle.Store
+	eventStore     enforcementlog.Store
 	durations      banlifecycle.DurationPolicy
 	now            func() time.Time
+}
+
+// recordEnforcementEvent is a best-effort write to eventStore: a failure to
+// log must never fail or alter the outcome of ExecuteBan itself, mirroring
+// how lifecycleStore.Upsert errors are only logged, never propagated.
+func (e *cfBanExecutor) recordEnforcementEvent(ctx context.Context, ev enforcementlog.Event) {
+	if e == nil || e.eventStore == nil {
+		return
+	}
+	if err := e.eventStore.Append(ctx, ev); err != nil && e.logger != nil {
+		e.logger.Warn("autoban: enforcement event log append failed", "ip", ev.IP, "action", ev.Action, "error", err)
+	}
 }
 
 func (e *cfBanExecutor) ExecuteBan(ctx context.Context, decision autoban.BanDecision) error {
@@ -403,7 +434,8 @@ func (e *cfBanExecutor) ExecuteBan(ctx context.Context, decision autoban.BanDeci
 	if e.now != nil {
 		now = e.now
 	}
-	createdAt := now().UTC()
+	callStart := now()
+	createdAt := callStart.UTC()
 
 	recidiveLevel := 1
 	if e.lifecycleStore != nil {
@@ -427,6 +459,15 @@ func (e *cfBanExecutor) ExecuteBan(ctx context.Context, decision autoban.BanDeci
 			if e.logger != nil {
 				e.logger.Error("autoban: CF ban failed", "ip", decision.IP, "reason", decision.Reason, "error", err)
 			}
+			e.recordEnforcementEvent(ctx, enforcementlog.Event{
+				OccurredAt: createdAt,
+				Action:     enforcementlog.ActionBanFailed,
+				IP:         decision.IP,
+				Reason:     decision.Reason,
+				Success:    false,
+				Error:      err.Error(),
+				Duration:   now().Sub(callStart),
+			})
 			return err
 		}
 		// Cloudflare already has a live rule for this IP (error code 10009,
@@ -493,6 +534,15 @@ func (e *cfBanExecutor) ExecuteBan(ctx context.Context, decision autoban.BanDeci
 			e.logger.Warn("autoban: ban lifecycle store upsert failed", "ip", decision.IP, "error", err)
 		}
 	}
+	e.recordEnforcementEvent(ctx, enforcementlog.Event{
+		OccurredAt: createdAt,
+		Action:     enforcementlog.ActionBanApplied,
+		IP:         decision.IP,
+		Reason:     decision.Reason,
+		RuleID:     id,
+		Success:    true,
+		Duration:   now().Sub(callStart),
+	})
 	return nil
 }
 

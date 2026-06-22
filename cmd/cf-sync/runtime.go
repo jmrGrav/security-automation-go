@@ -155,6 +155,9 @@ func runCFSync(configPath, mode string, dryRun bool, format string, metricsAddr 
 	// before scope resolution, so it must hold this indirection rather than
 	// a *sqlite.BanLifecycleStore bound to the unscoped bootstrapDB.
 	banLifecycleHolder := &lazyBanLifecycleStore{}
+	// enforcementEventHolder mirrors banLifecycleHolder for the same reason:
+	// the UI goroutine starts before the scoped runtime DB is opened.
+	enforcementEventHolder := &lazyEnforcementEventStore{}
 	// trustedNetworksCache is created here (before the UI goroutine starts)
 	// and shared with the daemon's sync loop below, so the UI can render the
 	// most recent SyncReport even though the registry itself is built later
@@ -163,7 +166,7 @@ func runCFSync(configPath, mode string, dryRun bool, format string, metricsAddr 
 	if cfg.UI.Enabled {
 		uiCfg := *cfg // snapshot: runUIWithLocker writes its own credential fields; avoid race with writes below
 		go func() {
-			if err := runUIWithLocker(ctx, logger, &uiCfg, false, evidenceHolder, bootstrapDB, trustedNetworksCache, banLifecycleHolder); err != nil {
+			if err := runUIWithLocker(ctx, logger, &uiCfg, false, evidenceHolder, bootstrapDB, trustedNetworksCache, banLifecycleHolder, enforcementEventHolder); err != nil {
 				logger.Error("UI server failed", "error", err)
 			}
 		}()
@@ -386,7 +389,9 @@ func runCFSync(configPath, mode string, dryRun bool, format string, metricsAddr 
 	if mode == "daemon" || mode == "ui" {
 		banLifecycleStore := sqlite.NewBanLifecycleStore(sqliteDB)
 		banLifecycleHolder.set(banLifecycleStore)
-		bundle := newWAFBundle(cf, abuse, hc, credentialStore, setupStore, securityTelemetry, trustRegistry, cfg, reportingStores, banLifecycleStore, logger)
+		enforcementEventStore := sqlite.NewEnforcementEventStore(sqliteDB)
+		enforcementEventHolder.set(enforcementEventStore)
+		bundle := newWAFBundle(cf, abuse, hc, credentialStore, setupStore, securityTelemetry, trustRegistry, cfg, reportingStores, banLifecycleStore, enforcementEventStore, logger)
 		var cfEnforcer cfpkg.EnforcementClient
 		if cfg.Cloudflare.MutationsEnabled && cfg.Cloudflare.APIToken != "" {
 			cfEnforcer = cfpkg.NewClient(hc, cfg.Cloudflare.APIToken)

@@ -47,6 +47,7 @@ var knownTables = map[string]struct{}{
 	"cf_ban_lifecycle":             {},
 	"trusted_networks":             {},
 	"crowdsec_allowlist_status":    {},
+	"cf_enforcement_events":        {},
 }
 
 // DB manages a scoped SQLite connection with migrations.
@@ -479,6 +480,27 @@ func (s *DB) runMigrations() error {
 						mode TEXT NOT NULL DEFAULT '',
 						updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 					);
+				`,
+		},
+		{
+			Version:     21,
+			Description: "Cloudflare enforcement event log (real ban/deban attempts, success and failure)",
+			SQL: `
+					CREATE TABLE IF NOT EXISTS cf_enforcement_events (
+						id INTEGER PRIMARY KEY AUTOINCREMENT,
+						occurred_at TIMESTAMP NOT NULL,
+						action TEXT NOT NULL,
+						ip TEXT NOT NULL DEFAULT '',
+						reason TEXT NOT NULL DEFAULT '',
+						rule_id TEXT NOT NULL DEFAULT '',
+						success INTEGER NOT NULL DEFAULT 0,
+						error TEXT NOT NULL DEFAULT '',
+						duration_ns INTEGER NOT NULL DEFAULT 0
+					);
+					CREATE INDEX IF NOT EXISTS idx_cf_enforcement_events_occurred_at
+					ON cf_enforcement_events(occurred_at DESC, id DESC);
+					CREATE INDEX IF NOT EXISTS idx_cf_enforcement_events_success
+					ON cf_enforcement_events(success, occurred_at DESC);
 				`,
 		},
 	}
