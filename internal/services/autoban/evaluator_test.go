@@ -1,9 +1,12 @@
 package autoban_test
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"log/slog"
 	"net/netip"
+	"strings"
 	"testing"
 	"time"
 
@@ -95,6 +98,33 @@ func TestConfidence100_NoLocalEvidence_Noban(t *testing.T) {
 	}
 	if fe.callCount != 0 {
 		t.Errorf("expected AbuseIPDB Enrich not called, got callCount=%d", fe.callCount)
+	}
+}
+
+// TestLog_BanDecision_SurfacesCorroboration guards against an operator-facing
+// regression: the "autoban: ban decision" log line must surface the
+// confidence score and local-evidence corroboration explicitly, so an auditor
+// can confirm from the log alone that confidence=100 was never sufficient by
+// itself (see internal/services/autoban/evaluator.go's package doc and
+// EvaluateConfidence's HasLocalEvidence gate).
+func TestLog_BanDecision_SurfacesCorroboration(t *testing.T) {
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, nil))
+	ev := autoban.NewEvaluator(autoban.Config{LiveMode: true}, trust.DefaultRegistry(), &fakeEnricher{abuseScore: 100}, logger)
+
+	const ip = "5.6.7.8"
+	withLocalEvent(t, ev, ip)
+	d := ev.EvaluateConfidence(context.Background(), ip)
+	if !d.ShouldBan {
+		t.Fatalf("expected ban decision, got SkipReason=%q", d.SkipReason)
+	}
+	ev.Log(d)
+
+	out := buf.String()
+	for _, want := range []string{"confidence=100", "local_evidence=true", "reason=confidence_100"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("expected ban-decision log to contain %q, got: %s", want, out)
+		}
 	}
 }
 
