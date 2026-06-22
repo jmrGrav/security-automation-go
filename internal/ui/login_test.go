@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestLoginHandler_ValidCredentials(t *testing.T) {
@@ -63,6 +64,43 @@ func TestLoginHandler_NoHashInStore(t *testing.T) {
 
 	if w.Code != http.StatusUnauthorized {
 		t.Errorf("expected 401 when no hash stored, got %d", w.Code)
+	}
+}
+
+// TestLoginHandler_JSONPrunesExpiredSessions guards parity between the JSON
+// and form login paths: both must sweep expired/over-limit sessions on every
+// successful login, not just the form path. Without this, the JSON login
+// endpoint lets the in-memory session map grow without bound.
+func TestLoginHandler_JSONPrunesExpiredSessions(t *testing.T) {
+	pwd, store := seedAdminHash(t, "TestPassword123!@#Secure")
+	server := newServerWithStore(store)
+
+	server.mu.Lock()
+	server.sessionMax = 1
+	server.sessions["expired-1"] = time.Now().Add(-time.Hour)
+	server.sessions["expired-2"] = time.Now().Add(-time.Hour)
+	server.mu.Unlock()
+
+	body := `{"password": "` + pwd + `"}`
+	req := httptest.NewRequest("POST", "/login", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	server.handleLoginJSON(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	server.mu.Lock()
+	count := len(server.sessions)
+	server.mu.Unlock()
+
+	if count > server.sessionMax {
+		t.Fatalf("expected session map pruned to sessionMax=%d after JSON login, got %d entries", server.sessionMax, count)
+	}
+	if _, ok := server.sessions["expired-1"]; ok {
+		t.Fatalf("expired session was not pruned on JSON login")
 	}
 }
 

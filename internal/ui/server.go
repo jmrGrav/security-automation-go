@@ -29,6 +29,7 @@ import (
 	"github.com/jm/security-automation-go/internal/health"
 	"github.com/jm/security-automation-go/internal/observability/metrics"
 	"github.com/jm/security-automation-go/internal/security"
+	"github.com/jm/security-automation-go/internal/security/audit"
 	"github.com/jm/security-automation-go/internal/security/enrichment"
 	"github.com/jm/security-automation-go/internal/services/reporting"
 	"github.com/jm/security-automation-go/internal/trustednetworks"
@@ -113,6 +114,9 @@ type Server struct {
 	validateCloudflare   func(context.Context, string, string) error
 	validateAbuseIPDB    func(context.Context, string) error
 	validateBetterStack  func(context.Context, string) error
+	timelineMu           sync.Mutex
+	timelineCache        []audit.TimelineEvent
+	timelineCacheAt      time.Time
 }
 
 func NewServer(cfg *config.Config, opts Options) (*Server, error) {

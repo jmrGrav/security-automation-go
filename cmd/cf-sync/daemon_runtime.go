@@ -122,16 +122,22 @@ func newDaemonContext(ctx context.Context, logger *slog.Logger, srv *http.Server
 
 	go func() {
 		defer signal.Stop(sigChan)
-		sig := <-sigChan
-		logger.Info("received signal, shutting down", "signal", sig)
+		select {
+		case sig := <-sigChan:
+			logger.Info("received signal, shutting down", "signal", sig)
 
-		if srv != nil {
-			shutdownCtx, shutCancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer shutCancel()
-			_ = srv.Shutdown(shutdownCtx)
+			if srv != nil {
+				shutdownCtx, shutCancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer shutCancel()
+				_ = srv.Shutdown(shutdownCtx)
+			}
+
+			cancel()
+		case <-childCtx.Done():
+			// Caller already cancelled (e.g. manual cancel() or a parent
+			// context being done) — release the signal registration so
+			// this goroutine doesn't leak past the normal shutdown path.
 		}
-
-		cancel()
 	}()
 
 	return childCtx, cancel

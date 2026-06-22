@@ -81,6 +81,45 @@ func TestTimelineIncludesEvidenceEvents(t *testing.T) {
 	}
 }
 
+// TestAllTimelineEventsCachesWithinTTL guards GitHub issue #69: every
+// /timeline request used to re-merge and re-sort the full audit log plus up
+// to 10000 evidence rows from scratch, so a burst of refreshes during a live
+// incident multiplied that cost. allTimelineEvents now caches the merged
+// result for timelineCacheTTL. This test proves both halves of that
+// contract: a second call within the TTL must reuse the cached slice (not
+// reflect data added in between), and a call after the cache is forced
+// stale must recompute and pick up the new data.
+func TestAllTimelineEventsCachesWithinTTL(t *testing.T) {
+	store := &stubEvidenceStore{items: []reporting.DecisionEvidence{
+		{EvidenceID: "ev-1", Source: "cloudflare_waf", IP: "1.1.1.1", Timestamp: time.Now().UTC()},
+	}}
+	srv, _, _ := newTestServer(t, nil)
+	srv.evidence = store
+
+	first := srv.allTimelineEvents(context.Background())
+	if len(first) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(first))
+	}
+
+	store.items = append(store.items, reporting.DecisionEvidence{
+		EvidenceID: "ev-2", Source: "crowdsec_waf", IP: "2.2.2.2", Timestamp: time.Now().UTC(),
+	})
+
+	cached := srv.allTimelineEvents(context.Background())
+	if len(cached) != 1 {
+		t.Fatalf("expected cached result (1 event) within TTL, got %d — cache was bypassed", len(cached))
+	}
+
+	srv.timelineMu.Lock()
+	srv.timelineCacheAt = time.Now().Add(-2 * timelineCacheTTL)
+	srv.timelineMu.Unlock()
+
+	refreshed := srv.allTimelineEvents(context.Background())
+	if len(refreshed) != 2 {
+		t.Fatalf("expected recomputed result (2 events) after TTL expiry, got %d", len(refreshed))
+	}
+}
+
 func TestTimelineSourceFilter(t *testing.T) {
 	now := time.Now().UTC()
 	store := &stubEvidenceStore{
