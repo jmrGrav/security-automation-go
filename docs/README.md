@@ -29,8 +29,7 @@
 | Document | What it covers |
 |----------|---------------|
 | [RUNBOOK.md](operations/RUNBOOK.md) | Day-to-day operations |
-| [CUTOVER.md](operations/CUTOVER.md) | Production cutover procedure |
-| [SHADOW_MODE.md](operations/SHADOW_MODE.md) | Shadow mode operation |
+| [CUTOVER.md](operations/CUTOVER.md) | Production cutover procedure (historical; cf-shadow since decommissioned) |
 
 ## Security
 

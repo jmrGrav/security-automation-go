@@ -1,5 +1,11 @@
 # Production Cutover Runbook
 
+> **Superseded:** `cf-shadow` (the Go shadow validator referenced below) was
+> removed from the codebase after this cutover completed and Go enforcement
+> (`cf-sync`) stabilized as the live authority. This document is kept as a
+> historical record of the cutover decision and service map; do not use the
+> `cf-shadow.service` references below for new deployments.
+
 **Date:** 2026-05-30  
 **Scope:** Controlled authority — Go takes over CF enforcement + AbuseIPDB reporting  
 **Recommendation: CONTROLLED AUTHORITY** (not full cutover — see Lua section)
