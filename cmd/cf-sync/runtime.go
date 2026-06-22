@@ -150,6 +150,11 @@ func runCFSync(configPath, mode string, dryRun bool, format string, metricsAddr 
 
 	// Always start UI server in background if enabled.
 	evidenceHolder := &lazyEvidenceStore{}
+	// banLifecycleHolder is populated below once the scoped runtime DB is
+	// opened (see initSQLite call further down). The UI goroutine starts
+	// before scope resolution, so it must hold this indirection rather than
+	// a *sqlite.BanLifecycleStore bound to the unscoped bootstrapDB.
+	banLifecycleHolder := &lazyBanLifecycleStore{}
 	// trustedNetworksCache is created here (before the UI goroutine starts)
 	// and shared with the daemon's sync loop below, so the UI can render the
 	// most recent SyncReport even though the registry itself is built later
@@ -158,7 +163,7 @@ func runCFSync(configPath, mode string, dryRun bool, format string, metricsAddr 
 	if cfg.UI.Enabled {
 		uiCfg := *cfg // snapshot: runUIWithLocker writes its own credential fields; avoid race with writes below
 		go func() {
-			if err := runUIWithLocker(ctx, logger, &uiCfg, false, evidenceHolder, bootstrapDB, trustedNetworksCache); err != nil {
+			if err := runUIWithLocker(ctx, logger, &uiCfg, false, evidenceHolder, bootstrapDB, trustedNetworksCache, banLifecycleHolder); err != nil {
 				logger.Error("UI server failed", "error", err)
 			}
 		}()
@@ -380,6 +385,7 @@ func runCFSync(configPath, mode string, dryRun bool, format string, metricsAddr 
 
 	if mode == "daemon" || mode == "ui" {
 		banLifecycleStore := sqlite.NewBanLifecycleStore(sqliteDB)
+		banLifecycleHolder.set(banLifecycleStore)
 		bundle := newWAFBundle(cf, abuse, hc, credentialStore, setupStore, securityTelemetry, trustRegistry, cfg, reportingStores, banLifecycleStore, logger)
 		var cfEnforcer cfpkg.EnforcementClient
 		if cfg.Cloudflare.MutationsEnabled && cfg.Cloudflare.APIToken != "" {
