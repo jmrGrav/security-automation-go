@@ -3,7 +3,6 @@ package app
 import (
 	"context"
 	"log/slog"
-	"path/filepath"
 
 	"github.com/jm/security-automation-go/internal/abuseipdb"
 	"github.com/jm/security-automation-go/internal/betterstack"
@@ -16,7 +15,6 @@ import (
 	luastate "github.com/jm/security-automation-go/internal/openresty/state"
 	"github.com/jm/security-automation-go/internal/recidive"
 	"github.com/jm/security-automation-go/internal/security/protected"
-	"github.com/jm/security-automation-go/internal/shadow"
 	"github.com/jm/security-automation-go/internal/state"
 	"github.com/jm/security-automation-go/internal/trustednetworks"
 )
@@ -47,11 +45,6 @@ type CrowdSecSyncApp struct {
 
 	// Anti-self-ban shield (P0 safety).
 	shield *protected.Shield
-
-	// Shadow mode: compute plans but do not mutate Cloudflare.
-	shadowMode   bool
-	shadowStore  *shadow.Store
-	shadowReport string // path to SHADOW_MODE_REPORT.md
 
 	// luaWriter publishes bans.json for the OpenResty Lua bouncer (optional).
 	luaWriter *luastate.Writer
@@ -138,10 +131,8 @@ func NewCrowdSecSyncApp(logger *slog.Logger, cfg *config.Config) *CrowdSecSyncAp
 			CSRangeBanner: csClient,
 			ZoneID:        cfg.Cloudflare.ZoneID,
 		}),
-		shield:       shield,
-		shadowStore:  shadow.NewStore(cfg.StateDir),
-		shadowReport: filepath.Join(cfg.StateDir, "SHADOW_MODE_REPORT.md"),
-		luaWriter:    newLuaWriter(cfg),
+		shield:    shield,
+		luaWriter: newLuaWriter(cfg),
 		poller: cspoller.New(cspoller.Config{
 			Enabled:  cfg.CrowdSec.PollerEnabled,
 			LAPIURL:  cfg.CrowdSec.PollerLAPIURL,
@@ -207,16 +198,6 @@ func NewCleanupApp(logger *slog.Logger, cfg *config.Config) *CleanupApp {
 func (a *CleanupApp) WithDryRun() *CleanupApp {
 	if a != nil {
 		a.dryRun = true
-	}
-	return a
-}
-
-// WithShadowMode enables shadow mode: Go computes plans but does not mutate CF.
-// The report path is where SHADOW_MODE_REPORT.md is written after each cycle.
-func (a *CrowdSecSyncApp) WithShadowMode(reportPath string) *CrowdSecSyncApp {
-	a.shadowMode = true
-	if reportPath != "" {
-		a.shadowReport = reportPath
 	}
 	return a
 }

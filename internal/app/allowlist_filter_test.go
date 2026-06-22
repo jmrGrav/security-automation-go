@@ -9,7 +9,6 @@ import (
 
 	"github.com/jm/security-automation-go/internal/cidrban"
 	csmodels "github.com/jm/security-automation-go/internal/crowdsec/models"
-	"github.com/jm/security-automation-go/internal/shadow"
 )
 
 // ── Fakes ─────────────────────────────────────────────────────────────────────
@@ -188,38 +187,37 @@ func TestCIDRAdapter_AllowlistFetchFailureIsFailOpen(t *testing.T) {
 	}
 }
 
-// ── Shadow mode: allowlist filter produces zero CF mutations ─────────────────
+// ── Allowlist filter produces zero CF mutations for already-allowlisted IPs ──
 
-// TestShadowMode_AllowlistFilterNoMutation verifies that allowlist-filtered IPs
-// do not appear in the sync plan (FalsePositives) and no CF mutation is triggered.
-func TestShadowMode_AllowlistFilterNoMutation(t *testing.T) {
-	// Simulate a plan where one IP was in active bans but filtered by allowlist.
-	// After filtering, plan.ToAdd is empty → InSync=true → no CF mutation.
-	plan := shadow.SyncPlan{
-		ActiveBans: map[string]bool{"1.2.3.4": true},
-		CFRules:    map[string]bool{"1.2.3.4": true},
-		ToAdd:      nil, // allowlisted IP was already filtered out of ToAdd
-		ToDelete:   nil,
-	}
-	cycle := shadow.Compare(plan, time.Now())
+// TestAllowlistFilter_NoMutationForAlreadySyncedIP verifies that an IP that is
+// both an active CrowdSec ban and already has a matching Cloudflare rule
+// produces no further mutation: the sync plan's ToAdd/ToDelete sets are empty,
+// so syncCloudflare would issue zero AddIPAccessRule/DeleteIPAccessRule calls.
+// (buildSyncPlan itself, including allowlist filtering, is exercised directly
+// in crowdsec_sync_runtime_test.go; this test documents the zero-mutation
+// outcome at the plan level.)
+func TestAllowlistFilter_NoMutationForAlreadySyncedIP(t *testing.T) {
+	activeBans := map[string]bool{"1.2.3.4": true}
+	cfRules := map[string]bool{"1.2.3.4": true}
 
-	if !cycle.InSync {
-		t.Error("want InSync=true after allowlist filter removes divergence")
+	var toAdd []string
+	for ip := range activeBans {
+		if !cfRules[ip] {
+			toAdd = append(toAdd, ip)
+		}
 	}
-	if len(cycle.FalsePositives) != 0 {
-		t.Errorf("want 0 false positives after allowlist filter, got %d", len(cycle.FalsePositives))
+	var toDelete []string
+	for ip := range cfRules {
+		if !activeBans[ip] {
+			toDelete = append(toDelete, ip)
+		}
 	}
 
-	// Prove: in shadow mode, the guard prevents CF mutations.
-	// (The full app integration is proven by TestShadowMode_CIDRBanNotExecuted
-	// and the existing shadow mode tests.)
-	shadowMode := true
-	cfMutations := 0
-	if !shadowMode {
-		cfMutations = len(plan.ToAdd) // would mutate if live
+	if len(toAdd) != 0 {
+		t.Errorf("want 0 adds for already-synced IP, got %d", len(toAdd))
 	}
-	if cfMutations != 0 {
-		t.Error("shadow mode must produce zero CF mutations")
+	if len(toDelete) != 0 {
+		t.Errorf("want 0 deletes for already-synced IP, got %d", len(toDelete))
 	}
 }
 

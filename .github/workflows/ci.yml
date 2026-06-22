@@ -67,7 +67,7 @@ jobs:
           go-version: '1.25.11'
           cache: true
 
-      - name: Build linux/${{ matrix.goarch }} (all 6 binaries)
+      - name: Build linux/${{ matrix.goarch }} (all 5 binaries)
         env:
           CGO_ENABLED: "0"
           GOOS: linux
@@ -78,7 +78,6 @@ jobs:
           go build -trimpath -buildvcs=false -ldflags="-s -w" -o bin/${{ matrix.artifact }}/cf-allowlist-sync   ./cmd/cf-allowlist-sync
           go build -trimpath -buildvcs=false -ldflags="-s -w" -o bin/${{ matrix.artifact }}/cf-cleanup          ./cmd/cf-cleanup
           go build -trimpath -buildvcs=false -ldflags="-s -w" -o bin/${{ matrix.artifact }}/cf-sync             ./cmd/cf-sync
-          go build -trimpath -buildvcs=false -ldflags="-s -w" -o bin/${{ matrix.artifact }}/cf-shadow           ./cmd/cf-shadow
           go build -trimpath -buildvcs=false -ldflags="-s -w" -o bin/${{ matrix.artifact }}/security-automation-mcp ./cmd/security-automation-mcp
 
       - name: Upload binaries (${{ matrix.artifact }})

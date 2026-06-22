@@ -23,7 +23,7 @@ dpkg-deb --contents dist/security-automation-go_1.5.0_amd64.deb
 
 | Path | Contents |
 |------|---------|
-| `/usr/local/bin/` | 6 binaries: `cf-sync`, `cf-shadow`, `cf-cleanup`, `cf-allowlist-sync`, `crowdsec-sync`, `security-automation-mcp` |
+| `/usr/local/bin/` | 5 binaries: `cf-sync`, `cf-cleanup`, `cf-allowlist-sync`, `crowdsec-sync`, `security-automation-mcp` |
 | `/lib/systemd/system/` | 5 service files + `cf-allowlist-sync.timer` |
 | `/usr/lib/sysusers.d/` | `security-automation-go.conf` (user/group) |
 | `/usr/lib/tmpfiles.d/` | `security-automation-go.conf` (directories) |

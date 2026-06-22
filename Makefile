@@ -14,13 +14,12 @@ GOFMT_FILES := $(shell find . -type f -name '*.go' -not -path './vendor/*')
 
 all: build
 
-# Build all 6 binaries for host platform
+# Build all 5 binaries for host platform
 build:
 	$(STATIC_ENV) $(GO) build $(GOFLAGS) $(BUILD_FLAGS) -o bin/crowdsec-sync ./cmd/crowdsec-sync
 	$(STATIC_ENV) $(GO) build $(GOFLAGS) $(BUILD_FLAGS) -o bin/cf-allowlist-sync ./cmd/cf-allowlist-sync
 	$(STATIC_ENV) $(GO) build $(GOFLAGS) $(BUILD_FLAGS) -o bin/cf-cleanup ./cmd/cf-cleanup
 	$(STATIC_ENV) $(GO) build $(GOFLAGS) $(BUILD_FLAGS) -o bin/cf-sync ./cmd/cf-sync
-	$(STATIC_ENV) $(GO) build $(GOFLAGS) $(BUILD_FLAGS) -o bin/cf-shadow ./cmd/cf-shadow
 	$(STATIC_ENV) $(GO) build $(GOFLAGS) $(BUILD_FLAGS) -o bin/security-automation-mcp ./cmd/security-automation-mcp
 
 # linux/amd64 static binaries (for .deb packaging and CI artifact)
@@ -30,7 +29,6 @@ build-linux-amd64:
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GO) build $(GOFLAGS) $(BUILD_FLAGS) -o bin/linux-amd64/cf-allowlist-sync ./cmd/cf-allowlist-sync
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GO) build $(GOFLAGS) $(BUILD_FLAGS) -o bin/linux-amd64/cf-cleanup ./cmd/cf-cleanup
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GO) build $(GOFLAGS) $(BUILD_FLAGS) -o bin/linux-amd64/cf-sync ./cmd/cf-sync
-	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GO) build $(GOFLAGS) $(BUILD_FLAGS) -o bin/linux-amd64/cf-shadow ./cmd/cf-shadow
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GO) build $(GOFLAGS) $(BUILD_FLAGS) -o bin/linux-amd64/security-automation-mcp ./cmd/security-automation-mcp
 
 # linux/arm64 static binaries (for CI artifact; modernc.org/sqlite is pure Go, no cross-compiler needed)
@@ -40,7 +38,6 @@ build-linux-arm64:
 	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 $(GO) build $(GOFLAGS) $(BUILD_FLAGS) -o bin/linux-arm64/cf-allowlist-sync ./cmd/cf-allowlist-sync
 	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 $(GO) build $(GOFLAGS) $(BUILD_FLAGS) -o bin/linux-arm64/cf-cleanup ./cmd/cf-cleanup
 	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 $(GO) build $(GOFLAGS) $(BUILD_FLAGS) -o bin/linux-arm64/cf-sync ./cmd/cf-sync
-	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 $(GO) build $(GOFLAGS) $(BUILD_FLAGS) -o bin/linux-arm64/cf-shadow ./cmd/cf-shadow
 	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 $(GO) build $(GOFLAGS) $(BUILD_FLAGS) -o bin/linux-arm64/security-automation-mcp ./cmd/security-automation-mcp
 
 # Full pre-release gate: gofmt, vet, test, race, build, govulncheck, gitleaks, trufflehog
@@ -57,7 +54,7 @@ verify-release:
 	$(GO) test -timeout 120s ./... || exit 1; \
 	echo "==> [4/7] go test -race"; \
 	$(GO) test -race -timeout 300s ./... || exit 1; \
-	echo "==> [5/7] go build (all 6 binaries)"; \
+	echo "==> [5/7] go build (all 5 binaries)"; \
 	$(MAKE) build || exit 1; \
 	echo "==> [6/7] govulncheck"; \
 	GOVULNCHECK=$$(command -v govulncheck 2>/dev/null || echo "$(GOPATH_BIN)/govulncheck"); \
@@ -100,11 +97,9 @@ package: build-linux-amd64
 	@cp bin/linux-amd64/cf-allowlist-sync packaging/deb/usr/local/bin/
 	@cp bin/linux-amd64/cf-cleanup packaging/deb/usr/local/bin/
 	@cp bin/linux-amd64/cf-sync packaging/deb/usr/local/bin/
-	@cp bin/linux-amd64/cf-shadow packaging/deb/usr/local/bin/
 	@cp bin/linux-amd64/security-automation-mcp packaging/deb/usr/local/bin/
 	@cp deployments/systemd/*.service packaging/deb/lib/systemd/system/
 	@cp deployments/systemd/*.timer packaging/deb/lib/systemd/system/ 2>/dev/null || true
-	@cp deployments/shadow/cf-shadow.service packaging/deb/lib/systemd/system/
 	@cp packaging/shared/sysusers.d/security-automation-go.conf packaging/deb/usr/lib/sysusers.d/
 	@cp packaging/shared/tmpfiles.d/security-automation-go.conf packaging/deb/usr/lib/tmpfiles.d/
 	@chmod 755 packaging/deb/DEBIAN/postinst packaging/deb/DEBIAN/postrm packaging/deb/DEBIAN/prerm

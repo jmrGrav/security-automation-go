@@ -91,7 +91,7 @@ make build-linux-amd64    # produces bin/linux-amd64/
 make build-linux-arm64    # produces bin/linux-arm64/
 ```
 
-All 6 binaries use `modernc.org/sqlite` (pure Go) — `CGO_ENABLED=0` works on both
+All 5 binaries use `modernc.org/sqlite` (pure Go) — `CGO_ENABLED=0` works on both
 architectures without a cross-compiler.
 
 | Binary | amd64 | arm64 |
@@ -100,7 +100,6 @@ architectures without a cross-compiler.
 | `cf-allowlist-sync` | ✓ | ✓ |
 | `cf-cleanup` | ✓ | ✓ |
 | `cf-sync` | ✓ | ✓ |
-| `cf-shadow` | ✓ | ✓ |
 | `security-automation-mcp` | ✓ | ✓ |
 
 ---

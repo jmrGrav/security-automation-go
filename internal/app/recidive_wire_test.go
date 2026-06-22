@@ -254,11 +254,9 @@ func TestRecidive_AllowlistedIPExcluded(t *testing.T) {
 	}
 }
 
-// TestRecidive_ShadowModeNoMutation proves the !shadowMode guard prevents
-// recidive.Run() in shadow mode. Without the guard, PlaceholderService would
-// succeed but RealService would mutate cscli.
-func TestRecidive_ShadowModeNoMutation(t *testing.T) {
-	// Prove: with Escalator=nil (shadow-equivalent), no escalation fires
+// TestRecidive_NilEscalatorIsSafeNoOp proves that recidive.Run() is safe (no
+// panic, no mutation attempt) when no Escalator is configured.
+func TestRecidive_NilEscalatorIsSafeNoOp(t *testing.T) {
 	dir := t.TempDir()
 	now := time.Now().UTC()
 
@@ -269,13 +267,11 @@ func TestRecidive_ShadowModeNoMutation(t *testing.T) {
 	svc := recidive.NewService(recidive.Config{
 		StateDir:  dir,
 		BanSource: src,
-		Escalator: nil, // shadow mode: no escalator
+		Escalator: nil,
 	})
 	if err := svc.Run(context.Background()); err != nil {
 		t.Fatalf("want no error with nil escalator, got %v", err)
 	}
-	// With !a.shadowMode guard in CrowdSecSyncApp, Run() is never called in shadow mode.
-	// This test verifies the escalator=nil path is safe (no panic, no mutation).
 }
 
 // TestRecidive_BanSourceNilIsNoOp verifies that the nil-BanSource case no longer

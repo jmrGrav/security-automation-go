@@ -20,7 +20,6 @@
   crowdsec-sync
   cf-allowlist-sync
   cf-cleanup
-  cf-shadow
 ```
 
 ## Debian package

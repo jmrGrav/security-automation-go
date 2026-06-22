@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/jm/security-automation-go/internal/cidrban"
-	"github.com/jm/security-automation-go/internal/shadow"
 )
 
 // ── Tests: anti-self-ban shield in cidrBanSourceAdapter ──────────────────────
@@ -81,81 +80,6 @@ func TestCIDRBanAdapter_NonProtectedIPsTriggerBan(t *testing.T) {
 	if len(banner.added) != 1 {
 		t.Errorf("want 1 /24 ban for two non-protected IPs, got %d", len(banner.added))
 	}
-}
-
-// ── Tests: shadow mode suppresses cidrban mutations ───────────────────────────
-
-// TestShadowMode_CIDRBanNotExecuted proves that the shadow-mode guard
-// (`if !a.shadowMode`) suppresses cidrban.Run(). We prove this indirectly:
-// the cidrban.Service used in shadow mode is the PlaceholderService (which
-// returns ErrNotImplemented), so if it were called without the guard, Run()
-// would surface an error. Since the guard prevents the call, no error surfaces.
-//
-// This test validates the contract at the cidrban.Service interface level,
-// which is the boundary the scheduler loop crosses.
-func TestShadowMode_CIDRBanNotExecuted(t *testing.T) {
-	// Construct a PlaceholderService (returns ErrNotImplemented on Run).
-	// In live mode (no guard) this would produce an error.
-	// In shadow mode (with guard) Run() is never called → no error.
-	placeholder := cidrban.NewPlaceholderService()
-
-	// Simulate the guarded call: shadow mode → skip
-	shadowMode := true
-	var runErr error
-	if !shadowMode {
-		runErr = placeholder.Run(context.Background())
-	}
-	if runErr != nil {
-		t.Errorf("shadow mode must suppress cidrban.Run(); got error: %v", runErr)
-	}
-
-	// Confirm that without the guard, the placeholder would return an error
-	// (proving the guard is load-bearing, not vacuous).
-	if err := placeholder.Run(context.Background()); err == nil {
-		t.Error("PlaceholderService.Run() must return ErrNotImplemented (sanity check)")
-	}
-}
-
-// TestShadowCycle_CIDRDivergenceClassification verifies that the shadow
-// comparison correctly classifies CIDR drift. This proves that once cidrban
-// is wired in live mode (Go creates crowdsec-cidr-ban rules matching Python),
-// IPs covered by a /24 that previously appeared as DriftCIDRRule will no
-// longer show up as false negatives in the crowdsec-local-ban comparison.
-//
-// Key: the crowdsec-local-ban comparison is tag-scoped. CIDR rules live under
-// crowdsec-cidr-ban. Wiring cidrban does not change the crowdsec-local-ban
-// comparison — it adds a parallel /24 management track that matches Python's.
-func TestShadowCycle_CIDRDivergenceClassification(t *testing.T) {
-	// Active bans from cscli: one IP
-	activeBans := map[string]bool{"1.2.3.10": true}
-
-	// CF rules with crowdsec-local-ban: same IP (Go and Python agree)
-	cfRules := map[string]bool{"1.2.3.10": true}
-
-	plan := shadow.SyncPlan{
-		ActiveBans: activeBans,
-		CFRules:    cfRules,
-		ToAdd:      nil,
-		ToDelete:   nil,
-	}
-	cycle := shadow.Compare(plan, time.Now())
-
-	if !cycle.InSync {
-		t.Error("want InSync=true when crowdsec-local-ban comparison is identical")
-	}
-	if cycle.AgreementPct != 100.0 {
-		t.Errorf("want 100%% agreement, got %.2f", cycle.AgreementPct)
-	}
-
-	// Demonstrate: CIDR drift (crowdsec-cidr-ban tag) does not pollute the
-	// crowdsec-local-ban shadow comparison. The shadow cycle above is 100%
-	// regardless of whether a /24 exists in CF under a different tag.
-	//
-	// After wiring cidrban in live mode:
-	// - Go creates crowdsec-cidr-ban rules (matching Python's sync_cidr_bans)
-	// - The crowdsec-local-ban shadow comparison remains unaffected
-	// - The drift classifier's DriftCIDRRule count drops to zero because
-	//   both Go and Python now manage the same /24 rules
 }
 
 // ── Minimal fakes for wire tests ──────────────────────────────────────────────
