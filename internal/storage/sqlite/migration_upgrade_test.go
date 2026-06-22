@@ -37,7 +37,8 @@ func TestSQLiteMigrations_UpgradeFromLegacyRuntimeDB_CreatesAllCurrentTables(t *
 	downgradeStatements := []string{
 		`DROP TABLE IF EXISTS cf_ban_lifecycle`,
 		`DROP TABLE IF EXISTS trusted_networks`,
-		`DELETE FROM schema_migrations WHERE version IN (18, 19)`,
+		`DROP TABLE IF EXISTS crowdsec_allowlist_status`,
+		`DELETE FROM schema_migrations WHERE version >= 18`,
 	}
 	for _, stmt := range downgradeStatements {
 		if _, err := db.Conn().ExecContext(context.Background(), stmt); err != nil {
@@ -83,7 +84,7 @@ func TestSQLiteMigrations_UpgradeFromLegacyRuntimeDB_CreatesAllCurrentTables(t *
 		t.Fatalf("schema not current after re-open: %v", err)
 	}
 
-	for _, table := range []string{"cf_ban_lifecycle", "trusted_networks"} {
+	for _, table := range []string{"cf_ban_lifecycle", "trusted_networks", "crowdsec_allowlist_status"} {
 		var exists int
 		if err := upgraded.Conn().QueryRowContext(context.Background(),
 			"SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?", table).Scan(&exists); err != nil {
@@ -107,8 +108,8 @@ func TestSQLiteMigrations_UpgradeFromLegacyRuntimeDB_CreatesAllCurrentTables(t *
 		appliedVersions = append(appliedVersions, v)
 	}
 	rows.Close()
-	if len(appliedVersions) == 0 || appliedVersions[len(appliedVersions)-1] < 19 {
-		t.Fatalf("expected migrations to be replayed up to at least version 19, got versions: %v", appliedVersions)
+	if len(appliedVersions) == 0 || appliedVersions[len(appliedVersions)-1] < 20 {
+		t.Fatalf("expected migrations to be replayed up to at least version 20, got versions: %v", appliedVersions)
 	}
 
 	// Pre-existing data must survive the upgrade untouched.
