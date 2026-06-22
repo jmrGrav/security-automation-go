@@ -18,6 +18,7 @@ import (
 	"github.com/jm/security-automation-go/internal/security/protected"
 	"github.com/jm/security-automation-go/internal/shadow"
 	"github.com/jm/security-automation-go/internal/state"
+	"github.com/jm/security-automation-go/internal/trustednetworks"
 )
 
 // NOTE_TAG is the Cloudflare rule notes tag for CrowdSec-managed bans.
@@ -59,11 +60,28 @@ type CrowdSecSyncApp struct {
 	poller *cspoller.Poller
 }
 
+// AllowlistSyncApp is the root-run, oneshot helper that owns the entire
+// CrowdSec-spoke reconcile for the trusted-networks registry. It is the
+// ONLY process that ever invokes `cscli allowlists inspect/add` — the
+// long-lived cf-sync daemon runs as the unprivileged security-automation
+// user and cannot read /etc/crowdsec/local_api_credentials.yaml, so it must
+// never attempt these calls itself. AllowlistSyncApp persists its result
+// (success/failure, counts, drift) to SQLite via statusStore; the daemon
+// and UI read that record instead of shelling out.
 type AllowlistSyncApp struct {
 	logger *slog.Logger
 	cfg    *config.Config
 	cf     cloudflare.ListClient
-	cs     crowdsec.AllowlistManager
+
+	// reg drives the actual reconcile. Its CrowdSec spoke is always set
+	// (this app's whole purpose); its Cloudflare spoke is always nil — the
+	// Cloudflare spoke of the trusted-networks registry continues to run
+	// inside the long-lived daemon, unaffected by this helper.
+	reg *trustednetworks.Registry
+
+	// statusStore persists the CrowdSec spoke's reconcile result so the
+	// daemon/UI can read live status without calling cscli themselves.
+	statusStore trustednetworks.CrowdSecStatusStore
 }
 
 type CleanupApp struct {
@@ -136,14 +154,41 @@ func NewCrowdSecSyncApp(logger *slog.Logger, cfg *config.Config) *CrowdSecSyncAp
 	}
 }
 
-func NewAllowlistSyncApp(logger *slog.Logger, cfg *config.Config) *AllowlistSyncApp {
+// NewAllowlistSyncApp builds the root-run CrowdSec-allowlist helper.
+// tnStore is the trusted-networks registry's source of truth (the same
+// SQLite-backed store the daemon reads); statusStore is where this helper
+// persists its reconcile result for the daemon/UI to read. Both must be
+// non-nil in production — callers (cmd/cf-allowlist-sync) construct them
+// against the same STATE_DIR/scope the daemon uses.
+func NewAllowlistSyncApp(logger *slog.Logger, cfg *config.Config, tnStore trustednetworks.Store, statusStore trustednetworks.CrowdSecStatusStore) *AllowlistSyncApp {
 	httpClient := httpclient.New(cfg.Global.HTTP)
-	return &AllowlistSyncApp{
-		logger: logger,
-		cfg:    cfg,
-		cf:     cloudflare.NewClient(httpClient, cfg.Cloudflare.APIToken),
-		cs:     crowdsec.NewClientFromConfig(cfg.CrowdSec.BinPath, cfg.CrowdSec.DecisionsLog, cfg.CrowdSec.Timeout),
+
+	reg := &trustednetworks.Registry{
+		Store:                 tnStore,
+		Mode:                  cfg.TrustedNetworks.EffectiveMode(),
+		Logger:                logger,
+		CrowdSec:              crowdsec.NewClientFromConfig(cfg.CrowdSec.BinPath, cfg.CrowdSec.DecisionsLog, cfg.CrowdSec.Timeout),
+		CrowdSecAllowlistName: allowlistNameFromConfig(cfg),
 	}
+
+	return &AllowlistSyncApp{
+		logger:      logger,
+		cfg:         cfg,
+		cf:          cloudflare.NewClient(httpClient, cfg.Cloudflare.APIToken),
+		reg:         reg,
+		statusStore: statusStore,
+	}
+}
+
+// allowlistNameFromConfig resolves the cscli allowlist name the helper
+// reconciles against: TrustedNetworks.CrowdSec.AllowlistName when set,
+// falling back to the legacy top-level CrowdSec.AllowlistName so existing
+// deployments that only set the latter keep working unchanged.
+func allowlistNameFromConfig(cfg *config.Config) string {
+	if cfg.TrustedNetworks.CrowdSec.AllowlistName != "" {
+		return cfg.TrustedNetworks.CrowdSec.AllowlistName
+	}
+	return cfg.CrowdSec.AllowlistName
 }
 
 func NewCleanupApp(logger *slog.Logger, cfg *config.Config) *CleanupApp {

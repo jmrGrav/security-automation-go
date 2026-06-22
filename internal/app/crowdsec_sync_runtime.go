@@ -15,6 +15,7 @@ import (
 	"github.com/jm/security-automation-go/internal/logging"
 	"github.com/jm/security-automation-go/internal/scheduler"
 	"github.com/jm/security-automation-go/internal/shadow"
+	"github.com/jm/security-automation-go/internal/trustednetworks"
 )
 
 func (a *CrowdSecSyncApp) Run(ctx context.Context) error {
@@ -256,6 +257,20 @@ func (a *CrowdSecSyncApp) recordShadowCycle(ctx context.Context, logger *slog.Lo
 	return nil
 }
 
+// Run performs one CrowdSec-spoke reconcile pass: load the trusted-networks
+// registry, push additively to the CrowdSec allowlist (enforce mode only;
+// shadow mode detects but never mutates), detect drift, and persist the
+// result to statusStore. This is the only code path in the whole codebase
+// permitted to invoke `cscli allowlists inspect/add/remove` — see
+// internal/crowdsec/client_boundary_test.go's
+// TestCrowdSecWriteCommandsOnlyInClient for the static guard and
+// cmd/cf-sync's daemon-side guard asserting the daemon never wires the
+// CrowdSec spoke itself.
+//
+// Run always reports its outcome to statusStore (success or failure) so a
+// stale "never ran" status is never confused with "ran and failed" — both
+// the daemon and UI must be able to tell the difference (e.g. permission
+// denied reading local_api_credentials.yaml vs. helper timer disabled).
 func (a *AllowlistSyncApp) Run(ctx context.Context) error {
 	const op = "app.AllowlistSyncApp.Run"
 	if ctx == nil {
@@ -264,18 +279,69 @@ func (a *AllowlistSyncApp) Run(ctx context.Context) error {
 	ctx = logging.WithTraceLogger(ctx, a.logger)
 	logger := logging.FromContext(ctx, a.logger)
 
-	name := a.cfg.CrowdSec.AllowlistName
-	logger.InfoContext(ctx, "syncing crowdsec allowlist", "name", name)
-
-	entries, err := a.cs.ListAllowlist(ctx, name)
-	if err != nil {
-		return apperr.Wrapf(op, err, "ListAllowlist %s", name)
+	if a.reg == nil || a.reg.CrowdSecAllowlistName == "" {
+		logger.InfoContext(ctx, "crowdsec allowlist sync: disabled (no allowlist name configured)")
+		return nil
 	}
-	logger.InfoContext(ctx, "crowdsec allowlist loaded", "name", name, "count", len(entries))
-	for _, e := range entries {
-		logger.InfoContext(ctx, "allowlist entry", "value", e.Value, "comment", e.Comment)
+	name := a.reg.CrowdSecAllowlistName
+	logger.InfoContext(ctx, "syncing crowdsec allowlist", "name", name, "mode", a.reg.EffectiveMode())
+
+	report, syncErr := a.reg.Sync(ctx)
+	status := crowdSecStatusFromReport(name, report)
+
+	if syncErr != nil {
+		status.LastError = syncErr.Error()
+		logger.ErrorContext(ctx, "crowdsec allowlist sync: registry load failed", "name", name, "error", syncErr)
+	} else if len(report.CrowdSec.Errors) > 0 {
+		status.LastError = report.CrowdSec.Errors[0]
+		logger.WarnContext(ctx, "crowdsec allowlist sync: spoke reported errors", "name", name, "errors", report.CrowdSec.Errors)
+		// A failed cscli call (e.g. permission denied reading
+		// local_api_credentials.yaml) must fail this run closed, not just
+		// be logged — the timer's exit code is the only out-of-band signal
+		// an operator gets if the persisted status itself can't be read.
+		syncErr = fmt.Errorf("crowdsec spoke: %s", report.CrowdSec.Errors[0])
+	} else {
+		logger.InfoContext(ctx, "crowdsec allowlist sync complete",
+			"name", name,
+			"desired_count", status.DesiredCount,
+			"current_count", status.CurrentCount,
+			"drift_count", status.DriftCount,
+		)
+	}
+
+	if a.statusStore != nil {
+		if err := a.statusStore.PutCrowdSecAllowlistStatus(ctx, status); err != nil {
+			logger.ErrorContext(ctx, "crowdsec allowlist sync: failed to persist status", "error", err)
+			if syncErr == nil {
+				syncErr = err
+			}
+		}
+	}
+
+	if syncErr != nil {
+		return apperr.Wrapf(op, syncErr, "sync %s", name)
 	}
 	return nil
+}
+
+// crowdSecStatusFromReport derives a persisted status snapshot from one
+// Registry.Sync pass. AuthOK is true exactly when the spoke's list call
+// succeeded — i.e. cscli could read local_api_credentials.yaml and reach
+// the local CrowdSec LAPI socket — independent of whether any entries
+// still needed pushing.
+func crowdSecStatusFromReport(allowlistName string, report trustednetworks.SyncReport) trustednetworks.CrowdSecAllowlistStatus {
+	res := report.CrowdSec
+	authOK := res.Enabled && len(res.Errors) == 0
+	return trustednetworks.CrowdSecAllowlistStatus{
+		AllowlistName: allowlistName,
+		Configured:    true,
+		AuthOK:        authOK,
+		LastSyncAt:    time.Now().UTC(),
+		DesiredCount:  report.RegistryCount,
+		CurrentCount:  len(res.AlreadySynced) + len(res.Pushed),
+		DriftCount:    len(res.Drift),
+		Mode:          report.Mode,
+	}
 }
 
 func (a *CleanupApp) Run(ctx context.Context) error {

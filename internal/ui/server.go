@@ -74,49 +74,57 @@ type Options struct {
 	EvidenceStore        reporting.EvidenceStore
 	BanLifecycleStore    banlifecycle.Store
 	TrustedNetworksCache *trustednetworks.ReportCache
-	AIExplain            aigateway.Gateway
-	AIExplainBuilder     func(ai.Config) aigateway.Gateway
-	AIConfig             ai.Config
-	ProviderFactories    map[string]ProviderFactory
-	SetupStore           SetupStorer
-	ValidateCloudflare   func(context.Context, string, string) error
-	ValidateAbuseIPDB    func(context.Context, string) error
-	ValidateBetterStack  func(context.Context, string) error
+	// CrowdSecStatusStore is the read-only source for the CrowdSec spoke's
+	// status (configured/auth_ok/last_sync_at/last_error/counts), persisted
+	// by the separate root-owned cf-allowlist-sync helper. The UI never
+	// calls cscli itself — it only reads this record.
+	CrowdSecStatusStore   trustednetworks.CrowdSecStatusStore
+	CrowdSecAllowlistName string
+	AIExplain             aigateway.Gateway
+	AIExplainBuilder      func(ai.Config) aigateway.Gateway
+	AIConfig              ai.Config
+	ProviderFactories     map[string]ProviderFactory
+	SetupStore            SetupStorer
+	ValidateCloudflare    func(context.Context, string, string) error
+	ValidateAbuseIPDB     func(context.Context, string) error
+	ValidateBetterStack   func(context.Context, string) error
 }
 
 type Server struct {
-	cfg                  *config.Config
-	secretProvider       SecretProvider
-	credentialStore      CredentialStorer
-	audit                AuditSink
-	logger               *slog.Logger
-	mux                  *http.ServeMux
-	sessions             map[string]time.Time
-	mu                   sync.Mutex
-	authEpoch            atomic.Int64
-	sessionMax           int
-	lastSessionSweep     time.Time
-	sessionSweepEvery    time.Duration
-	limiter              *rateLimiter
-	aiLimiter            *rateLimiter
-	aiMu                 sync.RWMutex
-	uiSecret             string
-	enrichment           *enrichment.Service
-	aiBaseConfig         ai.Config
-	aiExplain            aigateway.Gateway
-	aiConfig             ai.Config
-	aiExplainBuilder     func(ai.Config) aigateway.Gateway
-	providerFactories    map[string]ProviderFactory
-	setupStore           SetupStorer
-	evidence             reporting.EvidenceStore
-	banLifecycleStore    banlifecycle.Store
-	trustedNetworksCache *trustednetworks.ReportCache
-	validateCloudflare   func(context.Context, string, string) error
-	validateAbuseIPDB    func(context.Context, string) error
-	validateBetterStack  func(context.Context, string) error
-	timelineMu           sync.Mutex
-	timelineCache        []audit.TimelineEvent
-	timelineCacheAt      time.Time
+	cfg                   *config.Config
+	secretProvider        SecretProvider
+	credentialStore       CredentialStorer
+	audit                 AuditSink
+	logger                *slog.Logger
+	mux                   *http.ServeMux
+	sessions              map[string]time.Time
+	mu                    sync.Mutex
+	authEpoch             atomic.Int64
+	sessionMax            int
+	lastSessionSweep      time.Time
+	sessionSweepEvery     time.Duration
+	limiter               *rateLimiter
+	aiLimiter             *rateLimiter
+	aiMu                  sync.RWMutex
+	uiSecret              string
+	enrichment            *enrichment.Service
+	aiBaseConfig          ai.Config
+	aiExplain             aigateway.Gateway
+	aiConfig              ai.Config
+	aiExplainBuilder      func(ai.Config) aigateway.Gateway
+	providerFactories     map[string]ProviderFactory
+	setupStore            SetupStorer
+	evidence              reporting.EvidenceStore
+	banLifecycleStore     banlifecycle.Store
+	trustedNetworksCache  *trustednetworks.ReportCache
+	crowdSecStatusStore   trustednetworks.CrowdSecStatusStore
+	crowdSecAllowlistName string
+	validateCloudflare    func(context.Context, string, string) error
+	validateAbuseIPDB     func(context.Context, string) error
+	validateBetterStack   func(context.Context, string) error
+	timelineMu            sync.Mutex
+	timelineCache         []audit.TimelineEvent
+	timelineCacheAt       time.Time
 }
 
 func NewServer(cfg *config.Config, opts Options) (*Server, error) {
@@ -144,29 +152,31 @@ func NewServer(cfg *config.Config, opts Options) (*Server, error) {
 	}
 	effectiveAIConfig := applyAIProviderState(opts.AIConfig, state, loaded)
 	s := &Server{
-		cfg:                  cfg,
-		secretProvider:       opts.SecretProvider,
-		credentialStore:      opts.CredentialStore,
-		audit:                opts.AuditSink,
-		logger:               opts.Logger,
-		mux:                  http.NewServeMux(),
-		sessions:             make(map[string]time.Time),
-		sessionMax:           4096,
-		sessionSweepEvery:    time.Minute,
-		limiter:              newRateLimiter(20, time.Minute),
-		uiSecret:             uiSecret,
-		enrichment:           opts.Enrichment,
-		evidence:             opts.EvidenceStore,
-		banLifecycleStore:    opts.BanLifecycleStore,
-		trustedNetworksCache: opts.TrustedNetworksCache,
-		aiBaseConfig:         opts.AIConfig,
-		aiConfig:             effectiveAIConfig,
-		aiExplainBuilder:     opts.AIExplainBuilder,
-		providerFactories:    opts.ProviderFactories,
-		setupStore:           opts.SetupStore,
-		validateCloudflare:   opts.ValidateCloudflare,
-		validateAbuseIPDB:    opts.ValidateAbuseIPDB,
-		validateBetterStack:  opts.ValidateBetterStack,
+		cfg:                   cfg,
+		secretProvider:        opts.SecretProvider,
+		credentialStore:       opts.CredentialStore,
+		audit:                 opts.AuditSink,
+		logger:                opts.Logger,
+		mux:                   http.NewServeMux(),
+		sessions:              make(map[string]time.Time),
+		sessionMax:            4096,
+		sessionSweepEvery:     time.Minute,
+		limiter:               newRateLimiter(20, time.Minute),
+		uiSecret:              uiSecret,
+		enrichment:            opts.Enrichment,
+		evidence:              opts.EvidenceStore,
+		banLifecycleStore:     opts.BanLifecycleStore,
+		trustedNetworksCache:  opts.TrustedNetworksCache,
+		crowdSecStatusStore:   opts.CrowdSecStatusStore,
+		crowdSecAllowlistName: opts.CrowdSecAllowlistName,
+		aiBaseConfig:          opts.AIConfig,
+		aiConfig:              effectiveAIConfig,
+		aiExplainBuilder:      opts.AIExplainBuilder,
+		providerFactories:     opts.ProviderFactories,
+		setupStore:            opts.SetupStore,
+		validateCloudflare:    opts.ValidateCloudflare,
+		validateAbuseIPDB:     opts.ValidateAbuseIPDB,
+		validateBetterStack:   opts.ValidateBetterStack,
 	}
 	if s.aiConfig.MaxContextBytes <= 0 {
 		s.aiConfig.MaxContextBytes = 12_000

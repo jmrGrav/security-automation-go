@@ -46,6 +46,7 @@ var knownTables = map[string]struct{}{
 	"admin_recovery_keys":          {},
 	"cf_ban_lifecycle":             {},
 	"trusted_networks":             {},
+	"crowdsec_allowlist_status":    {},
 }
 
 // DB manages a scoped SQLite connection with migrations.
@@ -458,6 +459,24 @@ func (s *DB) runMigrations() error {
 						source TEXT NOT NULL DEFAULT '',
 						comment TEXT NOT NULL DEFAULT '',
 						created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+						updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+					);
+				`,
+		},
+		{
+			Version:     20,
+			Description: "CrowdSec allowlist spoke status (written by the root-owned cf-allowlist-sync helper, read by the daemon and UI)",
+			SQL: `
+					CREATE TABLE IF NOT EXISTS crowdsec_allowlist_status (
+						allowlist_name TEXT PRIMARY KEY,
+						configured INTEGER NOT NULL DEFAULT 0,
+						auth_ok INTEGER NOT NULL DEFAULT 0,
+						last_sync_at TIMESTAMP,
+						last_error TEXT NOT NULL DEFAULT '',
+						desired_count INTEGER NOT NULL DEFAULT 0,
+						current_count INTEGER NOT NULL DEFAULT 0,
+						drift_count INTEGER NOT NULL DEFAULT 0,
+						mode TEXT NOT NULL DEFAULT '',
 						updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 					);
 				`,
