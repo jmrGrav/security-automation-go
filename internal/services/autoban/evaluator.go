@@ -279,9 +279,38 @@ func (e *Evaluator) guardIP(ip string, now time.Time) string {
 	return ""
 }
 
-// RecordBan marks ip as banned in the dedup store. Call after a successful ban execution.
+// RecordBan marks ip as banned in the dedup store using the fixed legacy TTL
+// (BanDedupTTL, 24h). Call after a successful ban execution when the actual
+// applied ban duration is NOT known to the caller.
+//
+// Prefer RecordBanWithDuration whenever the caller knows the real duration
+// that was applied (e.g. via banlifecycle.DurationPolicy.DurationFor) — this
+// fixed-TTL fallback exists only for callers with no specific duration to
+// report. Since BanDedupTTL (24h) now equals banlifecycle.MaxBanDuration,
+// this fallback can never be SHORTER than any real ban duration, only
+// potentially longer — safe by construction.
 func (e *Evaluator) RecordBan(ip string) {
-	e.dedup.MarkBanned(ip, e.now())
+	e.dedup.MarkBannedDefaultTTL(ip, e.now())
+}
+
+// RecordBanWithDuration marks ip as banned in the dedup store using ttl as
+// the dedup window, rather than the fixed legacy BanDedupTTL. Call after a
+// successful ban execution, passing the ACTUAL duration that was applied to
+// the real Cloudflare ban (e.g. the value banlifecycle.DurationPolicy.
+// DurationFor produced for that ban's recidive level). This is what keeps
+// the in-memory dedup guard's lifetime in sync with the real ban: a 1h
+// first-tier ban no longer blocks re-evaluation for a fixed 24h after
+// Cloudflare has already lifted it.
+//
+// If ttl <= 0, falls back to the fixed legacy TTL rather than leaving the IP
+// completely unguarded — this is a safety fallback, not an invitation to
+// pass zero on purpose.
+func (e *Evaluator) RecordBanWithDuration(ip string, ttl time.Duration) {
+	if ttl <= 0 {
+		e.dedup.MarkBannedDefaultTTL(ip, e.now())
+		return
+	}
+	e.dedup.MarkBanned(ip, e.now(), ttl)
 }
 
 // Log emits a structured log line for a ban decision.

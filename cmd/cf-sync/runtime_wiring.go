@@ -560,3 +560,63 @@ func normalizeIPForCompare(value string) string {
 	}
 	return value
 }
+
+// LastBanDuration returns the Duration recorded in this IP's most recent
+// banlifecycle.Entry — i.e. the actual ban duration ExecuteBan just applied
+// (or, for an already-existing rule, the duration of whatever ban is
+// currently active for it). Returns (0, false) when there is no lifecycle
+// store wired, no entry exists yet, or the lookup fails; callers must treat
+// that as "duration unknown" and fall back to a safe default rather than
+// assuming a short duration.
+//
+// This is intentionally a separate read-after-write step rather than having
+// ExecuteBan return the duration directly: ExecuteBan's signature
+// (ctx, decision) error is also being modified by a separate in-flight PR
+// (#78, fix/cf-ban-duplicate-idempotent) that rewrites large parts of its
+// body; adding a second return value here would conflict with that PR's
+// diff on nearly every line. Reading the just-persisted entry back out is
+// equivalent (it reflects whatever duration was actually computed and
+// stored, including any future backfill logic like #78's duplicate-rule
+// handling) without touching ExecuteBan's signature or body at all.
+func (e *cfBanExecutor) LastBanDuration(ctx context.Context, ip string) (time.Duration, bool) {
+	if e == nil || e.lifecycleStore == nil {
+		return 0, false
+	}
+	entry, ok, err := e.lifecycleStore.Get(ctx, ip)
+	if err != nil || !ok {
+		return 0, false
+	}
+	return entry.Duration, true
+}
+
+// banDurationLookup is satisfied by *cfBanExecutor (and any future
+// BanExecutor implementation) that can report the actual duration applied
+// to a specific IP's most recent ban. It is intentionally a small,
+// additive interface — NOT a method added to autoban.BanExecutor itself —
+// so existing BanExecutor implementations (including test fakes) keep
+// compiling unchanged; callers type-assert for it and fall back to the
+// fixed-TTL dedup path when an executor doesn't support it.
+type banDurationLookup interface {
+	LastBanDuration(ctx context.Context, ip string) (time.Duration, bool)
+}
+
+// recordBanAfterExecute marks ip as banned in evalr's dedup guard using the
+// real ban duration that was just applied, when banExec exposes one via
+// banDurationLookup (true for *cfBanExecutor). Falls back to the fixed
+// legacy BanDedupTTL via RecordBan when the executor doesn't support the
+// lookup, or the lookup fails — this can only make the dedup guard hold
+// longer than (never shorter than) the real ban, which is the safe
+// direction per the "never relax a guard while a CF rule is still active"
+// requirement.
+func recordBanAfterExecute(ctx context.Context, evalr *autoban.Evaluator, banExec autoban.BanExecutor, ip string) {
+	if evalr == nil {
+		return
+	}
+	if lookup, ok := banExec.(banDurationLookup); ok {
+		if d, found := lookup.LastBanDuration(ctx, ip); found && d > 0 {
+			evalr.RecordBanWithDuration(ip, d)
+			return
+		}
+	}
+	evalr.RecordBan(ip)
+}

@@ -28,6 +28,20 @@ type BanEvaluator interface {
 	EvaluateExternalBurst(ip, reason string) autoban.BanDecision
 	Log(decision autoban.BanDecision)
 	RecordBan(ip string)
+	// RecordBanWithDuration marks ip as banned in the dedup guard using ttl
+	// as the dedup window instead of the fixed legacy TTL. Satisfied by
+	// *autoban.Evaluator.
+	RecordBanWithDuration(ip string, ttl time.Duration)
+}
+
+// banDurationLookup is satisfied by a BanExecutor that can report the actual
+// duration applied to a specific IP's most recent ban (e.g. *cfBanExecutor
+// in cmd/cf-sync, via banlifecycle). It is a small additive interface —
+// banExec is type-asserted against it rather than widening
+// autoban.BanExecutor itself — so existing BanExecutor implementations
+// (including test fakes) keep compiling unchanged.
+type banDurationLookup interface {
+	LastBanDuration(ctx context.Context, ip string) (time.Duration, bool)
 }
 
 // Service aggregates raw nginx error log lines into per-IP bursts and
@@ -72,6 +86,22 @@ func (s *Service) SetEnforcement(eval BanEvaluator, exec autoban.BanExecutor, ba
 	s.banExec = exec
 	s.banThreshold = banThreshold
 	s.enforce = true
+}
+
+// recordBanAfterExecute marks ip as banned in s.banEval's dedup guard using
+// the real ban duration that was just applied, when s.banExec exposes one
+// via banDurationLookup. Falls back to the fixed legacy TTL (RecordBan) when
+// the executor doesn't support the lookup or the lookup fails — this can
+// only make the dedup guard hold longer than (never shorter than) the real
+// ban, which is the safe direction.
+func (s *Service) recordBanAfterExecute(ctx context.Context, ip string) {
+	if lookup, ok := s.banExec.(banDurationLookup); ok {
+		if d, found := lookup.LastBanDuration(ctx, ip); found && d > 0 {
+			s.banEval.RecordBanWithDuration(ip, d)
+			return
+		}
+	}
+	s.banEval.RecordBan(ip)
 }
 
 type burstKey struct {
@@ -200,7 +230,7 @@ func (s *Service) ProcessSince(ctx context.Context, since time.Time) (Processing
 			s.banEval.Log(decision)
 			if decision.ShouldBan && !decision.Shadow && s.banExec != nil {
 				if err := s.banExec.ExecuteBan(ctx, decision); err == nil {
-					s.banEval.RecordBan(b.ip)
+					s.recordBanAfterExecute(ctx, b.ip)
 					report.Banned++
 				}
 			}

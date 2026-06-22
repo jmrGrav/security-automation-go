@@ -137,8 +137,8 @@ func TestWorker_RecidiveLevel3_NotYetExpired_LeavesRuleAlone(t *testing.T) {
 	entry := banlifecycle.Entry{
 		IP:            "3.3.3.3",
 		CreatedAt:     now.Add(-1 * time.Hour),
-		ExpiresAt:     now.Add(167 * time.Hour), // 168h ban created 1h ago: not expired
-		Duration:      168 * time.Hour,
+		ExpiresAt:     now.Add(23 * time.Hour), // 24h ban created 1h ago: not expired
+		Duration:      24 * time.Hour,
 		RuleID:        "rule-3",
 		RecidiveLevel: 3,
 		Status:        banlifecycle.StatusActive,
