@@ -28,31 +28,6 @@ func (s *Server) handleTrustedNetworksPage(w http.ResponseWriter, r *http.Reques
 	_ = TrustedNetworksPage(s.trustedNetworksView(r.Context())).Render(r.Context(), w)
 }
 
-func (s *Server) handleTrustedNetworksRefreshDryRun(w http.ResponseWriter, r *http.Request) {
-	eventID := newUIEventID()
-	s.audit.Record("trusted_networks_refresh_dry_run", map[string]string{
-		"actor":          "local",
-		"source":         "ui",
-		"target":         "trusted-networks",
-		"result":         "dry-run",
-		"correlation_id": eventID,
-		"event_id":       eventID,
-	})
-	_ = trustedNetworksPlaceholderPage(
-		"Trusted Networks Refresh",
-		"Refresh source is currently dry-run only. The registry is rendered from the local source of truth and no live sync is performed.",
-		r.URL.Path,
-	).Render(r.Context(), w)
-}
-
-func (s *Server) handleTrustedNetworksDiff(w http.ResponseWriter, r *http.Request) {
-	_ = trustedNetworksPlaceholderPage(
-		"Trusted Networks Diff",
-		"Diff view will compare source registry updates against the current local registry snapshot. For now it is a read-only placeholder.",
-		r.URL.Path,
-	).Render(r.Context(), w)
-}
-
 func (s *Server) handleTrustedNetworksExport(w http.ResponseWriter, r *http.Request) {
 	eventID := newUIEventID()
 	s.audit.Record("trusted_networks_export", map[string]string{
@@ -103,7 +78,7 @@ func TrustedNetworksPage(view TrustedNetworksView) templ.Component {
 		Subtitle: "Registry-backed read-only inventory of protected networks and crawler/monitoring ranges.",
 		Active:   "/trusted-networks",
 		Body: templ.ComponentFunc(func(ctx context.Context, w io.Writer) error {
-			if _, err := fmt.Fprint(w, `<section class="stack"><div class="panel"><p class="muted">Registry data is rendered read-only from the local source of truth. Refresh, diff, and export remain dry-run or read-only only.</p><div class="stack" style="margin-top:.75rem"><a class="badge dryrun" href="/trusted-networks/refresh">Refresh source</a><a class="badge" href="/trusted-networks/diff">View diff</a><a class="badge live" href="/trusted-networks/export">Export registry</a><button type="button" disabled>Approve update</button></div></div>`); err != nil {
+			if _, err := fmt.Fprint(w, `<section class="stack"><div class="panel"><p class="muted">Registry data is rendered read-only from the local source of truth.</p><div class="stack" style="margin-top:.75rem"><a class="badge live" href="/trusted-networks/export">Export registry</a><button type="button" disabled>Approve update</button></div></div>`); err != nil {
 				return err
 			}
 			if err := writeTrustedNetworksSyncBanner(w, view.SyncMode); err != nil {
@@ -200,21 +175,6 @@ func writeCrowdSecHelperBanner(w io.Writer, helper CrowdSecHelperStatusView) err
 	}
 	_, err := fmt.Fprint(w, `</div>`)
 	return err
-}
-
-func trustedNetworksPlaceholderPage(title, description, active string) templ.Component {
-	return ConsoleLayout(shellView{
-		Title:    title,
-		Headline: title,
-		Subtitle: description,
-		Active:   active,
-		Body: templ.ComponentFunc(func(ctx context.Context, w io.Writer) error {
-			if _, err := fmt.Fprintf(w, `<div class="panel"><div class="badge dryrun">read-only placeholder</div><p class="muted" style="margin-top:.8rem">%s</p></div>`, html.EscapeString(description)); err != nil {
-				return err
-			}
-			return writeEmptyState(w, "Placeholder ready.")
-		}),
-	})
 }
 
 func (s *Server) trustedNetworksView(ctx context.Context) TrustedNetworksView {

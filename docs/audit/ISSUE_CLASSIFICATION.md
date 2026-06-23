@@ -31,12 +31,151 @@ just trusted as written) before disposition.
   them via `_ = `. Removed both constructions and their imports, which
   also orphaned `internal/policy/compiler` and `internal/runtime/simulation`
   (deleted below).
+- **#84** — `/sync` read the legacy shadow-mode JSONL log
+  (`internal/shadow.Store`), which the live `cmd/cf-sync` daemon never
+  writes to (only `cmd/crowdsec-sync`/`cmd/cf-shadow`, in shadow mode, do).
+  Rewrote `internal/ui/cfsync_page.go` to read `banlifecycle.Store`
+  (runtime.db's `cf_ban_lifecycle` table) instead — the same store
+  `/ban-lifecycle` and the daemon's reactive ban/cleanup path already use.
+  `CFSyncView` (`internal/ui/types.go`) was rebuilt around this single
+  source of truth; no dual-source logic remains. Tests:
+  `internal/ui/cfsync_page_test.go` (rewritten).
+- **#103** — Cloudflare delete-cleanup failures were log-only. Added
+  `cleanup_attempts`, `last_cleanup_error`, `last_cleanup_attempt_at`
+  columns to `cf_ban_lifecycle` (migration v21,
+  `internal/storage/sqlite/db.go`), a `RecordCleanupFailure` method on
+  `banlifecycle.Store` (implemented in `internal/storage/sqlite/ban_lifecycle.go`
+  and `internal/cloudflare/banlifecycle/memstore`), wired
+  `internal/cloudflare/banlifecycle/cleanup/cleanup.go`'s
+  `deleteRuleAndFinish` to persist failures instead of only logging them
+  (entry stays active so the next pass retries), and added a "retrying
+  cleanup" render state to `/ban-lifecycle`
+  (`internal/ui/ban_lifecycle_page.go`) showing attempt count and last
+  error. Tests: `TestWorker_DeleteFailure_PersistsCleanupFailure`
+  (`cleanup_test.go`), `TestBanLifecycleView_RetryingEntry_SurfacesCleanupFailure`
+  (`internal/ui/ban_lifecycle_page_test.go`).
+- **#104** — `/timeline` never read the runtime event journal at all,
+  hardcoding `ReplaySequence: "unavailable"` for every audit-derived row.
+  `tlCollector` (`internal/runtime/timeline.Collector`) was constructed in
+  `cmd/cf-sync/runtime.go` and immediately discarded — real lineage data
+  (sequence numbers, correlation ids from the daemon's lifecycle-transition
+  event journal) existed but was unreachable from the UI. Added
+  `lazyEventStore` (`cmd/cf-sync/event_store_holder.go`, same
+  populated-after-startup indirection as `lazyBanLifecycleStore`), wired it
+  through `ui.Options.EventStore`/`Server.eventStore`, and added a
+  `runtimeEntryToTimelineEvent` projection in `internal/ui/timeline.go` that
+  merges `timeline.Collector.Assemble(...)` entries into the unified
+  timeline as their own `scope=runtime` rows with real `ReplaySequence`
+  values (never a placeholder) — filterable via a new "Runtime Lineage"
+  source option. Standalone `-mode ui` (no daemon) falls back to
+  `sqlite.NewEventRepository(setupDB)`, mirroring the ban-lifecycle
+  fallback. Removed the now-redundant `tlCollector` construction in
+  `runtime.go` (the UI builds its own collector from the same event store).
+  Tests: `TestTimelineIncludesRuntimeLineage`
+  (`internal/ui/timeline_test.go`).
+- **#89** — the dashboard's "HA / fencing" row hardcoded
+  `Level: "disabled"` with a misleading detail ("read-only UI shell") that
+  didn't reflect reality. The dedicated HA subsystem (`internal/runtime/ha`)
+  was deleted as dead code in this pass (#108, zero importers), and no HA or
+  fencing config flag exists anywhere in `internal/config` — so "disabled"
+  wrongly implied an operator could enable it. Replaced with
+  `haFencingLevel()`/`haFencingDetail()` (`internal/ui/server.go`) reporting
+  `Level: "unavailable"` and a detail explaining the HA subsystem is not
+  present in this build (single-instance fencing tokens/leases are internal
+  scheduler plumbing, not multi-node HA failover). Test:
+  `TestDashboard_HAFencingReportsRealUnavailableState`
+  (`internal/ui/dashboard_helpers_test.go`).
+- **#85** — `/replay`, `/recovery`, `/drift`, `/deban` were shell-only pages
+  presenting elaborate future-state copy ("Checkpoints", "Convergence
+  indicators", etc.) with zero backing data, and none were reachable from
+  navigation (`consoleNav()` never linked them — only directly-typed URLs
+  reached them). Replay's and Recovery's backing subsystems were already
+  deleted as dead code in this same pass (#107, #106). Drift's engine
+  (`internal/runtime/drift`) does run live in the daemon, but is never
+  threaded into `ui.Options` and its memory store
+  (`internal/runtime/drift/memory.Store`) has no list/summary method to
+  back a real overview page without new plumbing — i.e. just as unreachable
+  from the UI as the deleted subsystems today. Deban's "coming soon" copy
+  was actively misleading, since a fully real per-IP deban action already
+  ships at `/ban-lifecycle`. Per the issue's own recommended fix ("remove
+  the route and navigation entry until the workflow is implemented") and the
+  standing no-fake-state rule, removed all four routes outright: handlers
+  (`handleReplayPage`/`handleDebanPage`/`handleRecoveryPage`/`handleDriftPage`),
+  route registrations, view builders (`replayView`/`recoveryView`/`driftView`
+  in `internal/ui/workflows.go`), and the now-unused `ComingSoonPage`/
+  `ComingSoonView`. The issue also named `/trusted-networks/diff` and
+  `/trusted-networks/refresh` — both reachable from the real
+  `/trusted-networks` page and already self-labeled "read-only placeholder",
+  but `internal/trustednetworks` has no `Diff`/`Refresh` function of any
+  kind to wire to (verified by grep), so building either for real would mean
+  designing a brand-new feature (fetching an external source and diffing
+  against the local registry snapshot), not a wiring fix. Applied the same
+  disposition for consistency: removed both routes, their handlers, the
+  placeholder renderer (`trustedNetworksPlaceholderPage`), and the dead-end
+  links from the `/trusted-networks` page body — the page still renders its
+  real, wired registry table and the working `/trusted-networks/export`
+  link. Tests: `TestRemovedShellPlaceholderRoutesAreGone`
+  (`internal/ui/workflows_test.go`); updated `TestWorkflowPagesRenderReadOnlySections`,
+  `TestWorkflowPagesDoNotLeakSecrets`, `TestServer_WorkflowRoutesRequireAuth`,
+  `TestServer_PagesAreSelfContained`, `TestDashboard_StubPanelsAreDisabled`
+  to drop the removed routes; deleted `TestServer_ReservedRoutesRequireAuth`
+  and `TestWorkflowPages_StubBadgesAreDisabled` (asserted behavior of code
+  that no longer exists). Removed the four dead routes from the Playwright
+  smoke suite (`tests/smoke/specs/06-other-pages.spec.ts`).
+- **#83** — `cf_ban_lifecycle` only tracks ~5 of ~131 live Cloudflare rules
+  (rules created outside this tool, or before the lifecycle store existed,
+  are invisible to the UI). The issue itself is descriptive-only and
+  explicitly does not propose writing synthetic backfill rows (open policy
+  questions: expiration, origin-disambiguation) — doing so would fabricate
+  provenance data and create a second, conflicting source of truth for
+  `cf_ban_lifecycle`, violating the no-fake-state rule. Instead added a
+  read-only inventory cross-reference to `/sync`
+  (`internal/ui/cfsync_page.go`): `fetchCFRuleInventory` calls the existing
+  read-only `discovery.ListIPAccessRules` primitive (already used
+  unauthenticated-write-free by the setup wizard's token validation,
+  `setup_wizard.go:795`) to count the zone's total live rules, and reports
+  live/tracked/untracked counts — no writes, no mutation, no synthetic
+  entries. Cached 60s (`cfRuleInventoryCacheTTL`) to bound Cloudflare API
+  call volume. The live API call is injectable via `Server.cfRuleLister`
+  (same test-seam pattern as `validateCloudflare`) so tests never hit the
+  real Cloudflare API. Tests: `TestFetchCFRuleInventory_*`,
+  `TestCFRuleInventorySnapshot_Caches`, `TestRenderCFRuleInventory_*`
+  (`internal/ui/cfsync_page_test.go`).
 
 ## Already fixed — close without further action
 
 - **#88** — Trusted Networks/CrowdSec allowlist staleness was resolved by
   an earlier-merged PR (#118), which wired `CrowdSecStatusStore` into the
   UI. No remaining gap.
+- **#67** — re-verified against current code rather than trusted as
+  written. The issue's core complaint (0% test coverage on setup-wizard
+  step handlers) predates this session's analysis: PR #71
+  (`6f0fbb5 test(ui): cover setup wizard steps 2/8/9 and full first-run
+  journey`) already added `TestSetupWizard_FullFirstRunJourney_SkipOptionalSteps`,
+  `TestSetupWizard_Step2PersistsBindAddress`, and
+  `TestSetupWizard_Step9RequiresExplicitOptIn` — these assert persisted
+  state (`store.settings["ui_addr"]`, `mutations_enabled`, `dry_run`), not
+  just HTTP status codes, which is exactly what the issue asked for.
+  `go tool cover -func` confirms every step handler the issue names by
+  name (`handleSetupStep2`/`4`/`5`/`6`/`8`/`9` and their Post variants) is
+  now in the 56.8%-100% coverage range, up from the issue's claimed 0%.
+  The remaining 0%-coverage functions (`validateCFToken`,
+  `validateAbuseIPDB`, `ValidateAbuseIPDB`, `validateBetterStack`) are
+  exercised indirectly via the existing injectable test-seam fields
+  (`s.validateCloudflare`, etc.) rather than called directly — consistent
+  with this codebase's established pattern, not a gap.
+  The issue also asked for a Playwright-level full-journey smoke test;
+  confirmed via grep that none exists (`tests/smoke/specs/*.ts` has zero
+  `setup/step` references). Did not add one: the existing smoke suite
+  (`tests/smoke/helpers/session.ts`) assumes an already-provisioned,
+  already-logged-in instance reached via password login — the first-run
+  wizard by definition only appears on a fresh, unprovisioned instance, so
+  a real browser-level test would need its own fresh-state harness
+  (separate state dir, separate server bootstrap, no login helper reuse),
+  which is new test infrastructure, not a wiring fix, and the Go-level
+  tests already exercise the real HTTP handlers end-to-end (cookies, CSRF,
+  redirects, persisted state) with equivalent rigor. No remaining gap that
+  justifies new infrastructure under the standing no-new-architecture rule.
 
 ## Dead code — deleted (per standing rule: prefer deletion over keeping dead code)
 
@@ -70,34 +209,16 @@ own directory) before deletion:
 Validation after the full sweep: `go build ./...`, `go vet ./...`, and
 `go test ./...` all pass with zero failures.
 
-## Deferred — needs dedicated implementation (not a dead-code/delete fix)
+## Deferred to v1.7.5
 
-These describe real feature gaps requiring schema/store/UI changes, not
-something resolvable by deleting or one-lining a fix. Tracked as
-follow-up work, not closed:
-
-- **#83** — CF rule inventory backfill (`cf_ban_lifecycle` only tracks
-  ~5 of ~131 live Cloudflare rules). Descriptive backfill proposal.
-- **#84** — `/sync` reads legacy shadow JSONL instead of the scoped
-  runtime.db.
-- **#85** — replay/recovery/drift/deban routes are shell placeholders
-  without backing data.
-- **#89** — dashboard hardcodes HA/fencing as disabled (consistent with
-  #108's HA subsystem being dead code — the UI gap is now arguably moot,
-  but a real "no HA" UI state, rather than a hardcoded one, is still
-  worth a small follow-up).
-- **#103** — Cloudflare delete-cleanup failures are log-only and never
-  persisted; needs a persisted failure status in `cf_ban_lifecycle` plus
-  a UI render path. Confirmed accurate against current
-  `internal/cloudflare/banlifecycle/cleanup/cleanup.go`.
-- **#104** — Timeline drops runtime lineage and hardcodes "replay
-  sequence unavailable." Needs real wiring of `tlCollector`
-  (`cmd/cf-sync/runtime.go`), not deletion — this is the reason
-  `tlCollector` was deliberately left in place during the #105 fix.
-
-## Not yet examined this pass
-
-- **#46** — pipeline health matrix observability columns. Per prior
-  analysis: explicitly does not block release.
-- **#67** — smoke coverage for first-run wizard / production enable
-  flows. Smoke-coverage gap, not a defect.
+- **#46** — pipeline health matrix observability columns (Fetched,
+  Duplicates, Last successful run, Last error, Last report timestamp).
+  Re-verified: the issue is labeled `enhancement`, not a defect, and its
+  own body states "Priority: Post-1.6.0 roadmap — Post-3 item. Do not
+  block release on this." Wiring real per-source data for every named
+  column is a multi-source plumbing change (each column needs its own
+  source-of-truth field threaded through to the pipeline health view),
+  not a small fix-in-place — exactly the kind of work the issue itself
+  says should wait. Deferred to v1.7.5 with no partial/speculative wiring
+  added now, consistent with the standing no-fake-state and
+  no-speculative-future-wiring rules.

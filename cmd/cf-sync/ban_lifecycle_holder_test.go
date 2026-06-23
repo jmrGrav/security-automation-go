@@ -49,6 +49,10 @@ func (f *fakeBanLifecycleStore) MarkStatus(ctx context.Context, ip string, statu
 	return nil
 }
 
+func (f *fakeBanLifecycleStore) RecordCleanupFailure(ctx context.Context, ip string, errMsg string) error {
+	return nil
+}
+
 func (f *fakeBanLifecycleStore) Recent(ctx context.Context, limit int) ([]banlifecycle.Entry, error) {
 	var out []banlifecycle.Entry
 	for _, e := range f.entries {

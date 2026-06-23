@@ -102,6 +102,24 @@ func (s *Store) MarkStatus(_ context.Context, ip string, status string, _ string
 	return nil
 }
 
+// RecordCleanupFailure increments CleanupAttempts and records the
+// failure message/timestamp on the current (most recent) entry for ip.
+// Status is left unchanged so the next cleanup pass retries.
+func (s *Store) RecordCleanupFailure(_ context.Context, ip string, errMsg string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	entries := s.history[ip]
+	if len(entries) == 0 {
+		return nil
+	}
+	last := &entries[len(entries)-1]
+	last.CleanupAttempts++
+	last.LastCleanupError = errMsg
+	last.LastCleanupAttemptAt = time.Now().UTC()
+	s.history[ip] = entries
+	return nil
+}
+
 // Recent returns the most recent entries across all IPs and statuses,
 // newest (by CreatedAt) first, capped at limit.
 func (s *Store) Recent(_ context.Context, limit int) ([]banlifecycle.Entry, error) {

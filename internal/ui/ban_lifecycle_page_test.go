@@ -37,6 +37,9 @@ func (s *fakeBanLifecycleStore) Recent(context.Context, int) ([]banlifecycle.Ent
 func (s *fakeBanLifecycleStore) MarkStatus(context.Context, string, string, string) error {
 	return nil
 }
+func (s *fakeBanLifecycleStore) RecordCleanupFailure(context.Context, string, string) error {
+	return nil
+}
 func (s *fakeBanLifecycleStore) RecidiveLevel(context.Context, string) (int, error) {
 	return 0, nil
 }
@@ -87,6 +90,54 @@ func TestBanLifecycleView_RendersActiveEntries(t *testing.T) {
 	}
 	if !strings.Contains(out, "rule-123") {
 		t.Error("expected rendered page to contain the rule ID")
+	}
+}
+
+func TestBanLifecycleView_RetryingEntry_SurfacesCleanupFailure(t *testing.T) {
+	now := time.Now().UTC()
+	lastAttempt := now.Add(-5 * time.Minute)
+	store := &fakeBanLifecycleStore{entries: []banlifecycle.Entry{
+		{
+			IP:                   "198.51.100.7",
+			Source:               "autoban_confidence_100",
+			Reason:               "confidence_100",
+			CreatedAt:            now.Add(-2 * time.Hour),
+			ExpiresAt:            now.Add(-1 * time.Hour),
+			Duration:             time.Hour,
+			RuleID:               "rule-retry",
+			RecidiveLevel:        1,
+			Status:               banlifecycle.StatusActive,
+			CleanupAttempts:      3,
+			LastCleanupError:     "cloudflare: HTTP 500: internal error",
+			LastCleanupAttemptAt: lastAttempt,
+		},
+	}}
+	s := &Server{banLifecycleStore: store}
+	view := s.banLifecycleView(context.Background())
+	if len(view.Entries) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(view.Entries))
+	}
+	entry := view.Entries[0]
+	if !entry.CleanupRetrying {
+		t.Error("expected CleanupRetrying=true for an active entry with recorded failures")
+	}
+	if entry.CleanupAttempts != 3 {
+		t.Errorf("expected CleanupAttempts=3, got %d", entry.CleanupAttempts)
+	}
+	if entry.LastCleanupError == "" {
+		t.Error("expected LastCleanupError to be propagated")
+	}
+
+	var buf strings.Builder
+	if err := BanLifecyclePage(view, false, "").Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "retrying cleanup") {
+		t.Error("expected rendered page to show the retrying-cleanup state")
+	}
+	if !strings.Contains(out, "cloudflare: HTTP 500: internal error") {
+		t.Error("expected rendered page to show the last cleanup error")
 	}
 }
 

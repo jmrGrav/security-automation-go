@@ -16,6 +16,7 @@ import (
 	aianthropic "github.com/jm/security-automation-go/internal/ai/providers/anthropic"
 	aigemini "github.com/jm/security-automation-go/internal/ai/providers/gemini"
 	aiopenai "github.com/jm/security-automation-go/internal/ai/providers/openai"
+	cfmodels "github.com/jm/security-automation-go/internal/cloudflare/models"
 	"github.com/jm/security-automation-go/internal/config"
 	"github.com/jm/security-automation-go/internal/storage/sqlite"
 	"github.com/jm/security-automation-go/internal/ui/auth"
@@ -354,26 +355,10 @@ func TestServer_AuditTrailEmptyState(t *testing.T) {
 	}
 }
 
-func TestServer_ReservedRoutesRequireAuth(t *testing.T) {
-	srv, _, _ := newTestServer(t, nil)
-
-	for _, path := range []string{"/deban"} {
-		req := httptest.NewRequest(http.MethodGet, path, nil)
-		rr := httptest.NewRecorder()
-		srv.Handler().ServeHTTP(rr, req)
-		if rr.Code != http.StatusFound {
-			t.Fatalf("%s should require auth, got %d", path, rr.Code)
-		}
-		if loc := rr.Header().Get("Location"); loc != "/login" {
-			t.Fatalf("%s should redirect to login, got %q", path, loc)
-		}
-	}
-}
-
 func TestServer_WorkflowRoutesRequireAuth(t *testing.T) {
 	srv, _, _ := newTestServer(t, nil)
 
-	for _, path := range []string{"/timeline", "/cloudflare/diff", "/replay", "/recovery", "/drift"} {
+	for _, path := range []string{"/timeline", "/cloudflare/diff"} {
 		req := httptest.NewRequest(http.MethodGet, path, nil)
 		rr := httptest.NewRecorder()
 		srv.Handler().ServeHTTP(rr, req)
@@ -390,7 +375,7 @@ func TestServer_PagesAreSelfContained(t *testing.T) {
 	srv, _, _ := newTestServer(t, nil)
 	cookie := loginCookie(t, srv, "test-password-123!@#")
 
-	for _, path := range []string{"/", "/forensic", "/intelligence", "/trusted-networks", "/timeline", "/cloudflare/diff", "/replay", "/recovery", "/drift"} {
+	for _, path := range []string{"/", "/forensic", "/intelligence", "/trusted-networks", "/timeline", "/cloudflare/diff"} {
 		req := httptest.NewRequest(http.MethodGet, path, nil)
 		req.AddCookie(cookie)
 		rr := httptest.NewRecorder()
@@ -593,6 +578,15 @@ func newTestServer(t *testing.T, env map[string]string) (*Server, *BufferAuditSi
 	hash, _ := auth.HashPassword("test-password-123!@#")
 	_ = srv.setupStore.SetSetting(context.Background(), "admin_password_hash", hash)
 	_ = srv.setupStore.MarkComplete(context.Background())
+
+	// newTestServer sets CF_API_TOKEN/CF_ZONE_ID above, which makes the
+	// /sync page's read-only Cloudflare rule inventory (issue #83) think
+	// it's wired. Stub it out so tests never make a real outbound call to
+	// the Cloudflare API; tests that want to exercise the real path
+	// override srv.cfRuleLister themselves.
+	srv.cfRuleLister = func(context.Context, string, string) ([]cfmodels.IPAccessRule, error) {
+		return nil, nil
+	}
 
 	return srv, audit, secretsPath
 }

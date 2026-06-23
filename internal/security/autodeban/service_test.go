@@ -71,6 +71,10 @@ func (s *fakeStore) RecidiveLevel(_ context.Context, ip string) (int, error) {
 	return s.entries[ip].RecidiveLevel, nil
 }
 
+func (s *fakeStore) RecordCleanupFailure(_ context.Context, ip string, errMsg string) error {
+	return nil
+}
+
 func (s *fakeStore) statusOf(ip string) (string, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

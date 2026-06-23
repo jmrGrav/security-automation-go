@@ -10,6 +10,7 @@ import (
 	"sort"
 
 	"github.com/a-h/templ"
+	"github.com/jm/security-automation-go/internal/cloudflare/banlifecycle"
 )
 
 func (s *Server) handleBanLifecyclePage(w http.ResponseWriter, r *http.Request) {
@@ -203,17 +204,25 @@ func (s *Server) banLifecycleView(ctx context.Context) BanLifecycleView {
 	})
 	views := make([]BanLifecycleEntryView, 0, len(entries))
 	for _, e := range entries {
+		lastAttempt := ""
+		if !e.LastCleanupAttemptAt.IsZero() {
+			lastAttempt = e.LastCleanupAttemptAt.UTC().Format("2006-01-02 15:04:05Z")
+		}
 		views = append(views, BanLifecycleEntryView{
-			IP:            e.IP,
-			Source:        valueOrFallback(e.Source, "unknown"),
-			Reason:        valueOrFallback(e.Reason, "unspecified"),
-			Confidence:    e.Confidence,
-			CreatedAt:     e.CreatedAt.UTC().Format("2006-01-02 15:04:05Z"),
-			ExpiresAt:     e.ExpiresAt.UTC().Format("2006-01-02 15:04:05Z"),
-			Duration:      e.Duration.String(),
-			RuleID:        valueOrFallback(e.RuleID, "n/a"),
-			RecidiveLevel: e.RecidiveLevel,
-			Status:        valueOrFallback(e.Status, "active"),
+			IP:                   e.IP,
+			Source:               valueOrFallback(e.Source, "unknown"),
+			Reason:               valueOrFallback(e.Reason, "unspecified"),
+			Confidence:           e.Confidence,
+			CreatedAt:            e.CreatedAt.UTC().Format("2006-01-02 15:04:05Z"),
+			ExpiresAt:            e.ExpiresAt.UTC().Format("2006-01-02 15:04:05Z"),
+			Duration:             e.Duration.String(),
+			RuleID:               valueOrFallback(e.RuleID, "n/a"),
+			RecidiveLevel:        e.RecidiveLevel,
+			Status:               valueOrFallback(e.Status, "active"),
+			CleanupRetrying:      e.Status == banlifecycle.StatusActive && e.CleanupAttempts > 0,
+			CleanupAttempts:      e.CleanupAttempts,
+			LastCleanupError:     e.LastCleanupError,
+			LastCleanupAttemptAt: lastAttempt,
 		})
 	}
 	return BanLifecycleView{Wired: true, Entries: views}
@@ -228,6 +237,7 @@ func renderBanLifecycleRow(w io.Writer, entry BanLifecycleEntryView, actionsAvai
 		recidiveBadge = `<span class="badge error">3rd+</span>`
 	}
 	statusClass := "badge"
+	statusLabel := entry.Status
 	switch entry.Status {
 	case "active":
 		statusClass = "badge warning"
@@ -238,8 +248,19 @@ func renderBanLifecycleRow(w io.Writer, entry BanLifecycleEntryView, actionsAvai
 	case "operator_debanned":
 		statusClass = "badge success"
 	}
+	if entry.CleanupRetrying {
+		statusClass = "badge error"
+		statusLabel = fmt.Sprintf("retrying cleanup (%d failed attempt(s))", entry.CleanupAttempts)
+	}
+	statusCell := fmt.Sprintf(`<span class="%s">%s</span>`, statusClass, html.EscapeString(statusLabel))
+	if entry.CleanupRetrying {
+		statusCell += fmt.Sprintf(
+			`<div class="muted" style="font-size:.8rem">last attempt %s: %s</div>`,
+			html.EscapeString(entry.LastCleanupAttemptAt), html.EscapeString(entry.LastCleanupError),
+		)
+	}
 	if _, err := fmt.Fprintf(w,
-		`<tr><td><code>%s</code></td><td>%s</td><td>%s</td><td>%d</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td><span class="%s">%s</span></td>`,
+		`<tr><td><code>%s</code></td><td>%s</td><td>%s</td><td>%d</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td>`,
 		html.EscapeString(entry.IP),
 		html.EscapeString(entry.Source),
 		html.EscapeString(entry.Reason),
@@ -249,8 +270,7 @@ func renderBanLifecycleRow(w io.Writer, entry BanLifecycleEntryView, actionsAvai
 		html.EscapeString(entry.ExpiresAt),
 		html.EscapeString(entry.Duration),
 		html.EscapeString(entry.RuleID),
-		statusClass,
-		html.EscapeString(entry.Status),
+		statusCell,
 	); err != nil {
 		return err
 	}

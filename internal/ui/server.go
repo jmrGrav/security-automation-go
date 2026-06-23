@@ -24,10 +24,12 @@ import (
 	ai "github.com/jm/security-automation-go/internal/ai"
 	aigateway "github.com/jm/security-automation-go/internal/ai/gateway"
 	"github.com/jm/security-automation-go/internal/cloudflare/banlifecycle"
+	cfmodels "github.com/jm/security-automation-go/internal/cloudflare/models"
 	"github.com/jm/security-automation-go/internal/config"
 	"github.com/jm/security-automation-go/internal/detect"
 	"github.com/jm/security-automation-go/internal/health"
 	"github.com/jm/security-automation-go/internal/observability/metrics"
+	"github.com/jm/security-automation-go/internal/runtime/events"
 	"github.com/jm/security-automation-go/internal/security"
 	"github.com/jm/security-automation-go/internal/security/audit"
 	"github.com/jm/security-automation-go/internal/security/enrichment"
@@ -101,14 +103,18 @@ type Options struct {
 	// calls cscli itself — it only reads this record.
 	CrowdSecStatusStore   trustednetworks.CrowdSecStatusStore
 	CrowdSecAllowlistName string
-	AIExplain             aigateway.Gateway
-	AIExplainBuilder      func(ai.Config) aigateway.Gateway
-	AIConfig              ai.Config
-	ProviderFactories     map[string]ProviderFactory
-	SetupStore            SetupStorer
-	ValidateCloudflare    func(context.Context, string, string) error
-	ValidateAbuseIPDB     func(context.Context, string) error
-	ValidateBetterStack   func(context.Context, string) error
+	// EventStore is the scoped runtime event journal, used by /timeline to
+	// surface real lifecycle lineage (sequence numbers, correlation ids)
+	// instead of leaving runtime events unread.
+	EventStore          events.EventStore
+	AIExplain           aigateway.Gateway
+	AIExplainBuilder    func(ai.Config) aigateway.Gateway
+	AIConfig            ai.Config
+	ProviderFactories   map[string]ProviderFactory
+	SetupStore          SetupStorer
+	ValidateCloudflare  func(context.Context, string, string) error
+	ValidateAbuseIPDB   func(context.Context, string) error
+	ValidateBetterStack func(context.Context, string) error
 }
 
 type Server struct {
@@ -141,12 +147,22 @@ type Server struct {
 	trustedNetworksCache  *trustednetworks.ReportCache
 	crowdSecStatusStore   trustednetworks.CrowdSecStatusStore
 	crowdSecAllowlistName string
+	eventStore            events.EventStore
 	validateCloudflare    func(context.Context, string, string) error
 	validateAbuseIPDB     func(context.Context, string) error
 	validateBetterStack   func(context.Context, string) error
 	timelineMu            sync.Mutex
 	timelineCache         []audit.TimelineEvent
 	timelineCacheAt       time.Time
+	cfInventoryMu         sync.Mutex
+	cfInventoryCache      cfRuleInventory
+	cfInventoryCacheAt    time.Time
+	// cfRuleLister overrides the live Cloudflare API call fetchCFRuleInventory
+	// makes (see cfsync_page.go, issue #83). nil in production — the real
+	// discovery.ListIPAccessRules implementation is used. Tests inject a fake
+	// here, the same test-seam pattern as validateCloudflare, to avoid making
+	// real outbound Cloudflare API calls.
+	cfRuleLister func(ctx context.Context, token, zoneID string) ([]cfmodels.IPAccessRule, error)
 }
 
 func NewServer(cfg *config.Config, opts Options) (*Server, error) {
@@ -192,6 +208,7 @@ func NewServer(cfg *config.Config, opts Options) (*Server, error) {
 		trustedNetworksCache:  opts.TrustedNetworksCache,
 		crowdSecStatusStore:   opts.CrowdSecStatusStore,
 		crowdSecAllowlistName: opts.CrowdSecAllowlistName,
+		eventStore:            opts.EventStore,
 		aiBaseConfig:          opts.AIConfig,
 		aiConfig:              effectiveAIConfig,
 		aiExplainBuilder:      opts.AIExplainBuilder,
@@ -282,14 +299,8 @@ func (s *Server) routes() {
 	s.mux.Handle("GET /intelligence", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleIntelligencePage)))))
 	s.mux.Handle("POST /intelligence", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleIntelligenceLookup)))))
 	s.mux.Handle("GET /trusted-networks", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleTrustedNetworksPage)))))
-	s.mux.Handle("GET /trusted-networks/diff", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleTrustedNetworksDiff)))))
-	s.mux.Handle("GET /trusted-networks/refresh", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleTrustedNetworksRefreshDryRun)))))
 	s.mux.Handle("GET /trusted-networks/export", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleTrustedNetworksExport)))))
 	s.mux.Handle("GET /cloudflare/diff", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleCloudflareDiffPage)))))
-	s.mux.Handle("GET /replay", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleReplayPage)))))
-	s.mux.Handle("GET /deban", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleDebanPage)))))
-	s.mux.Handle("GET /recovery", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleRecoveryPage)))))
-	s.mux.Handle("GET /drift", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleDriftPage)))))
 	s.mux.Handle("POST /actions/cloudflare/ban", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleCloudflareBanPreview)))))
 	s.mux.Handle("POST /ui/ai/explain", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleAIExplain)))))
 	s.mux.Handle("GET /static/ai-explain.js", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleAIExplainScript)))))
@@ -433,61 +444,6 @@ func (s *Server) handleCloudflareDiffPage(w http.ResponseWriter, r *http.Request
 		"event_id":       eventID,
 	})
 	_ = workflowProjectionPage(s.cloudflareDiffView()).Render(ctx, w)
-}
-
-func (s *Server) handleReplayPage(w http.ResponseWriter, r *http.Request) {
-	ctx, cancel := stableUIReadContext(r.Context())
-	defer cancel()
-	eventID := newUIEventID()
-	defer s.audit.Record("replay_view", map[string]string{
-		"actor":          "local",
-		"source":         "ui",
-		"target":         "replay",
-		"result":         "read-only",
-		"correlation_id": eventID,
-		"event_id":       eventID,
-	})
-	_ = workflowProjectionPage(s.replayView()).Render(ctx, w)
-}
-
-func (s *Server) handleDebanPage(w http.ResponseWriter, r *http.Request) {
-	ctx, cancel := stableUIReadContext(r.Context())
-	defer cancel()
-	_ = ComingSoonPage(ComingSoonView{
-		Title:       "Deban",
-		Description: "This route is reserved for preview, dry-run, and future execution of CrowdSec and Cloudflare deban workflows.",
-		Active:      r.URL.Path,
-	}).Render(ctx, w)
-}
-
-func (s *Server) handleRecoveryPage(w http.ResponseWriter, r *http.Request) {
-	ctx, cancel := stableUIReadContext(r.Context())
-	defer cancel()
-	eventID := newUIEventID()
-	defer s.audit.Record("recovery_view", map[string]string{
-		"actor":          "local",
-		"source":         "ui",
-		"target":         "recovery",
-		"result":         "read-only",
-		"correlation_id": eventID,
-		"event_id":       eventID,
-	})
-	_ = workflowProjectionPage(s.recoveryView()).Render(ctx, w)
-}
-
-func (s *Server) handleDriftPage(w http.ResponseWriter, r *http.Request) {
-	ctx, cancel := stableUIReadContext(r.Context())
-	defer cancel()
-	eventID := newUIEventID()
-	defer s.audit.Record("drift_view", map[string]string{
-		"actor":          "local",
-		"source":         "ui",
-		"target":         "drift",
-		"result":         "read-only",
-		"correlation_id": eventID,
-		"event_id":       eventID,
-	})
-	_ = workflowProjectionPage(s.driftView()).Render(ctx, w)
 }
 
 func (s *Server) handleCloudflareBanPreview(w http.ResponseWriter, r *http.Request) {
@@ -1046,7 +1002,7 @@ func (s *Server) dashboardConsoleView(ctx context.Context) DashboardConsoleView 
 		{Label: "Nginx", Level: statusLevelFromText(nginxStatus(s.cfg.CrowdSec.NginxLogDir)), Detail: nginxStatus(s.cfg.CrowdSec.NginxLogDir)},
 		{Label: "SQLite WAL", Level: statusLevelFromText(sqliteWALStatus(s.cfg.StateDir)), Detail: sqliteWALStatus(s.cfg.StateDir)},
 		{Label: "UI", Level: boolStatus(s.cfg.UI.Enabled), Detail: uiStatus(s.cfg.UI.Enabled, s.cfg.UI.Addr)},
-		{Label: "HA / fencing", Level: "disabled", Detail: "read-only UI shell"},
+		{Label: "HA / fencing", Level: haFencingLevel(), Detail: haFencingDetail()},
 		{Label: "Ownership", Level: "unknown", Detail: "lineage is recorded by the daemon process; not observable from the UI"},
 		{Label: "UI mutations", Level: boolStatus(s.cfg.UI.MutationsEnabled), Detail: boolDetail(s.cfg.UI.MutationsEnabled, "enabled", "disabled")},
 		{Label: "Cloudflare mutations", Level: cloudflareLevel(s.cfSentinelToken(), s.cfZoneIDFromSetup(ctx), s.cfg.Cloudflare.MutationsEnabled), Detail: cloudflareHealthStatus(s.cfSentinelToken(), s.cfZoneIDFromSetup(ctx), s.cfg.Cloudflare.MutationsEnabled)},
@@ -1263,6 +1219,22 @@ func statusLevelFromText(text string) string {
 	}
 }
 
+// haFencingLevel/haFencingDetail report the real state of HA/fencing in this
+// build: the dedicated HA subsystem (internal/runtime/ha) was deleted as dead
+// code (issue #108, zero importers), and no config flag for HA or fencing
+// exists in internal/config. "disabled" would wrongly imply an operator could
+// turn it on; the honest state is that the feature is not present in this
+// build at all. Single-instance fencing tokens/leases (internal/storage/sqlite
+// lease.go, runtime/engine state machine) are internal scheduler plumbing, not
+// the multi-node HA failover this status row historically described.
+func haFencingLevel() string {
+	return "unavailable"
+}
+
+func haFencingDetail() string {
+	return "HA subsystem not present in this build (no multi-node failover support)"
+}
+
 func crowdSecStatus(decisionsLog string) string {
 	if strings.TrimSpace(decisionsLog) == "" {
 		return "CrowdSec unavailable / read-only fallback"
@@ -1308,7 +1280,7 @@ func providerStatus(enabled bool, configured bool) string {
 
 func normalizeAISubjectType(value string) string {
 	switch strings.TrimSpace(strings.ToLower(value)) {
-	case "timeline_event", "audit_event", "provider", "intelligence", "trusted_network", "diff", "replay", "recovery", "drift":
+	case "timeline_event", "audit_event", "provider", "intelligence", "trusted_network", "diff":
 		return strings.TrimSpace(strings.ToLower(value))
 	default:
 		return ""

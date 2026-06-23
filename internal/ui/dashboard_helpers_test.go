@@ -123,7 +123,7 @@ func TestOpenRestyDashboardDetail_WAFEventsFileMissing(t *testing.T) {
 func TestDashboard_StubPanelsAreDisabled(t *testing.T) {
 	srv := newCFTestServer(t, nil, "tok", "zone")
 	view := srv.dashboardConsoleView(context.Background())
-	for _, label := range []string{"HA / fencing", "Replay", "Recovery"} {
+	for _, label := range []string{"HA / fencing"} {
 		for _, item := range view.Statuses {
 			if item.Label == label && item.Level == "warning" {
 				t.Errorf("stub panel %q must not carry a warning badge", label)
@@ -132,21 +132,28 @@ func TestDashboard_StubPanelsAreDisabled(t *testing.T) {
 	}
 }
 
-func TestWorkflowPages_StubBadgesAreDisabled(t *testing.T) {
+// TestDashboard_HAFencingReportsRealUnavailableState guards GitHub issue #89:
+// the HA/fencing row used to hardcode Level: "disabled" with a misleading
+// detail ("read-only UI shell") that didn't describe why. Since the HA
+// subsystem (#108) was deleted as dead code and no HA/fencing config exists,
+// the row must honestly report "unavailable" rather than a config-implying
+// "disabled" state, with a detail that explains the real reason.
+func TestDashboard_HAFencingReportsRealUnavailableState(t *testing.T) {
 	srv := newCFTestServer(t, nil, "tok", "zone")
-	for _, tc := range []struct {
-		name   string
-		badges []StatusItem
-	}{
-		{"replay", srv.replayView().Badges},
-		{"drift", srv.driftView().Badges},
-	} {
-		for _, b := range tc.badges {
-			if b.Level == "warning" {
-				t.Errorf("%s page badge %q must not carry warning level", tc.name, b.Label)
-			}
+	view := srv.dashboardConsoleView(context.Background())
+	for _, item := range view.Statuses {
+		if item.Label != "HA / fencing" {
+			continue
 		}
+		if item.Level != "unavailable" {
+			t.Errorf("expected Level %q, got %q", "unavailable", item.Level)
+		}
+		if item.Detail == "read-only UI shell" || strings.TrimSpace(item.Detail) == "" {
+			t.Errorf("expected a real detail explaining HA absence, got %q", item.Detail)
+		}
+		return
 	}
+	t.Fatal("HA / fencing status row not found")
 }
 
 // ---------------------------------------------------------------------------

@@ -305,6 +305,61 @@ func TestWorker_IdempotentRerun_404TreatedAsSuccess(t *testing.T) {
 	}
 }
 
+// TestWorker_DeleteFailure_PersistsCleanupFailure guards against the
+// log-only failure path: when DeleteIPAccessRule fails with a real error
+// (not 404), the worker must persist the failure via
+// Store.RecordCleanupFailure (CleanupAttempts incremented, LastCleanupError
+// set) and the entry must stay active so the next pass retries — not just
+// log the error.
+func TestWorker_DeleteFailure_PersistsCleanupFailure(t *testing.T) {
+	now := time.Date(2026, 6, 21, 12, 0, 0, 0, time.UTC)
+	store := memstore.New()
+	entry := banlifecycle.Entry{
+		IP:            "172.16.0.9",
+		CreatedAt:     now.Add(-2 * time.Hour),
+		ExpiresAt:     now.Add(-1 * time.Hour),
+		Duration:      1 * time.Hour,
+		RuleID:        "rule-fail",
+		RecidiveLevel: 1,
+		Status:        banlifecycle.StatusActive,
+	}
+	if err := store.Upsert(context.Background(), entry); err != nil {
+		t.Fatalf("Upsert: %v", err)
+	}
+
+	cf := &fakeCF{deleteErr: map[string]error{"rule-fail": fmt.Errorf("cloudflare: HTTP 500: internal error")}}
+	w := &Worker{Store: store, CF: cf, ZoneID: "zone1", Now: func() time.Time { return now }}
+	if err := w.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	got, ok, err := store.Get(context.Background(), "172.16.0.9")
+	if err != nil || !ok {
+		t.Fatalf("Get: %v ok=%v", err, ok)
+	}
+	if got.Status != banlifecycle.StatusActive {
+		t.Fatalf("expected entry to remain active for retry, got status %q", got.Status)
+	}
+	if got.CleanupAttempts != 1 {
+		t.Fatalf("expected CleanupAttempts=1, got %d", got.CleanupAttempts)
+	}
+	if got.LastCleanupError == "" {
+		t.Fatal("expected LastCleanupError to be recorded, got empty string")
+	}
+	if got.LastCleanupAttemptAt.IsZero() {
+		t.Fatal("expected LastCleanupAttemptAt to be recorded, got zero time")
+	}
+
+	// A second failed pass must increment the counter further, not reset it.
+	if err := w.Run(context.Background()); err != nil {
+		t.Fatalf("second Run: %v", err)
+	}
+	got2, _, _ := store.Get(context.Background(), "172.16.0.9")
+	if got2.CleanupAttempts != 2 {
+		t.Fatalf("expected CleanupAttempts=2 after second failure, got %d", got2.CleanupAttempts)
+	}
+}
+
 func TestWorker_DebanOne_DeletesRuleAndMarksOperatorDebanned(t *testing.T) {
 	now := time.Date(2026, 6, 21, 12, 0, 0, 0, time.UTC)
 	store := memstore.New()

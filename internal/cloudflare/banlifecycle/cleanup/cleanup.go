@@ -160,7 +160,9 @@ func (w *Worker) deleteRuleAndFinish(ctx context.Context, entry banlifecycle.Ent
 	if ruleID == "" {
 		rules, err := loadRules()
 		if err != nil {
-			return fmt.Errorf("list autoban rules: %w", err)
+			failErr := fmt.Errorf("list autoban rules: %w", err)
+			w.recordCleanupFailure(ctx, entry.IP, failErr)
+			return failErr
 		}
 		ruleID = matchRuleByNote(rules, entry.IP)
 	}
@@ -168,13 +170,29 @@ func (w *Worker) deleteRuleAndFinish(ctx context.Context, entry banlifecycle.Ent
 	if ruleID != "" && w.CF != nil {
 		if err := w.CF.DeleteIPAccessRule(ctx, w.ZoneID, ruleID); err != nil {
 			if !isNotFound(err) {
-				return fmt.Errorf("delete rule %s: %w", ruleID, err)
+				failErr := fmt.Errorf("delete rule %s: %w", ruleID, err)
+				w.recordCleanupFailure(ctx, entry.IP, failErr)
+				return failErr
 			}
 			// Already gone — idempotent no-op.
 		}
 	}
 
 	return w.finishCleanup(ctx, entry, status, reason)
+}
+
+// recordCleanupFailure persists a delete-cleanup failure to Store so
+// operators can see "retrying" state on the /ban-lifecycle UI instead of
+// the failure only ever appearing in logs. Best-effort: a failure to
+// persist the failure itself is logged, not propagated, since the caller
+// is already returning the original delete error.
+func (w *Worker) recordCleanupFailure(ctx context.Context, ip string, cleanupErr error) {
+	if w.Store == nil {
+		return
+	}
+	if err := w.Store.RecordCleanupFailure(ctx, ip, cleanupErr.Error()); err != nil {
+		w.logger().Warn("banlifecycle cleanup: failed to persist cleanup failure", "ip", ip, "error", err)
+	}
 }
 
 func (w *Worker) finishCleanup(ctx context.Context, entry banlifecycle.Entry, status, reason string) error {
