@@ -59,7 +59,8 @@ func (s *Server) timelineView(r *http.Request) TimelineView {
 	page := parsePositiveInt(r.URL.Query().Get("page"), 1)
 	pageSize := clampInt(parsePositiveInt(r.URL.Query().Get("limit"), 20), 5, 100)
 
-	events := s.allTimelineEvents(ctx)
+	hasFilter := query != "" || action != "" || source != ""
+	events := s.timelineEvents(ctx, timelineEvidenceReadLimit(page, pageSize, hasFilter))
 	events = filterTimelineEvents(events, query, action, source)
 	total := len(events)
 	paged, hasPrev, hasNext := paginateTimelineEvents(events, page, pageSize)
@@ -99,42 +100,63 @@ func (s *Server) timelineView(r *http.Request) TimelineView {
 	}
 }
 
-// timelineCacheTTL bounds how often the full audit+evidence merge is
-// recomputed. Without this, an operator repeatedly refreshing /timeline
-// during a live incident forces a full re-merge, re-sort, and re-paginate of
-// the entire history on every single request — the cost grows with total
-// history instead of page size. A short TTL collapses bursts of refreshes
-// into a single recomputation while still keeping the view fresh.
-const timelineCacheTTL = 3 * time.Second
+const (
+	// timelineCacheTTL bounds how often the audit+evidence merge is recomputed.
+	// Without this, an operator repeatedly refreshing /timeline during a live
+	// incident forces a re-merge, re-sort, and re-paginate on every request.
+	timelineCacheTTL = 3 * time.Second
+
+	// timelineEvidenceMaxWindow is the largest evidence read-model slice the UI
+	// will merge for a single /timeline projection. It keeps large datasets
+	// bounded while preserving enough history for filters and exports.
+	timelineEvidenceMaxWindow = 1000
+	timelineEvidenceMinWindow = 100
+	timelineEvidenceLookahead = 5
+)
 
 // allTimelineEvents merges audit entries and WAF evidence records into a single
 // reverse-chronological stream, sorted by parsed wall-clock time. The merged
 // result is cached for timelineCacheTTL to bound the cost of repeated
 // requests against a growing history (see timelineCacheTTL).
 //
-// Evidence is capped at 10000 rows (matches evidence_page.go). Runtime daemon
-// lifecycle events (startup, config reloads) require a dedicated capture
-// mechanism not yet wired — deferred to a follow-up.
+// Evidence is capped by timelineEvidenceMaxWindow. Runtime daemon lifecycle
+// events (startup, config reloads) are read from the scoped runtime event store.
 func (s *Server) allTimelineEvents(ctx context.Context) []audit.TimelineEvent {
+	return s.timelineEvents(ctx, timelineEvidenceMaxWindow)
+}
+
+func (s *Server) timelineEvents(ctx context.Context, evidenceLimit int) []audit.TimelineEvent {
+	evidenceLimit = clampInt(evidenceLimit, 1, timelineEvidenceMaxWindow)
 	s.timelineMu.Lock()
-	if !s.timelineCacheAt.IsZero() && time.Since(s.timelineCacheAt) < timelineCacheTTL {
+	if !s.timelineCacheAt.IsZero() && s.timelineCacheLimit == evidenceLimit && time.Since(s.timelineCacheAt) < timelineCacheTTL {
 		cached := s.timelineCache
 		s.timelineMu.Unlock()
 		return cached
 	}
 	s.timelineMu.Unlock()
 
-	events := s.computeAllTimelineEvents(ctx)
+	events := s.computeAllTimelineEvents(ctx, evidenceLimit)
 
 	s.timelineMu.Lock()
 	s.timelineCache = events
 	s.timelineCacheAt = time.Now()
+	s.timelineCacheLimit = evidenceLimit
 	s.timelineMu.Unlock()
 
 	return events
 }
 
-func (s *Server) computeAllTimelineEvents(ctx context.Context) []audit.TimelineEvent {
+func timelineEvidenceReadLimit(page, pageSize int, hasFilter bool) int {
+	if hasFilter {
+		return timelineEvidenceMaxWindow
+	}
+	page = maxInt(1, page)
+	pageSize = clampInt(pageSize, 5, 100)
+	needed := page * pageSize
+	return clampInt(needed+(pageSize*timelineEvidenceLookahead), timelineEvidenceMinWindow, timelineEvidenceMaxWindow)
+}
+
+func (s *Server) computeAllTimelineEvents(ctx context.Context, evidenceLimit int) []audit.TimelineEvent {
 	ctx, cancel := stableUIReadContext(ctx)
 	defer cancel()
 	var timed []timedEvent
@@ -149,7 +171,7 @@ func (s *Server) computeAllTimelineEvents(ctx context.Context) []audit.TimelineE
 	}
 
 	if s.evidence != nil {
-		evs, err := s.evidence.Search(ctx, reporting.EvidenceSearchOptions{Limit: 10000})
+		evs, err := s.evidence.Search(ctx, reporting.EvidenceSearchOptions{Limit: evidenceLimit})
 		if err == nil {
 			for _, ev := range evs {
 				timed = append(timed, timedEvent{t: ev.Timestamp, event: evidenceToTimelineEvent(ev)})
@@ -437,10 +459,10 @@ func TimelinePage(view TimelineView, csrfToken string) templ.Component {
 		Active:      "/timeline",
 		BadgeLabels: view.Badges,
 		Body: templ.ComponentFunc(func(ctx context.Context, w io.Writer) error {
-			if _, err := fmt.Fprintf(w, `<div class="stack" data-live-shell="timeline" data-live-refresh-url="%s" data-live-refresh-interval="10000"><div class="panel"><p class="muted">This page is read-only. Filters update the projection only; JSON and CSV exports are derived from the same server-side event stream.</p></div>`, html.EscapeString(view.RefreshURL)); err != nil {
+			if _, err := fmt.Fprintf(w, `<div class="stack" data-live-shell="timeline" data-live-refresh-url="%s" data-live-refresh-interval="10000"><div class="panel collapsible-panel" data-collapsible-panel="true" data-collapsible-key="timeline-read-model" data-collapsed="false"><div class="collapsible-head"><div><h2>Read model</h2><p class="muted">Server-rendered projection over audit, evidence, and runtime lineage.</p></div><button type="button" class="badge" data-collapsible-toggle="true" aria-expanded="true">Collapse</button></div><div class="collapsible-body"><p class="muted">This page is read-only. Filters update the projection only; JSON and CSV exports are derived from the same server-side event stream.</p></div></div>`, html.EscapeString(view.RefreshURL)); err != nil {
 				return err
 			}
-			if _, err := fmt.Fprint(w, `<div class="panel"><form method="get" action="/timeline" class="stack" data-live-search-form="true">`); err != nil {
+			if _, err := fmt.Fprint(w, `<div class="panel collapsible-panel" data-collapsible-panel="true" data-collapsible-key="timeline-filters" data-collapsed="false"><div class="collapsible-head"><div><h2>Filters</h2><p class="muted">Server-side filtering; no browser-side business logic.</p></div><button type="button" class="badge" data-collapsible-toggle="true" aria-expanded="true">Collapse</button></div><div class="collapsible-body"><form method="get" action="/timeline" class="stack" data-live-search-form="true">`); err != nil {
 				return err
 			}
 			// Source filter row
@@ -518,7 +540,7 @@ func TimelinePage(view TimelineView, csrfToken string) templ.Component {
 			if _, err := io.WriteString(w, html.EscapeString(timelineExportURL(view, "csv"))); err != nil {
 				return err
 			}
-			if _, err := fmt.Fprint(w, `">Export CSV</a></div></form></div>`); err != nil {
+			if _, err := fmt.Fprint(w, `">Export CSV</a></div></form></div></div>`); err != nil {
 				return err
 			}
 

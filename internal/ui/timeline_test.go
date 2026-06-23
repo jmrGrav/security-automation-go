@@ -193,6 +193,61 @@ func TestAllTimelineEventsCachesWithinTTL(t *testing.T) {
 	}
 }
 
+func TestTimelineSmallPageUsesBoundedEvidenceWindow(t *testing.T) {
+	now := time.Now().UTC()
+	items := make([]reporting.DecisionEvidence, 5000)
+	for i := range items {
+		items[i] = reporting.DecisionEvidence{
+			EvidenceID: "ev-windowed",
+			Source:     "cloudflare_waf",
+			IP:         "192.0.2.1",
+			Decision:   "report_pending",
+			Timestamp:  now.Add(-time.Duration(i) * time.Second),
+		}
+	}
+	store := &stubEvidenceStore{items: items}
+	srv, _, _ := newTestServer(t, nil)
+	srv.evidence = store
+	cookie := loginCookie(t, srv, "test-password-123!@#")
+
+	req := httptest.NewRequest(http.MethodGet, "/timeline?limit=20", nil)
+	req.AddCookie(cookie)
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if len(store.searchCalls) == 0 {
+		t.Fatalf("expected /timeline to query evidence store")
+	}
+	got := store.searchCalls[0].Limit
+	if got <= 0 || got > 150 {
+		t.Fatalf("expected first /timeline page to use a bounded evidence window <= 150 rows, got %d", got)
+	}
+}
+
+func TestTimelinePageExposesErgonomicControls(t *testing.T) {
+	srv, _, _ := newTestServer(t, nil)
+	cookie := loginCookie(t, srv, "test-password-123!@#")
+	req := httptest.NewRequest(http.MethodGet, "/timeline", nil)
+	req.AddCookie(cookie)
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+
+	body := rr.Body.String()
+	for _, want := range []string{
+		`data-density-toggle="true"`,
+		`data-collapsible-panel="true"`,
+		`data-collapsible-toggle="true"`,
+		`data-collapsible-key="timeline-read-model"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("timeline page missing ergonomic control %q: %s", want, body)
+		}
+	}
+}
+
 func TestTimelineSourceFilter(t *testing.T) {
 	now := time.Now().UTC()
 	store := &stubEvidenceStore{
@@ -243,6 +298,32 @@ func TestTimelineSourceFilter(t *testing.T) {
 	}
 	if !strings.Contains(body2, "unique-audit-target-xzqw") {
 		t.Errorf("audit filter should show audit event target: %s", body2)
+	}
+}
+
+func BenchmarkTimelineViewLargeEvidence(b *testing.B) {
+	now := time.Now().UTC()
+	items := make([]reporting.DecisionEvidence, 10000)
+	for i := range items {
+		items[i] = reporting.DecisionEvidence{
+			EvidenceID: "ev-bench",
+			Source:     "cloudflare_waf",
+			IP:         "198.51.100.42",
+			Decision:   "report_pending",
+			Timestamp:  now.Add(-time.Duration(i) * time.Second),
+		}
+	}
+	store := &stubEvidenceStore{items: items}
+	srv := &Server{evidence: store}
+	req := httptest.NewRequest(http.MethodGet, "/timeline?limit=20", nil)
+
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		srv.timelineMu.Lock()
+		srv.timelineCacheAt = time.Time{}
+		srv.timelineCache = nil
+		srv.timelineMu.Unlock()
+		_ = srv.timelineView(req)
 	}
 }
 
