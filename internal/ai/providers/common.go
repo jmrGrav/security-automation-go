@@ -7,11 +7,9 @@ import (
 	"net/http"
 	"os"
 	"strings"
-	"sync"
 	"time"
 
 	ai "github.com/jm/security-automation-go/internal/ai"
-	aiquota "github.com/jm/security-automation-go/internal/ai/quota"
 	airedaction "github.com/jm/security-automation-go/internal/ai/redaction"
 )
 
@@ -93,29 +91,4 @@ func ReadResponseBody(resp *http.Response, limit int64) ([]byte, error) {
 		limit = 1 << 20
 	}
 	return io.ReadAll(io.LimitReader(resp.Body, limit))
-}
-
-type quotaState struct {
-	mu    sync.RWMutex
-	quota aiquota.ProviderQuota
-	ok    bool
-}
-
-func (s *quotaState) set(quota aiquota.ProviderQuota) {
-	if s == nil {
-		return
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.quota = quota
-	s.ok = true
-}
-
-func (s *quotaState) get() (aiquota.ProviderQuota, bool) {
-	if s == nil {
-		return aiquota.ProviderQuota{}, false
-	}
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.quota, s.ok
 }
