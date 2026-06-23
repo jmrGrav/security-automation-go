@@ -65,6 +65,26 @@ type CredentialStorer interface {
 
 var legacySecretsDirPath = "/etc/security-automation-go/secrets"
 
+// BanDebanner is the UI-facing abstraction for operator-initiated Cloudflare
+// deban actions on the /ban-lifecycle page. Implementations must only ever
+// remove the Cloudflare rule and update banlifecycle.Store — debanning from
+// Cloudflare must never delete AbuseIPDB report history or reset the
+// AbuseIPDB reporting window.
+type BanDebanner interface {
+	DebanIP(ctx context.Context, ip, reason string) error
+	ClearManagedBans(ctx context.Context, reason string) (BanClearResult, error)
+}
+
+// BanClearResult summarizes the outcome of a bulk "clear all managed bans"
+// action, for audit logging and operator feedback.
+type BanClearResult struct {
+	Attempted int
+	Deleted   int
+	Skipped   int
+	Failed    int
+	Errors    []string
+}
+
 type Options struct {
 	SecretProvider       SecretProvider
 	CredentialStore      CredentialStorer
@@ -73,6 +93,7 @@ type Options struct {
 	Enrichment           *enrichment.Service
 	EvidenceStore        reporting.EvidenceStore
 	BanLifecycleStore    banlifecycle.Store
+	BanDebanner          BanDebanner
 	TrustedNetworksCache *trustednetworks.ReportCache
 	// CrowdSecStatusStore is the read-only source for the CrowdSec spoke's
 	// status (configured/auth_ok/last_sync_at/last_error/counts), persisted
@@ -116,6 +137,7 @@ type Server struct {
 	setupStore            SetupStorer
 	evidence              reporting.EvidenceStore
 	banLifecycleStore     banlifecycle.Store
+	banDebanner           BanDebanner
 	trustedNetworksCache  *trustednetworks.ReportCache
 	crowdSecStatusStore   trustednetworks.CrowdSecStatusStore
 	crowdSecAllowlistName string
@@ -166,6 +188,7 @@ func NewServer(cfg *config.Config, opts Options) (*Server, error) {
 		enrichment:            opts.Enrichment,
 		evidence:              opts.EvidenceStore,
 		banLifecycleStore:     opts.BanLifecycleStore,
+		banDebanner:           opts.BanDebanner,
 		trustedNetworksCache:  opts.TrustedNetworksCache,
 		crowdSecStatusStore:   opts.CrowdSecStatusStore,
 		crowdSecAllowlistName: opts.CrowdSecAllowlistName,
@@ -250,6 +273,8 @@ func (s *Server) routes() {
 	s.mux.Handle("GET /nginx-access", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleNginxAccessPage)))))
 	s.mux.Handle("GET /sync", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleCFSyncPage)))))
 	s.mux.Handle("GET /ban-lifecycle", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleBanLifecyclePage)))))
+	s.mux.Handle("POST /actions/ban-lifecycle/deban", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleBanLifecycleDeban)))))
+	s.mux.Handle("POST /actions/ban-lifecycle/clear", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleBanLifecycleClearAll)))))
 	s.mux.Handle("GET /about", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleAboutPage)))))
 	s.mux.Handle("GET /system", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleAboutPage)))))
 	s.mux.Handle("GET /audit", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleAuditTrailPage)))))

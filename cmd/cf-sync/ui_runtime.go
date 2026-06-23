@@ -37,10 +37,10 @@ import (
 )
 
 func runUI(ctx context.Context, logger *slog.Logger, cfg *config.Config) error {
-	return runUIWithLocker(ctx, logger, cfg, true, nil, nil, nil, nil, nil)
+	return runUIWithLocker(ctx, logger, cfg, true, nil, nil, nil, nil, nil, nil)
 }
 
-func runUIWithLocker(ctx context.Context, logger *slog.Logger, cfg *config.Config, acquireLock bool, evidenceHolder *lazyEvidenceStore, sharedDB *sqlite.DB, trustedNetworksCache *trustednetworks.ReportCache, banLifecycleHolder *lazyBanLifecycleStore, crowdSecStatusHolder *lazyCrowdSecStatusStore) error {
+func runUIWithLocker(ctx context.Context, logger *slog.Logger, cfg *config.Config, acquireLock bool, evidenceHolder *lazyEvidenceStore, sharedDB *sqlite.DB, trustedNetworksCache *trustednetworks.ReportCache, banLifecycleHolder *lazyBanLifecycleStore, crowdSecStatusHolder *lazyCrowdSecStatusStore, banDebannerHolder *lazyBanDebanner) error {
 	if !cfg.UI.Enabled {
 		return errors.New("ui mode requires UI_ENABLED=1 or ui.enabled=true")
 	}
@@ -188,6 +188,16 @@ func runUIWithLocker(ctx context.Context, logger *slog.Logger, cfg *config.Confi
 		crowdSecStatusStore = crowdSecStatusHolder
 	}
 
+	// banDebannerHolder resolves against the cleanup worker the daemon wires
+	// up after this UI goroutine starts (same pattern as banLifecycleHolder).
+	// In standalone -mode ui (no daemon, holder nil), there is no Cloudflare
+	// enforcement client in this process, so deban actions stay unavailable
+	// rather than attempting Cloudflare calls with no client.
+	var banDebanner ui.BanDebanner
+	if banDebannerHolder != nil {
+		banDebanner = banDebannerHolder
+	}
+
 	server, err := ui.NewServer(cfg, ui.Options{
 		SetupStore:           setupStore,
 		CredentialStore:      credentialStore,
@@ -197,6 +207,7 @@ func runUIWithLocker(ctx context.Context, logger *slog.Logger, cfg *config.Confi
 		EvidenceStore:        evidenceStore,
 		BanLifecycleStore:    banLifecycleStore,
 		CrowdSecStatusStore:  crowdSecStatusStore,
+		BanDebanner:          banDebanner,
 		TrustedNetworksCache: trustedNetworksCache,
 		ValidateAbuseIPDB:    ui.ValidateAbuseIPDB,
 		AIExplainBuilder: func(effective ai.Config) aigateway.Gateway {

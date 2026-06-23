@@ -78,7 +78,7 @@ func TestBanLifecycleView_RendersActiveEntries(t *testing.T) {
 	}
 
 	var buf strings.Builder
-	if err := BanLifecyclePage(view).Render(context.Background(), &buf); err != nil {
+	if err := BanLifecyclePage(view, false, "").Render(context.Background(), &buf); err != nil {
 		t.Fatalf("render: %v", err)
 	}
 	out := buf.String()
@@ -87,6 +87,64 @@ func TestBanLifecycleView_RendersActiveEntries(t *testing.T) {
 	}
 	if !strings.Contains(out, "rule-123") {
 		t.Error("expected rendered page to contain the rule ID")
+	}
+}
+
+func TestBanLifecyclePage_ActionsAvailable_RendersDebanAndClearControls(t *testing.T) {
+	now := time.Now().UTC()
+	view := BanLifecycleView{Wired: true, Entries: []BanLifecycleEntryView{
+		{
+			IP:            "203.0.113.5",
+			Source:        "autoban_confidence_100",
+			Reason:        "AbuseIPDB confidence 100 + local burst",
+			Confidence:    100,
+			CreatedAt:     now.Format("2006-01-02 15:04:05Z"),
+			ExpiresAt:     now.Add(time.Hour).Format("2006-01-02 15:04:05Z"),
+			Duration:      time.Hour.String(),
+			RuleID:        "rule-123",
+			RecidiveLevel: 1,
+			Status:        banlifecycle.StatusActive,
+		},
+	}}
+	var buf strings.Builder
+	if err := BanLifecyclePage(view, true, "test-csrf-token").Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "/actions/ban-lifecycle/deban") {
+		t.Error("expected rendered page to contain the per-IP deban form action")
+	}
+	if !strings.Contains(out, "/actions/ban-lifecycle/clear") {
+		t.Error("expected rendered page to contain the clear-all form action")
+	}
+	if !strings.Contains(out, "test-csrf-token") {
+		t.Error("expected rendered page to embed the csrf token")
+	}
+	if !strings.Contains(out, "AbuseIPDB") {
+		t.Error("expected rendered page to mention AbuseIPDB is never touched")
+	}
+}
+
+func TestBanLifecyclePage_ActionsUnavailable_OmitsDebanControls(t *testing.T) {
+	now := time.Now().UTC()
+	view := BanLifecycleView{Wired: true, Entries: []BanLifecycleEntryView{
+		{
+			IP:        "203.0.113.5",
+			CreatedAt: now.Format("2006-01-02 15:04:05Z"),
+			ExpiresAt: now.Add(time.Hour).Format("2006-01-02 15:04:05Z"),
+			Status:    banlifecycle.StatusActive,
+		},
+	}}
+	var buf strings.Builder
+	if err := BanLifecyclePage(view, false, "").Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	out := buf.String()
+	if strings.Contains(out, "/actions/ban-lifecycle/deban") {
+		t.Error("expected no deban form action when actions are unavailable")
+	}
+	if strings.Contains(out, "/actions/ban-lifecycle/clear") {
+		t.Error("expected no clear-all form action when actions are unavailable")
 	}
 }
 
@@ -104,7 +162,7 @@ func TestBanLifecycleView_PropagatesStoreError(t *testing.T) {
 
 func TestBanLifecyclePage_EmptyState(t *testing.T) {
 	var buf strings.Builder
-	if err := BanLifecyclePage(BanLifecycleView{Wired: true}).Render(context.Background(), &buf); err != nil {
+	if err := BanLifecyclePage(BanLifecycleView{Wired: true}, false, "").Render(context.Background(), &buf); err != nil {
 		t.Fatalf("render: %v", err)
 	}
 	if !strings.Contains(buf.String(), "No managed Cloudflare ban lifecycle entries yet") {
@@ -145,7 +203,7 @@ func TestBanLifecycleView_RendersFullLifecycleHistory(t *testing.T) {
 	}
 
 	var buf strings.Builder
-	if err := BanLifecyclePage(view).Render(context.Background(), &buf); err != nil {
+	if err := BanLifecyclePage(view, false, "").Render(context.Background(), &buf); err != nil {
 		t.Fatalf("render: %v", err)
 	}
 	out := buf.String()

@@ -19,6 +19,12 @@ const (
 	StatusExpiredCleaned = "expired_cleaned"
 	StatusAutoDebanned   = "auto_debanned"
 	StatusManualOverride = "manual_override"
+	// StatusOperatorDebanned marks an entry an operator explicitly cleared
+	// via the /ban-lifecycle UI (single IP or bulk "clear all managed
+	// bans"), as distinct from an automatic expiry cleanup
+	// (StatusExpiredCleaned) or a reputation-gate auto-deban
+	// (StatusAutoDebanned).
+	StatusOperatorDebanned = "operator_debanned"
 )
 
 // Entry represents one Cloudflare autoban lifecycle record for a single IP.
