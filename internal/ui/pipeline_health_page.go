@@ -167,11 +167,6 @@ func PipelineHealthPage(view PipelineHealthView) templ.Component {
 			if view.Error != "" {
 				return writeEmptyState(w, view.Error)
 			}
-			if view.Truncated {
-				if _, err := fmt.Fprint(w, `<div class="panel"><p class="warning">Result set hit the 100 000-row cap — counts may be incomplete.</p></div>`); err != nil {
-					return err
-				}
-			}
 			if _, err := fmt.Fprint(w, `<div class="panel"><div class="table-wrap"><table><colgroup><col style="width:13rem"><col style="width:9rem"><col style="width:6rem"><col style="width:6rem"><col style="width:6rem"><col style="width:6rem"><col style="width:12rem"><col></colgroup><thead><tr><th>Source</th><th>State</th><th>Classified</th><th>Reported</th><th>Suppressed</th><th>Pending</th><th>Last event</th><th>Latest evidence</th></tr></thead><tbody>`); err != nil {
 				return err
 			}

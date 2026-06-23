@@ -294,10 +294,9 @@ type PipelineHealthRow struct {
 }
 
 type PipelineHealthView struct {
-	Rows      []PipelineHealthRow
-	Total     PipelineHealthRow
-	Truncated bool // hit the 100k search cap — counts may be incomplete
-	Error     string
+	Rows  []PipelineHealthRow
+	Total PipelineHealthRow
+	Error string
 }
 
 type EvidenceDetailView struct {
