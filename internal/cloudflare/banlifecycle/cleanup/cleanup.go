@@ -142,6 +142,20 @@ func (w *Worker) Run(ctx context.Context) error {
 }
 
 func (w *Worker) cleanupOne(ctx context.Context, entry banlifecycle.Entry, loadRules func() ([]CFRule, error)) error {
+	reason := fmt.Sprintf("ban expired at %s (duration=%s, recidive_level=%d)",
+		entry.ExpiresAt.UTC().Format(time.RFC3339), entry.Duration, entry.RecidiveLevel)
+	return w.deleteRuleAndFinish(ctx, entry, loadRules, banlifecycle.StatusExpiredCleaned, reason)
+}
+
+// deleteRuleAndFinish deletes the Cloudflare rule tracked by entry (by
+// RuleID, falling back to note-based lookup when empty, treating "already
+// gone" as a successful no-op), then marks the entry with the given status
+// and writes the audit/evidence trail. This is the single idempotent
+// delete-and-record sequence shared by the automatic expiry cleanup pass
+// (Run) and operator-initiated deban actions (DebanOne, ClearAll) — the
+// only difference between those callers is the resulting status and the
+// human-readable reason.
+func (w *Worker) deleteRuleAndFinish(ctx context.Context, entry banlifecycle.Entry, loadRules func() ([]CFRule, error), status, reason string) error {
 	ruleID := entry.RuleID
 	if ruleID == "" {
 		rules, err := loadRules()
@@ -149,14 +163,9 @@ func (w *Worker) cleanupOne(ctx context.Context, entry banlifecycle.Entry, loadR
 			return fmt.Errorf("list autoban rules: %w", err)
 		}
 		ruleID = matchRuleByNote(rules, entry.IP)
-		if ruleID == "" {
-			// No matching CF rule found (already deleted, or never had one).
-			// Treat as a successful no-op for idempotency.
-			return w.finishCleanup(ctx, entry, "no matching Cloudflare rule found (already removed or never created)")
-		}
 	}
 
-	if w.CF != nil {
+	if ruleID != "" && w.CF != nil {
 		if err := w.CF.DeleteIPAccessRule(ctx, w.ZoneID, ruleID); err != nil {
 			if !isNotFound(err) {
 				return fmt.Errorf("delete rule %s: %w", ruleID, err)
@@ -165,29 +174,133 @@ func (w *Worker) cleanupOne(ctx context.Context, entry banlifecycle.Entry, loadR
 		}
 	}
 
-	reason := fmt.Sprintf("ban expired at %s (duration=%s, recidive_level=%d)",
-		entry.ExpiresAt.UTC().Format(time.RFC3339), entry.Duration, entry.RecidiveLevel)
-	return w.finishCleanup(ctx, entry, reason)
+	return w.finishCleanup(ctx, entry, status, reason)
 }
 
-func (w *Worker) finishCleanup(ctx context.Context, entry banlifecycle.Entry, reason string) error {
-	if err := w.Store.MarkStatus(ctx, entry.IP, banlifecycle.StatusExpiredCleaned, reason); err != nil {
+func (w *Worker) finishCleanup(ctx context.Context, entry banlifecycle.Entry, status, reason string) error {
+	if err := w.Store.MarkStatus(ctx, entry.IP, status, reason); err != nil {
 		return fmt.Errorf("mark status: %w", err)
 	}
-	cleanedEntry := entry
-	cleanedEntry.Status = banlifecycle.StatusExpiredCleaned
+	finishedEntry := entry
+	finishedEntry.Status = status
 	if w.Audit != nil {
-		if err := w.Audit.RecordDeban(ctx, cleanedEntry, reason); err != nil {
+		if err := w.Audit.RecordDeban(ctx, finishedEntry, reason); err != nil {
 			w.logger().Warn("banlifecycle cleanup: audit record failed", "ip", entry.IP, "error", err)
 		}
 	}
 	if w.Evidence != nil {
-		if err := w.Evidence.RecordDebanEvidence(ctx, cleanedEntry, reason); err != nil {
+		if err := w.Evidence.RecordDebanEvidence(ctx, finishedEntry, reason); err != nil {
 			w.logger().Warn("banlifecycle cleanup: evidence record failed", "ip", entry.IP, "error", err)
 		}
 	}
-	w.logger().Info("banlifecycle cleanup: rule expired and removed", "ip", entry.IP, "reason", reason)
+	w.logger().Info("banlifecycle cleanup: rule removed", "ip", entry.IP, "status", status, "reason", reason)
 	return nil
+}
+
+// DebanOne is the operator-initiated counterpart to the automatic expiry
+// cleanup: it removes the Cloudflare rule for a single managed IP (idempotent,
+// same delete-by-RuleID-or-note-fallback logic as Run) and marks the entry
+// StatusOperatorDebanned with the operator-supplied reason. It only ever
+// touches banlifecycle.Store and the Cloudflare rule — it never reads or
+// writes AbuseIPDB report data, dedup state, or reporting windows, since
+// debanning from Cloudflare must never be conflated with erasing AbuseIPDB
+// history.
+//
+// Returns an error if ip has no tracked entry at all. Debanning an IP that
+// is already expired_cleaned/auto_debanned/operator_debanned is allowed and
+// idempotent (it simply re-confirms the Cloudflare rule is gone and updates
+// the status/reason).
+func (w *Worker) DebanOne(ctx context.Context, ip, reason string) (banlifecycle.Entry, error) {
+	if w == nil || w.Store == nil {
+		return banlifecycle.Entry{}, fmt.Errorf("banlifecycle/cleanup: worker not configured")
+	}
+	entry, found, err := w.Store.Get(ctx, ip)
+	if err != nil {
+		return banlifecycle.Entry{}, fmt.Errorf("get entry for %s: %w", ip, err)
+	}
+	if !found {
+		return banlifecycle.Entry{}, fmt.Errorf("no tracked ban lifecycle entry for %s", ip)
+	}
+	if reason == "" {
+		reason = "operator-initiated deban"
+	}
+	var rulesCache []CFRule
+	var rulesCacheLoaded bool
+	loadRules := func() ([]CFRule, error) {
+		if rulesCacheLoaded {
+			return rulesCache, nil
+		}
+		if w.CF == nil {
+			rulesCacheLoaded = true
+			return nil, nil
+		}
+		rules, err := w.CF.ListAutobanRules(ctx, w.ZoneID)
+		if err != nil {
+			return nil, err
+		}
+		rulesCache = rules
+		rulesCacheLoaded = true
+		return rulesCache, nil
+	}
+	if err := w.deleteRuleAndFinish(ctx, entry, loadRules, banlifecycle.StatusOperatorDebanned, reason); err != nil {
+		return banlifecycle.Entry{}, err
+	}
+	entry.Status = banlifecycle.StatusOperatorDebanned
+	return entry, nil
+}
+
+// ClearResult summarizes the outcome of a bulk ClearAll pass.
+type ClearResult struct {
+	Attempted int
+	Deleted   int
+	Skipped   int
+	Failed    int
+	Errors    []string
+}
+
+// ClearAll debans every currently-active managed IP (banlifecycle.Store.Active),
+// one at a time, via the same idempotent delete-by-RuleID-or-note-fallback
+// path as DebanOne. It never touches AbuseIPDB data or any IP outside the
+// managed banlifecycle.Store — manually-created Cloudflare rules and
+// CrowdSec-driven rules are never enumerated or deleted by this call.
+//
+// A small delay between deletes is used to avoid bursting the Cloudflare
+// API when clearing many entries at once; callers needing tighter control
+// over the request budget should wrap the worker's CF client in their own
+// rate limiter.
+func (w *Worker) ClearAll(ctx context.Context, reason string) (ClearResult, error) {
+	var result ClearResult
+	if w == nil || w.Store == nil {
+		return result, fmt.Errorf("banlifecycle/cleanup: worker not configured")
+	}
+	active, err := w.Store.Active(ctx)
+	if err != nil {
+		return result, fmt.Errorf("banlifecycle/cleanup: Store.Active: %w", err)
+	}
+	if reason == "" {
+		reason = "operator-initiated bulk clear"
+	}
+	result.Attempted = len(active)
+	for i, entry := range active {
+		if ctx.Err() != nil {
+			result.Failed += len(active) - i
+			result.Errors = append(result.Errors, fmt.Sprintf("%s: %v", entry.IP, ctx.Err()))
+			break
+		}
+		if _, err := w.DebanOne(ctx, entry.IP, reason); err != nil {
+			result.Failed++
+			result.Errors = append(result.Errors, fmt.Sprintf("%s: %v", entry.IP, err))
+			continue
+		}
+		result.Deleted++
+		if i < len(active)-1 {
+			select {
+			case <-ctx.Done():
+			case <-time.After(200 * time.Millisecond):
+			}
+		}
+	}
+	return result, nil
 }
 
 // matchRuleByNote finds the Cloudflare rule for ip whose Notes carries the

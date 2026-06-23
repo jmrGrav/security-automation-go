@@ -12,6 +12,7 @@ import (
 	"github.com/jm/security-automation-go/internal/runtime/journal"
 	runtimemodels "github.com/jm/security-automation-go/internal/runtime/models"
 	"github.com/jm/security-automation-go/internal/services/reporting"
+	"github.com/jm/security-automation-go/internal/ui"
 )
 
 // cfCleanupAdapter adapts a cfpkg.EnforcementClient to cleanup.CFClient,
@@ -102,10 +103,39 @@ func (s *reportingEvidenceSink) RecordDebanEvidence(ctx context.Context, e banli
 
 var _ cleanup.EvidenceSink = (*reportingEvidenceSink)(nil)
 
+// cleanupWorkerBanDebanner adapts a *cleanup.Worker to ui.BanDebanner, so the
+// /ban-lifecycle UI's operator-initiated deban/clear actions reuse the exact
+// same idempotent Cloudflare-rule-delete logic as the automatic expiry
+// cleanup loop. It never touches AbuseIPDB.
+type cleanupWorkerBanDebanner struct {
+	worker *cleanup.Worker
+}
+
+func (a *cleanupWorkerBanDebanner) DebanIP(ctx context.Context, ip, reason string) error {
+	_, err := a.worker.DebanOne(ctx, ip, reason)
+	return err
+}
+
+func (a *cleanupWorkerBanDebanner) ClearManagedBans(ctx context.Context, reason string) (ui.BanClearResult, error) {
+	result, err := a.worker.ClearAll(ctx, reason)
+	return ui.BanClearResult{
+		Attempted: result.Attempted,
+		Deleted:   result.Deleted,
+		Skipped:   result.Skipped,
+		Failed:    result.Failed,
+		Errors:    result.Errors,
+	}, err
+}
+
+var _ ui.BanDebanner = (*cleanupWorkerBanDebanner)(nil)
+
 // startBanLifecycleCleanup launches the periodic Cloudflare autoban rule
 // cleanup worker. It is a no-op if store or cf is nil (e.g. SQLite or the
-// Cloudflare enforcement client is unavailable).
-func startBanLifecycleCleanup(ctx context.Context, logger *slog.Logger, store banlifecycle.Store, cf cfpkg.EnforcementClient, zoneID string, interval time.Duration, auditJournal journal.JournalStore, evidenceStore reporting.EvidenceStore) {
+// Cloudflare enforcement client is unavailable). When debannerHolder is
+// non-nil, it is populated with an adapter over the same worker so the
+// /ban-lifecycle UI's operator-initiated deban/clear actions become
+// available once this wiring completes.
+func startBanLifecycleCleanup(ctx context.Context, logger *slog.Logger, store banlifecycle.Store, cf cfpkg.EnforcementClient, zoneID string, interval time.Duration, auditJournal journal.JournalStore, evidenceStore reporting.EvidenceStore, debannerHolder *lazyBanDebanner) {
 	if store == nil || cf == nil {
 		return
 	}
@@ -122,6 +152,9 @@ func startBanLifecycleCleanup(ctx context.Context, logger *slog.Logger, store ba
 		Audit:    &journalAuditSink{journal: auditJournal},
 		Evidence: &reportingEvidenceSink{store: evidenceStore},
 		Logger:   logger,
+	}
+	if debannerHolder != nil {
+		debannerHolder.set(&cleanupWorkerBanDebanner{worker: worker})
 	}
 	go func() {
 		runCleanupOnce(ctx, logger, worker)

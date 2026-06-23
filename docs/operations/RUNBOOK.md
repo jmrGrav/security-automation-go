@@ -128,6 +128,25 @@ If a live cleanup run is interrupted, the process stops before the next destruct
 
 `cf-allowlist-sync` is list-only and does not mutate Cloudflare.
 
+## Operator deban actions (/ban-lifecycle)
+
+The `/ban-lifecycle` page exposes two operator-initiated actions for managed
+(autoban) Cloudflare rules: a per-IP **Deban** button on each active entry,
+and a **Clear all managed bans** panel that debans every currently-active
+entry in one operation. Both require `UI_MUTATIONS_ENABLED=1` and
+`CLOUDFLARE_MUTATIONS_ENABLED=1`; if either is disabled, or this instance has
+no Cloudflare deban capability wired (no API token, standalone `-mode ui`
+without a co-located daemon), the controls are replaced with a disabled
+badge. Both actions are CSRF-protected, admin-session-gated, and idempotent —
+deleting an already-gone Cloudflare rule (404) is treated as success. The
+bulk action requires typing `CLEAR` to confirm before it runs.
+
+**Deban Cloudflare = oui ; effacement AbuseIPDB = jamais.** Both actions only
+ever delete the Cloudflare IP Access Rule and update the local ban lifecycle
+status (to `operator_debanned`). They never delete AbuseIPDB report history
+and never reset the AbuseIPDB 24h reporting window — AbuseIPDB is not called
+by either code path.
+
 ## Service restart after first-run wizard
 
 When `cf-sync -mode ui` starts **before** the first-run wizard is complete, the

@@ -34,6 +34,15 @@ func (f *fakeCF) DeleteIPAccessRule(ctx context.Context, zoneID, ruleID string) 
 	return nil
 }
 
+// abuseIPDBTracker fakes an AbuseIPDB-like dependency that DebanOne/ClearAll
+// must never touch. Its presence in a test as an unused-but-asserted-empty
+// counter operationalizes the hard constraint that debanning from
+// Cloudflare must never delete or reset AbuseIPDB report state.
+type abuseIPDBTracker struct {
+	reportsDeleted int
+	windowsReset   int
+}
+
 type fakeAudit struct {
 	calls []banlifecycle.Entry
 }
@@ -293,5 +302,153 @@ func TestWorker_IdempotentRerun_404TreatedAsSuccess(t *testing.T) {
 	got, ok, _ := store.Get(context.Background(), "10.10.10.10")
 	if !ok || got.Status != banlifecycle.StatusExpiredCleaned {
 		t.Fatalf("expected entry marked expired_cleaned despite 404, got %+v ok=%v", got, ok)
+	}
+}
+
+func TestWorker_DebanOne_DeletesRuleAndMarksOperatorDebanned(t *testing.T) {
+	now := time.Date(2026, 6, 21, 12, 0, 0, 0, time.UTC)
+	store := memstore.New()
+	entry := banlifecycle.Entry{
+		IP:            "20.20.20.20",
+		CreatedAt:     now.Add(-10 * time.Minute),
+		ExpiresAt:     now.Add(50 * time.Minute), // still active, not expired
+		Duration:      1 * time.Hour,
+		RuleID:        "rule-20",
+		RecidiveLevel: 1,
+		Status:        banlifecycle.StatusActive,
+	}
+	if err := store.Upsert(context.Background(), entry); err != nil {
+		t.Fatalf("Upsert: %v", err)
+	}
+
+	cf := &fakeCF{}
+	audit := &fakeAudit{}
+	evidence := &fakeEvidence{}
+	abuseIPDB := &abuseIPDBTracker{}
+	w := &Worker{Store: store, CF: cf, ZoneID: "zone1", Audit: audit, Evidence: evidence, Now: func() time.Time { return now }}
+
+	got, err := w.DebanOne(context.Background(), "20.20.20.20", "operator clicked deban")
+	if err != nil {
+		t.Fatalf("DebanOne: %v", err)
+	}
+	if got.Status != banlifecycle.StatusOperatorDebanned {
+		t.Fatalf("expected returned entry status operator_debanned, got %q", got.Status)
+	}
+	if len(cf.deletedIDs) != 1 || cf.deletedIDs[0] != "rule-20" {
+		t.Fatalf("expected delete of rule-20, got %v", cf.deletedIDs)
+	}
+	stored, ok, err := store.Get(context.Background(), "20.20.20.20")
+	if err != nil || !ok {
+		t.Fatalf("Get: %v ok=%v", err, ok)
+	}
+	if stored.Status != banlifecycle.StatusOperatorDebanned {
+		t.Fatalf("expected stored status operator_debanned, got %q", stored.Status)
+	}
+	if len(audit.calls) != 1 || len(evidence.calls) != 1 {
+		t.Fatalf("expected exactly 1 audit and 1 evidence call, got audit=%d evidence=%d", len(audit.calls), len(evidence.calls))
+	}
+	if abuseIPDB.reportsDeleted != 0 || abuseIPDB.windowsReset != 0 {
+		t.Fatalf("DebanOne must never touch AbuseIPDB state, got %+v", abuseIPDB)
+	}
+}
+
+func TestWorker_DebanOne_NoTrackedEntry_Errors(t *testing.T) {
+	store := memstore.New()
+	cf := &fakeCF{}
+	w := &Worker{Store: store, CF: cf, ZoneID: "zone1"}
+
+	if _, err := w.DebanOne(context.Background(), "30.30.30.30", "operator-initiated"); err == nil {
+		t.Fatal("expected error for untracked IP, got nil")
+	}
+	if len(cf.deletedIDs) != 0 {
+		t.Fatalf("expected no deletes for untracked IP, got %v", cf.deletedIDs)
+	}
+}
+
+func TestWorker_DebanOne_AlreadyGoneRule_404TreatedAsSuccess(t *testing.T) {
+	now := time.Date(2026, 6, 21, 12, 0, 0, 0, time.UTC)
+	store := memstore.New()
+	entry := banlifecycle.Entry{
+		IP:        "40.40.40.40",
+		CreatedAt: now.Add(-10 * time.Minute),
+		ExpiresAt: now.Add(50 * time.Minute),
+		Duration:  1 * time.Hour,
+		RuleID:    "rule-40",
+		Status:    banlifecycle.StatusActive,
+	}
+	if err := store.Upsert(context.Background(), entry); err != nil {
+		t.Fatalf("Upsert: %v", err)
+	}
+
+	cf := &fakeCF{deleteErr: map[string]error{"rule-40": fmt.Errorf("cloudflare: HTTP 404: rule not found")}}
+	w := &Worker{Store: store, CF: cf, ZoneID: "zone1", Now: func() time.Time { return now }}
+
+	if _, err := w.DebanOne(context.Background(), "40.40.40.40", ""); err != nil {
+		t.Fatalf("DebanOne: %v", err)
+	}
+	got, ok, _ := store.Get(context.Background(), "40.40.40.40")
+	if !ok || got.Status != banlifecycle.StatusOperatorDebanned {
+		t.Fatalf("expected operator_debanned despite 404, got %+v ok=%v", got, ok)
+	}
+}
+
+func TestWorker_ClearAll_DebansEveryActiveEntryOnly(t *testing.T) {
+	now := time.Date(2026, 6, 21, 12, 0, 0, 0, time.UTC)
+	store := memstore.New()
+	active1 := banlifecycle.Entry{IP: "50.1.1.1", CreatedAt: now, ExpiresAt: now.Add(time.Hour), RuleID: "rule-50-1", Status: banlifecycle.StatusActive}
+	active2 := banlifecycle.Entry{IP: "50.1.1.2", CreatedAt: now, ExpiresAt: now.Add(time.Hour), RuleID: "rule-50-2", Status: banlifecycle.StatusActive}
+	alreadyDone := banlifecycle.Entry{IP: "50.1.1.3", CreatedAt: now.Add(-2 * time.Hour), ExpiresAt: now.Add(-time.Hour), RuleID: "rule-50-3", Status: banlifecycle.StatusExpiredCleaned}
+	for _, e := range []banlifecycle.Entry{active1, active2, alreadyDone} {
+		if err := store.Upsert(context.Background(), e); err != nil {
+			t.Fatalf("Upsert: %v", err)
+		}
+	}
+
+	cf := &fakeCF{}
+	w := &Worker{Store: store, CF: cf, ZoneID: "zone1", Now: func() time.Time { return now }}
+
+	result, err := w.ClearAll(context.Background(), "operator-initiated bulk clear")
+	if err != nil {
+		t.Fatalf("ClearAll: %v", err)
+	}
+	if result.Attempted != 2 || result.Deleted != 2 || result.Failed != 0 {
+		t.Fatalf("unexpected result: %+v", result)
+	}
+	for _, id := range cf.deletedIDs {
+		if id == "rule-50-3" {
+			t.Fatal("must never re-delete an already-completed entry's rule")
+		}
+	}
+	if len(cf.deletedIDs) != 2 {
+		t.Fatalf("expected exactly 2 deletes, got %v", cf.deletedIDs)
+	}
+}
+
+func TestWorker_ClearAll_PartialFailureReportedNotFatal(t *testing.T) {
+	now := time.Date(2026, 6, 21, 12, 0, 0, 0, time.UTC)
+	store := memstore.New()
+	good := banlifecycle.Entry{IP: "60.1.1.1", CreatedAt: now, ExpiresAt: now.Add(time.Hour), RuleID: "rule-60-1", Status: banlifecycle.StatusActive}
+	bad := banlifecycle.Entry{IP: "60.1.1.2", CreatedAt: now, ExpiresAt: now.Add(time.Hour), RuleID: "rule-60-2", Status: banlifecycle.StatusActive}
+	for _, e := range []banlifecycle.Entry{good, bad} {
+		if err := store.Upsert(context.Background(), e); err != nil {
+			t.Fatalf("Upsert: %v", err)
+		}
+	}
+
+	cf := &fakeCF{deleteErr: map[string]error{"rule-60-2": fmt.Errorf("cloudflare: HTTP 500: internal error")}}
+	w := &Worker{Store: store, CF: cf, ZoneID: "zone1", Now: func() time.Time { return now }}
+
+	result, err := w.ClearAll(context.Background(), "")
+	if err != nil {
+		t.Fatalf("ClearAll: %v", err)
+	}
+	if result.Attempted != 2 {
+		t.Fatalf("expected attempted=2, got %d", result.Attempted)
+	}
+	if result.Deleted != 1 || result.Failed != 1 {
+		t.Fatalf("expected 1 deleted and 1 failed, got %+v", result)
+	}
+	if len(result.Errors) != 1 {
+		t.Fatalf("expected 1 error message, got %v", result.Errors)
 	}
 }

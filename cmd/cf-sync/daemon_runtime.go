@@ -477,7 +477,7 @@ func nextWAFReplayCursor(report cloudflareevent.ProcessingReport, previous time.
 	return previous.UTC()
 }
 
-func runDaemonWithLocker(ctx context.Context, logger *slog.Logger, orch *pipeline.Orchestrator, collector *status.Collector, j journal.JournalStore, qStore *quarantine.Store, store *state.StateStore, sm *engine.StateMachine, dm *memory.Store, cm *cooldown.Manager, rec *recorder.Recorder, br *registry.Registry, am *activation.Manager, fr *federation.Resolver, adm *admission.Controller, evidence reporting.EvidenceStore, ownershipRepo *sqlite.OwnershipRepository, p *pool.Pool, outboxWorker *reporting.OutboxWorker, stateDir string, interval time.Duration, metricsAddr string, zoneID string, wafReplay *cloudflareevent.Service, cursorStore *sqlite.CursorStore, quotaRefreshers *quotaRefreshers, bundle *wafBundle, acquireLock bool, cfEnforcer cfpkg.EnforcementClient, banLifecycleCleanupInterval time.Duration, cfg *config.Config, trustReg *sectrust.Registry, trustedNetworksReg *trustednetworks.Registry) {
+func runDaemonWithLocker(ctx context.Context, logger *slog.Logger, orch *pipeline.Orchestrator, collector *status.Collector, j journal.JournalStore, qStore *quarantine.Store, store *state.StateStore, sm *engine.StateMachine, dm *memory.Store, cm *cooldown.Manager, rec *recorder.Recorder, br *registry.Registry, am *activation.Manager, fr *federation.Resolver, adm *admission.Controller, evidence reporting.EvidenceStore, ownershipRepo *sqlite.OwnershipRepository, p *pool.Pool, outboxWorker *reporting.OutboxWorker, stateDir string, interval time.Duration, metricsAddr string, zoneID string, wafReplay *cloudflareevent.Service, cursorStore *sqlite.CursorStore, quotaRefreshers *quotaRefreshers, bundle *wafBundle, acquireLock bool, cfEnforcer cfpkg.EnforcementClient, banLifecycleCleanupInterval time.Duration, cfg *config.Config, trustReg *sectrust.Registry, trustedNetworksReg *trustednetworks.Registry, banDebannerHolder *lazyBanDebanner) {
 	logger.Info("starting in daemon mode", "state_dir", stateDir, "interval", interval, "metrics_addr", metricsAddr)
 	var ownershipLineage *ownership.LineageQueryService
 	if ownershipRepo != nil {
@@ -517,7 +517,7 @@ func runDaemonWithLocker(ctx context.Context, logger *slog.Logger, orch *pipelin
 	defer cancel()
 	startWAFReplayPoller(childCtx, logger, interval, zoneID, wafReplay, cursorStore, bundle.banEvalService(), bundle.banExecutorService())
 	startCrowdSecOpenRestyPoller(childCtx, logger, interval, bundle, cursorStore)
-	startBanLifecycleCleanup(childCtx, logger, bundle.banLifecycleStoreService(), cfEnforcer, zoneID, banLifecycleCleanupInterval, j, evidence)
+	startBanLifecycleCleanup(childCtx, logger, bundle.banLifecycleStoreService(), cfEnforcer, zoneID, banLifecycleCleanupInterval, j, evidence, banDebannerHolder)
 	startAutoDeban(childCtx, logger, cfg, bundle.reputationGateService(), bundle.banLifecycleStoreService(), cfEnforcer, zoneID, evidence, j, trustReg)
 	startTrustedNetworksSync(childCtx, logger, trustedNetworksReg, cfg.TrustedNetworks.SyncInterval)
 	if quotaRefreshers != nil {

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"html"
 	"io"
+	"net"
 	"net/http"
 	"sort"
 
@@ -21,14 +22,132 @@ func (s *Server) handleBanLifecyclePage(w http.ResponseWriter, r *http.Request) 
 		"correlation_id": eventID,
 		"event_id":       eventID,
 	})
-	_ = BanLifecyclePage(s.banLifecycleView(r.Context())).Render(r.Context(), w)
+	_ = BanLifecyclePage(s.banLifecycleView(r.Context()), s.banDebanActionsAvailable(), s.csrfTokenFromRequest(r)).Render(r.Context(), w)
 }
 
-func BanLifecyclePage(view BanLifecycleView) templ.Component {
+// banDebanActionsAvailable reports whether the deban/clear actions can be
+// offered at all: a BanDebanner must be wired and Cloudflare mutations must
+// be enabled. This mirrors the checks the handlers themselves enforce, so
+// the UI never shows a button that would immediately 403.
+func (s *Server) banDebanActionsAvailable() bool {
+	return s.banDebanner != nil && s.cfg.UI.MutationsEnabled && s.cfg.Cloudflare.MutationsEnabled
+}
+
+func (s *Server) handleBanLifecycleDeban(w http.ResponseWriter, r *http.Request) {
+	if !s.cfg.UI.MutationsEnabled {
+		http.Error(w, "ui mutations disabled", http.StatusForbidden)
+		return
+	}
+	if !s.cfg.Cloudflare.MutationsEnabled {
+		http.Error(w, "cloudflare mutations disabled", http.StatusForbidden)
+		return
+	}
+	if !s.validCSRF(r) {
+		http.Error(w, "csrf required", http.StatusForbidden)
+		return
+	}
+	if s.banDebanner == nil {
+		http.Error(w, "deban capability not available on this instance", http.StatusServiceUnavailable)
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	ip := r.PostForm.Get("ip")
+	if net.ParseIP(ip) == nil {
+		http.Error(w, "invalid ip", http.StatusBadRequest)
+		return
+	}
+	reason := r.PostForm.Get("reason")
+	if reason == "" {
+		reason = "operator-initiated deban via /ban-lifecycle"
+	}
+
+	eventID := newUIEventID()
+	ctx, cancel := stableUIReadContext(r.Context())
+	defer cancel()
+	err := s.banDebanner.DebanIP(ctx, ip, reason)
+	result := "success"
+	if err != nil {
+		result = "failed"
+	}
+	s.audit.Record("ban_lifecycle_deban", map[string]string{
+		"actor":          "local",
+		"source":         "ui",
+		"target":         ip,
+		"result":         result,
+		"correlation_id": eventID,
+		"event_id":       eventID,
+	})
+	if err != nil {
+		http.Error(w, "deban failed: "+err.Error(), http.StatusBadGateway)
+		return
+	}
+	http.Redirect(w, r, "/ban-lifecycle", http.StatusSeeOther)
+}
+
+func (s *Server) handleBanLifecycleClearAll(w http.ResponseWriter, r *http.Request) {
+	if !s.cfg.UI.MutationsEnabled {
+		http.Error(w, "ui mutations disabled", http.StatusForbidden)
+		return
+	}
+	if !s.cfg.Cloudflare.MutationsEnabled {
+		http.Error(w, "cloudflare mutations disabled", http.StatusForbidden)
+		return
+	}
+	if !s.validCSRF(r) {
+		http.Error(w, "csrf required", http.StatusForbidden)
+		return
+	}
+	if s.banDebanner == nil {
+		http.Error(w, "deban capability not available on this instance", http.StatusServiceUnavailable)
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	if r.PostForm.Get("confirm") != "CLEAR" {
+		http.Error(w, `type "CLEAR" to confirm`, http.StatusBadRequest)
+		return
+	}
+	reason := r.PostForm.Get("reason")
+	if reason == "" {
+		reason = "operator-initiated bulk clear via /ban-lifecycle"
+	}
+
+	eventID := newUIEventID()
+	ctx, cancel := stableUIReadContext(r.Context())
+	defer cancel()
+	clearResult, err := s.banDebanner.ClearManagedBans(ctx, reason)
+	result := "success"
+	if err != nil {
+		result = "failed"
+	}
+	s.audit.Record("ban_lifecycle_clear_all", map[string]string{
+		"actor":          "local",
+		"source":         "ui",
+		"target":         "ban-lifecycle",
+		"result":         result,
+		"correlation_id": eventID,
+		"event_id":       eventID,
+		"attempted":      fmt.Sprintf("%d", clearResult.Attempted),
+		"deleted":        fmt.Sprintf("%d", clearResult.Deleted),
+		"failed":         fmt.Sprintf("%d", clearResult.Failed),
+	})
+	if err != nil {
+		http.Error(w, "clear failed: "+err.Error(), http.StatusBadGateway)
+		return
+	}
+	http.Redirect(w, r, "/ban-lifecycle", http.StatusSeeOther)
+}
+
+func BanLifecyclePage(view BanLifecycleView, actionsAvailable bool, csrfToken string) templ.Component {
 	return ConsoleLayout(shellView{
 		Title:    "Cloudflare Ban Lifecycle",
 		Headline: "Cloudflare Ban Lifecycle",
-		Subtitle: "Full history of local autoban lifecycle entries — active, expired, auto-debanned, and manually overridden — with recidive-aware durations. Managed bans only — manual Cloudflare rules are never shown or touched here.",
+		Subtitle: "Full history of local autoban lifecycle entries — active, expired, auto-debanned, and manually overridden — with recidive-aware durations. Managed bans only — manual Cloudflare rules are never shown or touched here. Debanning removes the Cloudflare rule; it never deletes AbuseIPDB report history or resets the AbuseIPDB reporting window.",
 		Active:   "/ban-lifecycle",
 		Body: templ.ComponentFunc(func(ctx context.Context, w io.Writer) error {
 			if !view.Wired {
@@ -39,14 +158,17 @@ func BanLifecyclePage(view BanLifecycleView) templ.Component {
 					return err
 				}
 			}
+			if err := renderBanLifecycleClearAllPanel(w, actionsAvailable, csrfToken); err != nil {
+				return err
+			}
 			if len(view.Entries) == 0 {
 				return writeEmptyState(w, "No managed Cloudflare ban lifecycle entries yet.")
 			}
-			if _, err := fmt.Fprint(w, `<div style="overflow-x:auto"><table><thead><tr><th>IP</th><th>Source</th><th>Reason</th><th>Confidence</th><th>Recidive</th><th>Created</th><th>Expires</th><th>Duration</th><th>Rule ID</th><th>Status</th></tr></thead><tbody>`); err != nil {
+			if _, err := fmt.Fprint(w, `<div style="overflow-x:auto"><table><thead><tr><th>IP</th><th>Source</th><th>Reason</th><th>Confidence</th><th>Recidive</th><th>Created</th><th>Expires</th><th>Duration</th><th>Rule ID</th><th>Status</th><th>Action</th></tr></thead><tbody>`); err != nil {
 				return err
 			}
 			for _, entry := range view.Entries {
-				if err := renderBanLifecycleRow(w, entry); err != nil {
+				if err := renderBanLifecycleRow(w, entry, actionsAvailable, csrfToken); err != nil {
 					return err
 				}
 			}
@@ -54,6 +176,18 @@ func BanLifecyclePage(view BanLifecycleView) templ.Component {
 			return err
 		}),
 	})
+}
+
+func renderBanLifecycleClearAllPanel(w io.Writer, actionsAvailable bool, csrfToken string) error {
+	if !actionsAvailable {
+		_, err := fmt.Fprint(w, `<div class="panel"><span class="badge disabled">deban actions unavailable</span> <span class="muted" style="font-size:.85rem">Cloudflare mutations are disabled, or this instance has no Cloudflare deban capability wired.</span></div>`)
+		return err
+	}
+	_, err := fmt.Fprintf(w,
+		`<div class="panel"><form action="/actions/ban-lifecycle/clear" method="post" onsubmit="return confirm('This removes the Cloudflare rule for every currently-active managed ban. AbuseIPDB report history is never touched. Continue?');"><input type="hidden" name="csrf_token" value="%s"/><label>Clear all managed bans — type CLEAR to confirm</label><input type="text" name="confirm" autocomplete="off" placeholder="CLEAR"/><button type="submit" class="action-button secondary">Clear all managed bans</button></form><p class="muted" style="font-size:.85rem;margin-top:.5rem">Removes the Cloudflare rule for every active managed entry. AbuseIPDB report history and the 24h reporting window are never affected.</p></div>`,
+		html.EscapeString(csrfToken),
+	)
+	return err
 }
 
 func (s *Server) banLifecycleView(ctx context.Context) BanLifecycleView {
@@ -85,7 +219,7 @@ func (s *Server) banLifecycleView(ctx context.Context) BanLifecycleView {
 	return BanLifecycleView{Wired: true, Entries: views}
 }
 
-func renderBanLifecycleRow(w io.Writer, entry BanLifecycleEntryView) error {
+func renderBanLifecycleRow(w io.Writer, entry BanLifecycleEntryView, actionsAvailable bool, csrfToken string) error {
 	recidiveBadge := `<span class="badge">1st</span>`
 	switch {
 	case entry.RecidiveLevel == 2:
@@ -101,9 +235,11 @@ func renderBanLifecycleRow(w io.Writer, entry BanLifecycleEntryView) error {
 		statusClass = "badge success"
 	case "manual_override":
 		statusClass = "badge error"
+	case "operator_debanned":
+		statusClass = "badge success"
 	}
-	_, err := fmt.Fprintf(w,
-		`<tr><td><code>%s</code></td><td>%s</td><td>%s</td><td>%d</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td><span class="%s">%s</span></td></tr>`,
+	if _, err := fmt.Fprintf(w,
+		`<tr><td><code>%s</code></td><td>%s</td><td>%s</td><td>%d</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td><span class="%s">%s</span></td>`,
 		html.EscapeString(entry.IP),
 		html.EscapeString(entry.Source),
 		html.EscapeString(entry.Reason),
@@ -115,6 +251,24 @@ func renderBanLifecycleRow(w io.Writer, entry BanLifecycleEntryView) error {
 		html.EscapeString(entry.RuleID),
 		statusClass,
 		html.EscapeString(entry.Status),
-	)
+	); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprint(w, `<td>`); err != nil {
+		return err
+	}
+	if actionsAvailable && entry.Status == "active" {
+		if _, err := fmt.Fprintf(w,
+			`<form action="/actions/ban-lifecycle/deban" method="post" onsubmit="return confirm('Remove the Cloudflare rule for %s? AbuseIPDB report history is never touched.');"><input type="hidden" name="csrf_token" value="%s"/><input type="hidden" name="ip" value="%s"/><button type="submit" class="action-button secondary">Deban</button></form>`,
+			html.EscapeString(entry.IP), html.EscapeString(csrfToken), html.EscapeString(entry.IP),
+		); err != nil {
+			return err
+		}
+	} else if entry.Status != "active" {
+		if _, err := fmt.Fprint(w, `<span class="muted">—</span>`); err != nil {
+			return err
+		}
+	}
+	_, err := fmt.Fprint(w, `</td></tr>`)
 	return err
 }
