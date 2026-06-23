@@ -154,6 +154,7 @@ type Server struct {
 	timelineMu            sync.Mutex
 	timelineCache         []audit.TimelineEvent
 	timelineCacheAt       time.Time
+	timelineCacheLimit    int
 	cfInventoryMu         sync.Mutex
 	cfInventoryCache      cfRuleInventory
 	cfInventoryCacheAt    time.Time

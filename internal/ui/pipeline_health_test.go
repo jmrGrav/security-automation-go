@@ -13,7 +13,8 @@ import (
 )
 
 type stubEvidenceStore struct {
-	items []reporting.DecisionEvidence
+	items       []reporting.DecisionEvidence
+	searchCalls []reporting.EvidenceSearchOptions
 }
 
 func (s *stubEvidenceStore) Append(_ context.Context, ev reporting.DecisionEvidence) error {
@@ -38,6 +39,7 @@ func (s *stubEvidenceStore) Get(_ context.Context, id string) (reporting.Decisio
 }
 
 func (s *stubEvidenceStore) Search(_ context.Context, opts reporting.EvidenceSearchOptions) ([]reporting.DecisionEvidence, error) {
+	s.searchCalls = append(s.searchCalls, opts)
 	var out []reporting.DecisionEvidence
 	for _, ev := range s.items {
 		if opts.Source != "" && ev.Source != opts.Source {

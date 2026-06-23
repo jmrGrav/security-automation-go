@@ -119,6 +119,28 @@ func ConsoleLayout(view shellView) templ.Component {
 				margin-top: auto;
 				padding-top: .9rem;
 				border-top: 1px solid var(--sidebar-border);
+				display: grid;
+				gap: .45rem;
+			}
+			.density-toggle {
+				width: 100%;
+				justify-content: flex-start;
+				min-height: 2.25rem;
+				padding: .5rem .8rem;
+				border-radius: 8px;
+				border-color: rgba(255,255,255,.1);
+				background: rgba(255,255,255,.06);
+				color: var(--sidebar-text);
+				box-shadow: none;
+				font-size: .86rem;
+			}
+			.density-toggle:hover {
+				background: rgba(255,255,255,.1);
+				transform: none;
+			}
+			.density-toggle[aria-pressed="true"] {
+				background: rgba(232,250,251,.14);
+				color: #e8fafb;
 			}
 			.logout-link {
 				display: flex;
@@ -389,6 +411,26 @@ func ConsoleLayout(view shellView) templ.Component {
 				margin: 0 0 .65rem;
 				line-height: 1.15;
 			}
+			.collapsible-panel {
+				display: grid;
+				gap: .75rem;
+			}
+			.collapsible-head {
+				display: flex;
+				align-items: flex-start;
+				justify-content: space-between;
+				gap: .85rem;
+			}
+			.collapsible-head h2,
+			.collapsible-head h3 {
+				margin-bottom: .15rem;
+			}
+			.collapsible-panel[data-collapsed="true"] .collapsible-body {
+				display: none;
+			}
+			.collapsible-panel[data-collapsed="true"] {
+				padding-bottom: .75rem;
+			}
 			button, input, select, textarea {
 				font: inherit;
 			}
@@ -618,6 +660,72 @@ func ConsoleLayout(view shellView) templ.Component {
 				border-radius: 10px;
 			}
 			.stack { display: grid; gap: .75rem; }
+			body[data-density="compact"] .main {
+				padding: .72rem;
+			}
+			body[data-density="compact"] .page {
+				gap: .62rem;
+				max-width: 1500px;
+			}
+			body[data-density="compact"] .pagehead {
+				gap: .6rem;
+			}
+			body[data-density="compact"] .pagehead p {
+				margin-top: .2rem;
+			}
+			body[data-density="compact"] .panel {
+				padding: .66rem .72rem;
+				border-radius: 8px;
+			}
+			body[data-density="compact"] .stack,
+			body[data-density="compact"] .grid {
+				gap: .48rem;
+			}
+			body[data-density="compact"] .row {
+				padding: .32rem 0;
+				gap: .6rem;
+			}
+			body[data-density="compact"] button {
+				min-height: 2.08rem;
+				padding: .42rem .62rem;
+				border-radius: 8px;
+			}
+			body[data-density="compact"] input[type="text"],
+			body[data-density="compact"] input[type="password"],
+			body[data-density="compact"] input[type="search"],
+			body[data-density="compact"] input[type="url"],
+			body[data-density="compact"] input[type="number"],
+			body[data-density="compact"] select {
+				padding: .46rem .62rem;
+				border-radius: 8px;
+			}
+			body[data-density="compact"] thead th {
+				padding: .42rem .52rem;
+				font-size: .72rem;
+			}
+			body[data-density="compact"] tbody td,
+			body[data-density="compact"] .table-wrap tbody td {
+				padding: .34rem .52rem;
+				line-height: 1.12;
+			}
+			body[data-density="compact"] .badge {
+				padding: .16rem .42rem;
+				font-size: .72rem;
+			}
+			body[data-density="compact"] .empty {
+				padding: .64rem;
+				border-radius: 8px;
+			}
+			body[data-density="compact"] .table-wrap td [data-ai-explain-result].empty {
+				height: 0;
+				margin: 0;
+				padding: 0;
+				border: 0;
+				overflow: hidden;
+				font-size: 0;
+				line-height: 0;
+				background: transparent;
+			}
 			.live-panel-root {
 				position: fixed;
 				inset: 0;
@@ -784,7 +892,7 @@ func ConsoleLayout(view shellView) templ.Component {
 				return err
 			}
 		}
-		if _, err := fmt.Fprint(w, `</nav><div class="sidebar-footer"><a href="/logout" class="logout-link">⏻ Sign out</a></div></aside><main class="main"><div class="`); err != nil {
+		if _, err := fmt.Fprint(w, `</nav><div class="sidebar-footer"><button type="button" class="density-toggle" data-density-toggle="true" aria-pressed="false">Compact mode</button><a href="/logout" class="logout-link">⏻ Sign out</a></div></aside><main class="main"><div class="`); err != nil {
 			return err
 		}
 		if _, err := io.WriteString(w, html.EscapeString(view.BodyClass)); err != nil {

@@ -193,6 +193,163 @@ func TestAllTimelineEventsCachesWithinTTL(t *testing.T) {
 	}
 }
 
+func TestTimelineSmallPageUsesBoundedEvidenceWindow(t *testing.T) {
+	now := time.Now().UTC()
+	items := make([]reporting.DecisionEvidence, 5000)
+	for i := range items {
+		items[i] = reporting.DecisionEvidence{
+			EvidenceID: "ev-windowed",
+			Source:     "cloudflare_waf",
+			IP:         "192.0.2.1",
+			Decision:   "report_pending",
+			Timestamp:  now.Add(-time.Duration(i) * time.Second),
+		}
+	}
+	store := &stubEvidenceStore{items: items}
+	srv, _, _ := newTestServer(t, nil)
+	srv.evidence = store
+	cookie := loginCookie(t, srv, "test-password-123!@#")
+
+	req := httptest.NewRequest(http.MethodGet, "/timeline?limit=20", nil)
+	req.AddCookie(cookie)
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if len(store.searchCalls) == 0 {
+		t.Fatalf("expected /timeline to query evidence store")
+	}
+	got := store.searchCalls[0].Limit
+	if got <= 0 || got > 150 {
+		t.Fatalf("expected first /timeline page to use a bounded evidence window <= 150 rows, got %d", got)
+	}
+}
+
+func TestTimelineForensicSearchFindsEvidenceBeyondBrowsingWindow(t *testing.T) {
+	store := timelineEvidenceStoreWithOldMatch("old-ip-query", "cloudflare_waf", "report_pending", 1105)
+	srv, _, _ := newTestServer(t, nil)
+	srv.evidence = store
+	cookie := loginCookie(t, srv, "test-password-123!@#")
+
+	req := httptest.NewRequest(http.MethodGet, "/timeline?q=old-ip-query", nil)
+	req.AddCookie(cookie)
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "old-ip-query") {
+		t.Fatalf("forensic q search must find matching evidence older than the first 1000 rows: %s", rr.Body.String())
+	}
+}
+
+func TestTimelineSourceFilterCanPageBeyondBrowsingWindow(t *testing.T) {
+	store := timelineEvidenceStoreWithOldMatch("old-source-page", "cloudflare_waf", "report_pending", 1105)
+	srv, _, _ := newTestServer(t, nil)
+	srv.evidence = store
+	cookie := loginCookie(t, srv, "test-password-123!@#")
+
+	req := httptest.NewRequest(http.MethodGet, "/timeline?source=waf&page=12&limit=100", nil)
+	req.AddCookie(cookie)
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "old-source-page") {
+		t.Fatalf("source=waf pagination must reach evidence older than the first 1000 rows: %s", rr.Body.String())
+	}
+}
+
+func TestTimelineActionFilterFindsEvidenceBeyondBrowsingWindow(t *testing.T) {
+	store := timelineEvidenceStoreWithOldMatch("old-action-ip", "cloudflare_waf", "special_action", 1105)
+	srv, _, _ := newTestServer(t, nil)
+	srv.evidence = store
+	cookie := loginCookie(t, srv, "test-password-123!@#")
+
+	req := httptest.NewRequest(http.MethodGet, "/timeline?action=special_action", nil)
+	req.AddCookie(cookie)
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "old-action-ip") {
+		t.Fatalf("action filter must find matching evidence older than the first 1000 rows: %s", rr.Body.String())
+	}
+}
+
+func TestTimelineFilteredExportsFindEvidenceBeyondBrowsingWindow(t *testing.T) {
+	for _, format := range []string{"json", "csv"} {
+		t.Run(format, func(t *testing.T) {
+			store := timelineEvidenceStoreWithOldMatch("old-export-ip", "cloudflare_waf", "report_pending", 1105)
+			srv, _, _ := newTestServer(t, nil)
+			srv.evidence = store
+			cookie := loginCookie(t, srv, "test-password-123!@#")
+
+			req := httptest.NewRequest(http.MethodGet, "/timeline?q=old-export-ip&format="+format, nil)
+			req.AddCookie(cookie)
+			rr := httptest.NewRecorder()
+			srv.Handler().ServeHTTP(rr, req)
+
+			if rr.Code != http.StatusOK {
+				t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+			}
+			if !strings.Contains(rr.Body.String(), "old-export-ip") {
+				t.Fatalf("%s export must use the same complete filtered evidence semantics: %s", format, rr.Body.String())
+			}
+		})
+	}
+}
+
+func timelineEvidenceStoreWithOldMatch(oldIP, oldSource, oldDecision string, newerRows int) *stubEvidenceStore {
+	now := time.Now().UTC()
+	items := make([]reporting.DecisionEvidence, 0, newerRows+1)
+	for i := range newerRows {
+		items = append(items, reporting.DecisionEvidence{
+			EvidenceID: "ev-newer",
+			Source:     "crowdsec_waf",
+			IP:         "198.51.100.42",
+			Decision:   "report_pending",
+			Timestamp:  now.Add(-time.Duration(i) * time.Second),
+		})
+	}
+	items = append(items, reporting.DecisionEvidence{
+		EvidenceID: "ev-old-match",
+		Source:     oldSource,
+		IP:         oldIP,
+		Decision:   oldDecision,
+		Timestamp:  now.Add(-time.Duration(newerRows+1) * time.Second),
+	})
+	return &stubEvidenceStore{items: items}
+}
+
+func TestTimelinePageExposesErgonomicControls(t *testing.T) {
+	srv, _, _ := newTestServer(t, nil)
+	cookie := loginCookie(t, srv, "test-password-123!@#")
+	req := httptest.NewRequest(http.MethodGet, "/timeline", nil)
+	req.AddCookie(cookie)
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+
+	body := rr.Body.String()
+	for _, want := range []string{
+		`data-density-toggle="true"`,
+		`data-collapsible-panel="true"`,
+		`data-collapsible-toggle="true"`,
+		`data-collapsible-key="timeline-read-model"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("timeline page missing ergonomic control %q: %s", want, body)
+		}
+	}
+}
+
 func TestTimelineSourceFilter(t *testing.T) {
 	now := time.Now().UTC()
 	store := &stubEvidenceStore{
@@ -243,6 +400,32 @@ func TestTimelineSourceFilter(t *testing.T) {
 	}
 	if !strings.Contains(body2, "unique-audit-target-xzqw") {
 		t.Errorf("audit filter should show audit event target: %s", body2)
+	}
+}
+
+func BenchmarkTimelineViewLargeEvidence(b *testing.B) {
+	now := time.Now().UTC()
+	items := make([]reporting.DecisionEvidence, 10000)
+	for i := range items {
+		items[i] = reporting.DecisionEvidence{
+			EvidenceID: "ev-bench",
+			Source:     "cloudflare_waf",
+			IP:         "198.51.100.42",
+			Decision:   "report_pending",
+			Timestamp:  now.Add(-time.Duration(i) * time.Second),
+		}
+	}
+	store := &stubEvidenceStore{items: items}
+	srv := &Server{evidence: store}
+	req := httptest.NewRequest(http.MethodGet, "/timeline?limit=20", nil)
+
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		srv.timelineMu.Lock()
+		srv.timelineCacheAt = time.Time{}
+		srv.timelineCache = nil
+		srv.timelineMu.Unlock()
+		_ = srv.timelineView(req)
 	}
 }
 
