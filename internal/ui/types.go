@@ -9,20 +9,27 @@ import (
 )
 
 // CFSyncView is the view model for the /sync (Cloudflare ban sync) page.
+// It is derived entirely from banlifecycle.Store (runtime.db) — the same
+// source of truth the live daemon's reactive ban/cleanup path writes to.
+// The legacy periodic "shadow plan" diffing (planned adds/deletes vs a
+// JSONL cycle log) belongs to the separate shadow-mode parity-validation
+// tooling (cmd/cf-shadow, cmd/crowdsec-sync), which the live cf-sync daemon
+// does not run, so this page no longer reads or reflects that data.
 type CFSyncView struct {
-	HasData       bool
-	CycleAt       time.Time
-	AgreementPct  float64
-	InSync        bool
-	ToAdd         []string // IPs Go would add to CF
-	ToDelete      []string // IPs Go would remove from CF
-	ActiveBans    int
-	CFRules       int
-	CycleCount    int // total cycles in store
-	Error         string
-	NoCycleReason string // explains why HasData is false (no error)
-	MutationsOn   bool   // true when Cloudflare mutations are enabled
-	DryRun        bool   // true when CF mutations are disabled (observation-only)
+	Wired          bool // false when banLifecycleStore is not configured in this build
+	Error          string
+	MutationsOn    bool // true when Cloudflare mutations are enabled
+	DryRun         bool // true when CF mutations are disabled (observation-only)
+	HasActivity    bool
+	ActiveCount    int
+	StatusCounts   map[string]int // status -> count, tallied over the recent sample
+	SampleSize     int            // number of recent lifecycle entries the tally covers
+	LastActivityAt time.Time
+	// RuleInventory is a read-only cross-reference of the zone's total live
+	// Cloudflare IP access rules against cf_ban_lifecycle's tracked subset
+	// (see issue #83). No writes/backfill occur; untracked rules are simply
+	// reported as a count.
+	RuleInventory cfRuleInventory
 }
 
 type ProviderView struct {
@@ -159,12 +166,6 @@ type UnifiedProvidersView struct {
 	Error string
 }
 
-type ComingSoonView struct {
-	Title       string
-	Description string
-	Active      string
-}
-
 type AuditTrailView struct {
 	Entries    []audit.AuditEntry
 	Query      string
@@ -251,6 +252,16 @@ type BanLifecycleEntryView struct {
 	RuleID        string
 	RecidiveLevel int
 	Status        string
+
+	// Cleanup-failure visibility (see banlifecycle.Entry.CleanupAttempts):
+	// set when the cleanup worker has failed to delete this entry's
+	// Cloudflare rule at least once. CleanupRetrying is true when the entry
+	// is still active with at least one recorded failure, so the UI can
+	// show a "retrying" state instead of leaving the failure log-only.
+	CleanupRetrying      bool
+	CleanupAttempts      int
+	LastCleanupError     string
+	LastCleanupAttemptAt string
 }
 
 type BanLifecycleView struct {

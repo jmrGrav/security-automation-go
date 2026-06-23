@@ -8,8 +8,23 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jm/security-automation-go/internal/runtime/events"
 	"github.com/jm/security-automation-go/internal/services/reporting"
 )
+
+// fakeRuntimeEventStore is a minimal events.EventStore fake for proving
+// /timeline surfaces real runtime lineage (see runtimeEntryToTimelineEvent).
+type fakeRuntimeEventStore struct {
+	events []events.Event
+}
+
+func (s fakeRuntimeEventStore) List(_ context.Context, _ string, _ uint64) ([]events.Event, error) {
+	return append([]events.Event(nil), s.events...), nil
+}
+func (s fakeRuntimeEventStore) Append(context.Context, *events.Event) error { return nil }
+func (s fakeRuntimeEventStore) GetLastSequence(context.Context, string) (uint64, error) {
+	return 0, nil
+}
 
 func TestTimelineEmptyState(t *testing.T) {
 	srv, _, _ := newTestServer(t, nil)
@@ -78,6 +93,64 @@ func TestTimelineIncludesEvidenceEvents(t *testing.T) {
 		if !strings.Contains(body, want) {
 			t.Errorf("timeline page missing %q", want)
 		}
+	}
+}
+
+// TestTimelineIncludesRuntimeLineage guards GitHub issue #104: /timeline used
+// to never read the runtime event journal at all, hardcoding "unavailable"
+// as the replay sequence for every row. With an eventStore wired, real
+// daemon lifecycle-transition entries (real sequence numbers, correlation
+// ids) must appear as their own rows, filterable via source=runtime.
+func TestTimelineIncludesRuntimeLineage(t *testing.T) {
+	now := time.Now().UTC()
+	store := fakeRuntimeEventStore{events: []events.Event{
+		{
+			Sequence:      42,
+			Timestamp:     now.Add(-1 * time.Minute),
+			Category:      events.CategoryLifecycle,
+			Type:          "lifecycle_transition",
+			Actor:         "runtime-state-machine",
+			CorrelationID: "run-abc123",
+			Metadata:      map[string]any{"reason": "discovery completed"},
+		},
+	}}
+
+	srv, _, _ := newTestServer(t, nil)
+	srv.eventStore = store
+	cookie := loginCookie(t, srv, "test-password-123!@#")
+
+	req := httptest.NewRequest(http.MethodGet, "/timeline", nil)
+	req.AddCookie(cookie)
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	body := rr.Body.String()
+	for _, want := range []string{"runtime_lifecycle_transition", "run-abc123", "runtime-state-machine", "42"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("timeline page missing %q: %s", want, body)
+		}
+	}
+
+	// source=runtime must isolate this row from audit/WAF rows.
+	req2 := httptest.NewRequest(http.MethodGet, "/timeline?source=runtime", nil)
+	req2.AddCookie(cookie)
+	rr2 := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr2, req2)
+	if !strings.Contains(rr2.Body.String(), "runtime_lifecycle_transition") {
+		t.Fatalf("source=runtime filter dropped the runtime lineage row: %s", rr2.Body.String())
+	}
+
+	// The JSON export carries the Summary field (not rendered as its own
+	// table column), which is where the real metadata reason surfaces.
+	req3 := httptest.NewRequest(http.MethodGet, "/timeline?source=runtime&format=json", nil)
+	req3.AddCookie(cookie)
+	rr3 := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr3, req3)
+	if !strings.Contains(rr3.Body.String(), "discovery completed") {
+		t.Fatalf("expected JSON export to carry the runtime entry's metadata reason: %s", rr3.Body.String())
 	}
 }
 

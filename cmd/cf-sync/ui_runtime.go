@@ -23,6 +23,7 @@ import (
 	"github.com/jm/security-automation-go/internal/cloudflare/banlifecycle"
 	"github.com/jm/security-automation-go/internal/config"
 	"github.com/jm/security-automation-go/internal/httpclient"
+	"github.com/jm/security-automation-go/internal/runtime/events"
 	"github.com/jm/security-automation-go/internal/runtime/lock"
 	"github.com/jm/security-automation-go/internal/security/enrichment"
 	enrichmentabuseipdb "github.com/jm/security-automation-go/internal/security/enrichment/abuseipdb"
@@ -37,10 +38,10 @@ import (
 )
 
 func runUI(ctx context.Context, logger *slog.Logger, cfg *config.Config) error {
-	return runUIWithLocker(ctx, logger, cfg, true, nil, nil, nil, nil, nil, nil)
+	return runUIWithLocker(ctx, logger, cfg, true, nil, nil, nil, nil, nil, nil, nil)
 }
 
-func runUIWithLocker(ctx context.Context, logger *slog.Logger, cfg *config.Config, acquireLock bool, evidenceHolder *lazyEvidenceStore, sharedDB *sqlite.DB, trustedNetworksCache *trustednetworks.ReportCache, banLifecycleHolder *lazyBanLifecycleStore, crowdSecStatusHolder *lazyCrowdSecStatusStore, banDebannerHolder *lazyBanDebanner) error {
+func runUIWithLocker(ctx context.Context, logger *slog.Logger, cfg *config.Config, acquireLock bool, evidenceHolder *lazyEvidenceStore, sharedDB *sqlite.DB, trustedNetworksCache *trustednetworks.ReportCache, banLifecycleHolder *lazyBanLifecycleStore, crowdSecStatusHolder *lazyCrowdSecStatusStore, banDebannerHolder *lazyBanDebanner, eventStoreHolder *lazyEventStore) error {
 	if !cfg.UI.Enabled {
 		return errors.New("ui mode requires UI_ENABLED=1 or ui.enabled=true")
 	}
@@ -198,6 +199,18 @@ func runUIWithLocker(ctx context.Context, logger *slog.Logger, cfg *config.Confi
 		banDebanner = banDebannerHolder
 	}
 
+	// eventStoreHolder resolves against the scoped runtime event journal the
+	// daemon opens after this UI goroutine starts (same pattern as
+	// banLifecycleHolder — and the same DB). In standalone -mode ui (no
+	// daemon, holder nil), setupDB is the only DB this process has, so it is
+	// also the correct source for event-journal lineage.
+	var eventStore events.EventStore
+	if eventStoreHolder != nil {
+		eventStore = eventStoreHolder
+	} else {
+		eventStore = sqlite.NewEventRepository(setupDB)
+	}
+
 	server, err := ui.NewServer(cfg, ui.Options{
 		SetupStore:           setupStore,
 		CredentialStore:      credentialStore,
@@ -207,6 +220,7 @@ func runUIWithLocker(ctx context.Context, logger *slog.Logger, cfg *config.Confi
 		EvidenceStore:        evidenceStore,
 		BanLifecycleStore:    banLifecycleStore,
 		CrowdSecStatusStore:  crowdSecStatusStore,
+		EventStore:           eventStore,
 		BanDebanner:          banDebanner,
 		TrustedNetworksCache: trustedNetworksCache,
 		ValidateAbuseIPDB:    ui.ValidateAbuseIPDB,

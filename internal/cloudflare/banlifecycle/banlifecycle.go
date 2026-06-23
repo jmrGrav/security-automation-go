@@ -40,6 +40,15 @@ type Entry struct {
 	EvidenceID    string
 	RecidiveLevel int    // 1 = first ban, 2 = second, 3+ = third or more
 	Status        string // "active", "expired_cleaned", "auto_debanned", "manual_override"
+
+	// Cleanup-failure bookkeeping. Populated by RecordCleanupFailure when the
+	// cleanup worker fails to delete the Cloudflare rule for an expired entry
+	// (e.g. Cloudflare API error). The entry's Status stays StatusActive so
+	// the next cleanup pass retries it — these fields make that retrying
+	// state visible to operators instead of only appearing in logs.
+	CleanupAttempts      int       // number of failed delete attempts since the last success
+	LastCleanupError     string    // most recent delete failure, "" if none recorded
+	LastCleanupAttemptAt time.Time // when LastCleanupError was recorded; zero if never
 }
 
 // Store persists Cloudflare autoban lifecycle entries.
@@ -49,6 +58,14 @@ type Store interface {
 	Active(ctx context.Context) ([]Entry, error)
 	Expired(ctx context.Context, now time.Time) ([]Entry, error)
 	MarkStatus(ctx context.Context, ip string, status string, note string) error
+	// RecordCleanupFailure persists a failed Cloudflare-rule-delete attempt
+	// for the current entry of ip: increments CleanupAttempts, sets
+	// LastCleanupError and LastCleanupAttemptAt. It does NOT change Status —
+	// the entry stays active so the next cleanup pass retries it. This is
+	// the persistence path that replaces log-only cleanup failures: it must
+	// be called whenever a cleanup delete attempt fails, so operators can
+	// see "retrying" state without reading logs.
+	RecordCleanupFailure(ctx context.Context, ip string, errMsg string) error
 	// Recent returns the most recent entries across all statuses (active,
 	// expired_cleaned, auto_debanned, manual_override), newest first, capped
 	// at limit. Used to render full lifecycle history, not just current bans.

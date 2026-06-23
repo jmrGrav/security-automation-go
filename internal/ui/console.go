@@ -1159,21 +1159,6 @@ func AboutPage(active string, view BuildInfoView) templ.Component {
 	})
 }
 
-func ComingSoonPage(view ComingSoonView) templ.Component {
-	return ConsoleLayout(shellView{
-		Title:    view.Title,
-		Headline: view.Title,
-		Subtitle: view.Description,
-		Active:   view.Active,
-		Body: templ.ComponentFunc(func(ctx context.Context, w io.Writer) error {
-			if _, err := fmt.Fprint(w, `<div class="panel"><div class="badge dryrun">coming soon</div><p class="muted" style="margin-top:.8rem">This route is reserved in the shell so the future workflow can be added without reworking navigation or layout.</p></div>`); err != nil {
-				return err
-			}
-			return writeEmptyState(w, "Empty state ready.")
-		}),
-	})
-}
-
 type keyValueRow struct {
 	Key   string
 	Value string

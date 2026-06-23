@@ -16,9 +16,18 @@ import (
 	"time"
 
 	"github.com/a-h/templ"
+	"github.com/jm/security-automation-go/internal/runtime/events"
+	"github.com/jm/security-automation-go/internal/runtime/timeline"
 	"github.com/jm/security-automation-go/internal/security/audit"
 	"github.com/jm/security-automation-go/internal/services/reporting"
 )
+
+// timelineRuntimeScopeID is the scope ID the daemon's state machine publishes
+// lifecycle-transition events under (see engine.StateMachine.Transition,
+// cmd/cf-sync/runtime.go) when no per-run RuntimeContext scope override is
+// present — the case for nearly all transitions in this single-tenant
+// deployment model.
+const timelineRuntimeScopeID = "default"
 
 type TimelineView struct {
 	Query      string
@@ -148,6 +157,15 @@ func (s *Server) computeAllTimelineEvents(ctx context.Context) []audit.TimelineE
 		}
 	}
 
+	if s.eventStore != nil {
+		entries, err := timeline.NewCollector(s.eventStore).Assemble(ctx, timelineRuntimeScopeID)
+		if err == nil {
+			for _, entry := range entries {
+				timed = append(timed, timedEvent{t: entry.Timestamp, event: runtimeEntryToTimelineEvent(entry)})
+			}
+		}
+	}
+
 	sort.Slice(timed, func(i, j int) bool {
 		return timed[i].t.After(timed[j].t)
 	})
@@ -234,6 +252,42 @@ func evidenceToTimelineEvent(ev reporting.DecisionEvidence) audit.TimelineEvent 
 	}
 }
 
+// runtimeEntryToTimelineEvent projects a runtime event-journal entry (real
+// daemon lifecycle transitions, with real sequence numbers — see
+// internal/runtime/timeline.Collector) into the unified timeline stream.
+// Unlike audit/evidence rows, ReplaySequence here is never a placeholder:
+// it is the entry's actual journal sequence number.
+func runtimeEntryToTimelineEvent(entry timeline.TimelineEntry) audit.TimelineEvent {
+	summary := entry.Type
+	if reason, ok := entry.Metadata["reason"].(string); ok && reason != "" {
+		summary = entry.Type + " · " + reason
+	}
+	return audit.TimelineEvent{
+		Timestamp:      entry.Timestamp.UTC().Format(time.RFC3339Nano),
+		Scope:          "runtime",
+		EventType:      "runtime_" + entry.Type,
+		Severity:       runtimeEventSeverity(entry.Category),
+		CorrelationID:  entry.CorrelationID,
+		ReplaySequence: strconv.FormatUint(entry.Sequence, 10),
+		ActorSource:    valueOrUnknown(entry.Actor),
+		Action:         entry.Type,
+		Summary:        summary,
+	}
+}
+
+func runtimeEventSeverity(category events.Category) string {
+	switch category {
+	case events.CategoryRollback:
+		return "error"
+	case events.CategoryDrift, events.CategoryFencing:
+		return "warning"
+	case events.CategoryLifecycle:
+		return "live"
+	default:
+		return "badge"
+	}
+}
+
 // wafScopes is the set of evidence source values that identify WAF pipeline events.
 var wafScopes = map[string]bool{
 	"cloudflare_waf": true,
@@ -258,7 +312,11 @@ func filterTimelineEvents(events []audit.TimelineEvent, query, action, source st
 				continue
 			}
 		case "audit":
-			if isWAFScope(event.Scope) {
+			if isWAFScope(event.Scope) || event.Scope == "runtime" {
+				continue
+			}
+		case "runtime":
+			if event.Scope != "runtime" {
 				continue
 			}
 		}
@@ -410,7 +468,15 @@ func TimelinePage(view TimelineView, csrfToken string) templ.Component {
 					return err
 				}
 			}
-			if _, err := fmt.Fprint(w, `>Audit Trail</option></select></span></div>`); err != nil {
+			if _, err := fmt.Fprint(w, `>Audit Trail</option><option value="runtime"`); err != nil {
+				return err
+			}
+			if view.Source == "runtime" {
+				if _, err := fmt.Fprint(w, ` selected`); err != nil {
+					return err
+				}
+			}
+			if _, err := fmt.Fprint(w, `>Runtime Lineage</option></select></span></div>`); err != nil {
 				return err
 			}
 			// Search row

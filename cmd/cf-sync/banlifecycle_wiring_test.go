@@ -76,6 +76,9 @@ func (s *fakeLifecycleStore) Recent(_ context.Context, _ int) ([]banlifecycle.En
 func (s *fakeLifecycleStore) MarkStatus(_ context.Context, ip, status, note string) error {
 	return nil
 }
+func (s *fakeLifecycleStore) RecordCleanupFailure(_ context.Context, ip, errMsg string) error {
+	return nil
+}
 func (s *fakeLifecycleStore) RecidiveLevel(_ context.Context, ip string) (int, error) {
 	return 0, nil
 }

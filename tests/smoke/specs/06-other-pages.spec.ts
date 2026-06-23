@@ -13,10 +13,6 @@ const AUTH_REQUIRED_PAGES = [
   '/evidence',
   '/intelligence',
   '/timeline',
-  '/replay',
-  '/deban',
-  '/recovery',
-  '/drift',
 ];
 
 test.describe('Authenticated pages render without error', () => {

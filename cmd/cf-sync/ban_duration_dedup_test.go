@@ -43,6 +43,9 @@ func (s *recallingLifecycleStore) Recent(_ context.Context, _ int) ([]banlifecyc
 func (s *recallingLifecycleStore) MarkStatus(_ context.Context, ip, status, note string) error {
 	return nil
 }
+func (s *recallingLifecycleStore) RecordCleanupFailure(_ context.Context, ip, errMsg string) error {
+	return nil
+}
 func (s *recallingLifecycleStore) RecidiveLevel(_ context.Context, ip string) (int, error) {
 	if e, ok := s.entries[ip]; ok {
 		return e.RecidiveLevel, nil

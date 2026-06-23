@@ -52,7 +52,6 @@ import (
 	"github.com/jm/security-automation-go/internal/runtime/quarantine"
 	stateful_scheduler "github.com/jm/security-automation-go/internal/runtime/scheduler/stateful"
 	"github.com/jm/security-automation-go/internal/runtime/status"
-	"github.com/jm/security-automation-go/internal/runtime/timeline"
 	"github.com/jm/security-automation-go/internal/services/reporting"
 	"github.com/jm/security-automation-go/internal/startuplog"
 	"github.com/jm/security-automation-go/internal/storage/sqlite"
@@ -168,10 +167,15 @@ func runCFSync(configPath, mode string, dryRun bool, format string, metricsAddr 
 	// most recent SyncReport even though the registry itself is built later
 	// in this function.
 	trustedNetworksCache := trustednetworks.NewReportCache()
+	// eventStoreHolder is populated below once the scoped runtime event
+	// journal is opened (see initSQLite call further down), same ordering
+	// constraint as banLifecycleHolder. Backs the /timeline page's runtime
+	// lineage rows (real sequence numbers from the event journal).
+	eventStoreHolder := &lazyEventStore{}
 	if cfg.UI.Enabled {
 		uiCfg := *cfg // snapshot: runUIWithLocker writes its own credential fields; avoid race with writes below
 		go func() {
-			if err := runUIWithLocker(ctx, logger, &uiCfg, false, evidenceHolder, bootstrapDB, trustedNetworksCache, banLifecycleHolder, crowdSecStatusHolder, banDebannerHolder); err != nil {
+			if err := runUIWithLocker(ctx, logger, &uiCfg, false, evidenceHolder, bootstrapDB, trustedNetworksCache, banLifecycleHolder, crowdSecStatusHolder, banDebannerHolder, eventStoreHolder); err != nil {
 				logger.Error("UI server failed", "error", err)
 			}
 		}()
@@ -267,6 +271,7 @@ func runCFSync(configPath, mode string, dryRun bool, format string, metricsAddr 
 	}
 	defer sqliteDB.Close()
 	evidenceHolder.set(reportingStores.Evidence)
+	eventStoreHolder.set(eventStore)
 
 	outboxLeaseGuard := reporting.NewLeaseStoreOutboxGuard(currentScope.ID(), "reconcile", leaseRepo)
 	newBus := events.NewBus(eventStore, logger)
@@ -325,7 +330,6 @@ func runCFSync(configPath, mode string, dryRun bool, format string, metricsAddr 
 	gov := governor.New(logger)
 	invEng := invariants.New()
 	convVal := convergence.NewValidator(invEng, logger)
-	tlCollector := timeline.NewCollector(eventStore)
 
 	gov.RegisterProvider("cloudflare", map[governor.ResourceType]governor.Limit{
 		governor.ResourceRequest:  {MaxBurst: 50, Rate: 10, Interval: time.Minute},
@@ -416,8 +420,6 @@ func runCFSync(configPath, mode string, dryRun bool, format string, metricsAddr 
 	} else {
 		runCLI(ctx, orch, cfg.Cloudflare.ZoneID, dryRun, format)
 	}
-
-	_ = tlCollector
 }
 
 func mapLogLevel(level string) slog.Level {

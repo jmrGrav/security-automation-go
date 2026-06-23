@@ -481,6 +481,15 @@ func (s *DB) runMigrations() error {
 					);
 				`,
 		},
+		{
+			Version:     21,
+			Description: "Cloudflare ban lifecycle cleanup-failure bookkeeping (replaces log-only cleanup failures)",
+			SQL: `
+					ALTER TABLE cf_ban_lifecycle ADD COLUMN cleanup_attempts INTEGER NOT NULL DEFAULT 0;
+					ALTER TABLE cf_ban_lifecycle ADD COLUMN last_cleanup_error TEXT NOT NULL DEFAULT '';
+					ALTER TABLE cf_ban_lifecycle ADD COLUMN last_cleanup_attempt_at TIMESTAMP;
+				`,
+		},
 	}
 
 	return m.Migrate(context.Background(), migrations)

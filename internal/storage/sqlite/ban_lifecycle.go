@@ -75,7 +75,8 @@ func (s *BanLifecycleStore) Get(ctx context.Context, ip string) (banlifecycle.En
 	const op = "storage.sqlite.BanLifecycleStore.Get"
 	row := s.db.Conn().QueryRowContext(ctx, `
 		SELECT ip, source, reason, confidence, created_at, expires_at, duration_ns,
-		       rule_id, evidence_id, recidive_level, status
+		       rule_id, evidence_id, recidive_level, status,
+		       cleanup_attempts, last_cleanup_error, last_cleanup_attempt_at
 		FROM cf_ban_lifecycle
 		WHERE ip = ?
 		ORDER BY created_at DESC, id DESC
@@ -96,7 +97,8 @@ func (s *BanLifecycleStore) Active(ctx context.Context) ([]banlifecycle.Entry, e
 	const op = "storage.sqlite.BanLifecycleStore.Active"
 	rows, err := s.db.Conn().QueryContext(ctx, `
 		SELECT ip, source, reason, confidence, created_at, expires_at, duration_ns,
-		       rule_id, evidence_id, recidive_level, status
+		       rule_id, evidence_id, recidive_level, status,
+		       cleanup_attempts, last_cleanup_error, last_cleanup_attempt_at
 		FROM cf_ban_lifecycle
 		WHERE status = ?
 		ORDER BY created_at DESC, id DESC
@@ -113,7 +115,8 @@ func (s *BanLifecycleStore) Expired(ctx context.Context, now time.Time) ([]banli
 	const op = "storage.sqlite.BanLifecycleStore.Expired"
 	rows, err := s.db.Conn().QueryContext(ctx, `
 		SELECT ip, source, reason, confidence, created_at, expires_at, duration_ns,
-		       rule_id, evidence_id, recidive_level, status
+		       rule_id, evidence_id, recidive_level, status,
+		       cleanup_attempts, last_cleanup_error, last_cleanup_attempt_at
 		FROM cf_ban_lifecycle
 		WHERE status = ? AND expires_at <= ?
 		ORDER BY created_at ASC, id ASC
@@ -135,7 +138,8 @@ func (s *BanLifecycleStore) Recent(ctx context.Context, limit int) ([]banlifecyc
 	}
 	rows, err := s.db.Conn().QueryContext(ctx, `
 		SELECT ip, source, reason, confidence, created_at, expires_at, duration_ns,
-		       rule_id, evidence_id, recidive_level, status
+		       rule_id, evidence_id, recidive_level, status,
+		       cleanup_attempts, last_cleanup_error, last_cleanup_attempt_at
 		FROM cf_ban_lifecycle
 		ORDER BY created_at DESC, id DESC
 		LIMIT ?
@@ -171,6 +175,35 @@ func (s *BanLifecycleStore) MarkStatus(ctx context.Context, ip string, status st
 	return apperr.Wrap(op, err)
 }
 
+// RecordCleanupFailure increments cleanup_attempts and records the most
+// recent delete-failure message/timestamp for the current (most recent)
+// entry of ip. Status is left unchanged so the next cleanup pass retries.
+func (s *BanLifecycleStore) RecordCleanupFailure(ctx context.Context, ip string, errMsg string) error {
+	const op = "storage.sqlite.BanLifecycleStore.RecordCleanupFailure"
+	if err := s.db.ensureWritable(op); err != nil {
+		return err
+	}
+	var id int64
+	err := s.db.Conn().QueryRowContext(ctx, `
+		SELECT id FROM cf_ban_lifecycle WHERE ip = ? ORDER BY created_at DESC, id DESC LIMIT 1
+	`, ip).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return apperr.Wrap(op, err)
+	}
+	_, err = s.db.Conn().ExecContext(ctx, `
+		UPDATE cf_ban_lifecycle SET
+			cleanup_attempts = cleanup_attempts + 1,
+			last_cleanup_error = ?,
+			last_cleanup_attempt_at = CURRENT_TIMESTAMP,
+			updated_at = CURRENT_TIMESTAMP
+		WHERE id = ?
+	`, errMsg, id)
+	return apperr.Wrap(op, err)
+}
+
 // RecidiveLevel returns the count of prior non-active entries for ip.
 func (s *BanLifecycleStore) RecidiveLevel(ctx context.Context, ip string) (int, error) {
 	const op = "storage.sqlite.BanLifecycleStore.RecidiveLevel"
@@ -188,13 +221,18 @@ func scanBanLifecycleEntry(row *sql.Row) (banlifecycle.Entry, error) {
 	var e banlifecycle.Entry
 	var durationNS int64
 	var createdAt, expiresAt time.Time
+	var lastCleanupAttemptAt sql.NullTime
 	if err := row.Scan(&e.IP, &e.Source, &e.Reason, &e.Confidence, &createdAt, &expiresAt,
-		&durationNS, &e.RuleID, &e.EvidenceID, &e.RecidiveLevel, &e.Status); err != nil {
+		&durationNS, &e.RuleID, &e.EvidenceID, &e.RecidiveLevel, &e.Status,
+		&e.CleanupAttempts, &e.LastCleanupError, &lastCleanupAttemptAt); err != nil {
 		return banlifecycle.Entry{}, err
 	}
 	e.CreatedAt = createdAt.UTC()
 	e.ExpiresAt = expiresAt.UTC()
 	e.Duration = time.Duration(durationNS)
+	if lastCleanupAttemptAt.Valid {
+		e.LastCleanupAttemptAt = lastCleanupAttemptAt.Time.UTC()
+	}
 	return e, nil
 }
 
@@ -204,13 +242,18 @@ func scanBanLifecycleEntries(op string, rows *sql.Rows) ([]banlifecycle.Entry, e
 		var e banlifecycle.Entry
 		var durationNS int64
 		var createdAt, expiresAt time.Time
+		var lastCleanupAttemptAt sql.NullTime
 		if err := rows.Scan(&e.IP, &e.Source, &e.Reason, &e.Confidence, &createdAt, &expiresAt,
-			&durationNS, &e.RuleID, &e.EvidenceID, &e.RecidiveLevel, &e.Status); err != nil {
+			&durationNS, &e.RuleID, &e.EvidenceID, &e.RecidiveLevel, &e.Status,
+			&e.CleanupAttempts, &e.LastCleanupError, &lastCleanupAttemptAt); err != nil {
 			return nil, apperr.Wrap(op, err)
 		}
 		e.CreatedAt = createdAt.UTC()
 		e.ExpiresAt = expiresAt.UTC()
 		e.Duration = time.Duration(durationNS)
+		if lastCleanupAttemptAt.Valid {
+			e.LastCleanupAttemptAt = lastCleanupAttemptAt.Time.UTC()
+		}
 		out = append(out, e)
 	}
 	if err := rows.Err(); err != nil {

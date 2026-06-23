@@ -68,6 +68,13 @@ func (s *lazyBanLifecycleStore) MarkStatus(ctx context.Context, ip string, statu
 	return nil
 }
 
+func (s *lazyBanLifecycleStore) RecordCleanupFailure(ctx context.Context, ip string, errMsg string) error {
+	if inner := s.get(); inner != nil {
+		return inner.RecordCleanupFailure(ctx, ip, errMsg)
+	}
+	return nil
+}
+
 func (s *lazyBanLifecycleStore) Recent(ctx context.Context, limit int) ([]banlifecycle.Entry, error) {
 	if inner := s.get(); inner != nil {
 		return inner.Recent(ctx, limit)
