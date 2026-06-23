@@ -2,6 +2,14 @@ import { test, expect } from '@playwright/test';
 import { login } from '../helpers/session';
 import { assertNoSecretLeakage } from '../helpers/redact';
 
+// Gate for specs that mutate provider credentials. SECURITY_AUTOMATION_SMOKE_LIVE=1
+// only confirms "this is a reachable live server" — on an operator box that's
+// frequently the real production instance at :9091, and a mutating spec run there
+// would silently overwrite a real provider key with a disposable placeholder with
+// no way to recover it. SMOKE_ALLOW_MUTATIONS=1 is a separate, explicit opt-in that
+// the operator must set only when pointed at a disposable/isolated instance.
+const ALLOW_MUTATIONS = process.env.SMOKE_ALLOW_MUTATIONS === '1';
+
 test.describe('Providers', () => {
   test.beforeEach(async ({ page }) => {
     await login(page);
@@ -85,6 +93,10 @@ test.describe('Providers', () => {
   });
 
   test('Replace Key for Spamhaus shows CONFIGURED immediately and never leaks the key', async ({ page }) => {
+    if (!ALLOW_MUTATIONS) {
+      test.skip(true, 'Set SMOKE_ALLOW_MUTATIONS=1 to run this mutating spec against a disposable instance — it overwrites the live Spamhaus key with a placeholder and the original cannot be recovered');
+      return;
+    }
     // Get CSRF token from the providers page
     await page.goto('/providers');
     const csrfInput = page.locator('form input[name="csrf_token"]').first();

@@ -28,7 +28,6 @@ import (
 	"github.com/jm/security-automation-go/internal/policy/bundles/activation"
 	"github.com/jm/security-automation-go/internal/policy/bundles/registry"
 	"github.com/jm/security-automation-go/internal/policy/bundles/trust"
-	polcompiler "github.com/jm/security-automation-go/internal/policy/compiler"
 	polengine "github.com/jm/security-automation-go/internal/policy/engine"
 	"github.com/jm/security-automation-go/internal/policy/federation"
 	"github.com/jm/security-automation-go/internal/policy/opa"
@@ -52,7 +51,6 @@ import (
 	"github.com/jm/security-automation-go/internal/runtime/ownership"
 	"github.com/jm/security-automation-go/internal/runtime/quarantine"
 	stateful_scheduler "github.com/jm/security-automation-go/internal/runtime/scheduler/stateful"
-	"github.com/jm/security-automation-go/internal/runtime/simulation"
 	"github.com/jm/security-automation-go/internal/runtime/status"
 	"github.com/jm/security-automation-go/internal/runtime/timeline"
 	"github.com/jm/security-automation-go/internal/services/reporting"
@@ -298,7 +296,6 @@ func runCFSync(configPath, mode string, dryRun bool, format string, metricsAddr 
 	ownerRes.SetClaimStore(ownershipRepo)
 
 	pEngine := polengine.New(buildPolicies(cfg))
-	intentComp := polcompiler.New()
 
 	regoLoader := opa.NewBundleLoader(filepath.Join("internal", "policy", "rego"))
 	regoCode, err := regoLoader.LoadDefault()
@@ -328,7 +325,6 @@ func runCFSync(configPath, mode string, dryRun bool, format string, metricsAddr 
 	gov := governor.New(logger)
 	invEng := invariants.New()
 	convVal := convergence.NewValidator(invEng, logger)
-	simEng := simulation.NewEngine()
 	tlCollector := timeline.NewCollector(eventStore)
 
 	gov.RegisterProvider("cloudflare", map[governor.ResourceType]governor.Limit{
@@ -421,8 +417,6 @@ func runCFSync(configPath, mode string, dryRun bool, format string, metricsAddr 
 		runCLI(ctx, orch, cfg.Cloudflare.ZoneID, dryRun, format)
 	}
 
-	_ = intentComp
-	_ = simEng
 	_ = tlCollector
 }
 

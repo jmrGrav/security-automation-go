@@ -317,10 +317,6 @@ func sanitizeAuditFields(fields map[string]string) map[string]string {
 	return out
 }
 
-func isSensitiveAuditField(key string) bool {
-	return isSensitiveAuditKey(key)
-}
-
 func redactValue(value string) string {
 	if value == "" {
 		return "missing"
