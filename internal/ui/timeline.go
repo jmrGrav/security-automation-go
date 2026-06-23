@@ -58,9 +58,10 @@ func (s *Server) timelineView(r *http.Request) TimelineView {
 	source := strings.TrimSpace(r.URL.Query().Get("source"))
 	page := parsePositiveInt(r.URL.Query().Get("page"), 1)
 	pageSize := clampInt(parsePositiveInt(r.URL.Query().Get("limit"), 20), 5, 100)
+	format := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("format")))
 
 	hasFilter := query != "" || action != "" || source != ""
-	events := s.timelineEvents(ctx, timelineEvidenceReadLimit(page, pageSize, hasFilter))
+	events := s.timelineEvents(ctx, timelineEvidenceReadLimit(page, pageSize, hasFilter || isTimelineExport(format)))
 	events = filterTimelineEvents(events, query, action, source)
 	total := len(events)
 	paged, hasPrev, hasNext := paginateTimelineEvents(events, page, pageSize)
@@ -112,6 +113,7 @@ const (
 	timelineEvidenceMaxWindow = 1000
 	timelineEvidenceMinWindow = 100
 	timelineEvidenceLookahead = 5
+	timelineEvidenceComplete  = -1
 )
 
 // allTimelineEvents merges audit entries and WAF evidence records into a single
@@ -119,16 +121,20 @@ const (
 // result is cached for timelineCacheTTL to bound the cost of repeated
 // requests against a growing history (see timelineCacheTTL).
 //
-// Evidence is capped by timelineEvidenceMaxWindow. Runtime daemon lifecycle
-// events (startup, config reloads) are read from the scoped runtime event store.
+// Evidence is read completely in bounded pages. Runtime daemon lifecycle events
+// (startup, config reloads) are read from the scoped runtime event store.
 func (s *Server) allTimelineEvents(ctx context.Context) []audit.TimelineEvent {
-	return s.timelineEvents(ctx, timelineEvidenceMaxWindow)
+	return s.timelineEvents(ctx, timelineEvidenceComplete)
 }
 
 func (s *Server) timelineEvents(ctx context.Context, evidenceLimit int) []audit.TimelineEvent {
-	evidenceLimit = clampInt(evidenceLimit, 1, timelineEvidenceMaxWindow)
+	cacheLimit := evidenceLimit
+	if evidenceLimit != timelineEvidenceComplete {
+		evidenceLimit = clampInt(evidenceLimit, 1, timelineEvidenceMaxWindow)
+		cacheLimit = evidenceLimit
+	}
 	s.timelineMu.Lock()
-	if !s.timelineCacheAt.IsZero() && s.timelineCacheLimit == evidenceLimit && time.Since(s.timelineCacheAt) < timelineCacheTTL {
+	if !s.timelineCacheAt.IsZero() && s.timelineCacheLimit == cacheLimit && time.Since(s.timelineCacheAt) < timelineCacheTTL {
 		cached := s.timelineCache
 		s.timelineMu.Unlock()
 		return cached
@@ -140,7 +146,7 @@ func (s *Server) timelineEvents(ctx context.Context, evidenceLimit int) []audit.
 	s.timelineMu.Lock()
 	s.timelineCache = events
 	s.timelineCacheAt = time.Now()
-	s.timelineCacheLimit = evidenceLimit
+	s.timelineCacheLimit = cacheLimit
 	s.timelineMu.Unlock()
 
 	return events
@@ -148,12 +154,16 @@ func (s *Server) timelineEvents(ctx context.Context, evidenceLimit int) []audit.
 
 func timelineEvidenceReadLimit(page, pageSize int, hasFilter bool) int {
 	if hasFilter {
-		return timelineEvidenceMaxWindow
+		return timelineEvidenceComplete
 	}
 	page = maxInt(1, page)
 	pageSize = clampInt(pageSize, 5, 100)
 	needed := page * pageSize
 	return clampInt(needed+(pageSize*timelineEvidenceLookahead), timelineEvidenceMinWindow, timelineEvidenceMaxWindow)
+}
+
+func isTimelineExport(format string) bool {
+	return format == "json" || format == "csv"
 }
 
 func (s *Server) computeAllTimelineEvents(ctx context.Context, evidenceLimit int) []audit.TimelineEvent {
@@ -170,13 +180,8 @@ func (s *Server) computeAllTimelineEvents(ctx context.Context, evidenceLimit int
 		}
 	}
 
-	if s.evidence != nil {
-		evs, err := s.evidence.Search(ctx, reporting.EvidenceSearchOptions{Limit: evidenceLimit})
-		if err == nil {
-			for _, ev := range evs {
-				timed = append(timed, timedEvent{t: ev.Timestamp, event: evidenceToTimelineEvent(ev)})
-			}
-		}
+	for _, ev := range s.timelineEvidenceRows(ctx, evidenceLimit) {
+		timed = append(timed, timedEvent{t: ev.Timestamp, event: evidenceToTimelineEvent(ev)})
 	}
 
 	if s.eventStore != nil {
@@ -197,6 +202,34 @@ func (s *Server) computeAllTimelineEvents(ctx context.Context, evidenceLimit int
 		events = append(events, te.event)
 	}
 	return events
+}
+
+func (s *Server) timelineEvidenceRows(ctx context.Context, evidenceLimit int) []reporting.DecisionEvidence {
+	if s.evidence == nil {
+		return nil
+	}
+	if evidenceLimit != timelineEvidenceComplete {
+		evs, err := s.evidence.Search(ctx, reporting.EvidenceSearchOptions{Limit: evidenceLimit})
+		if err == nil {
+			return evs
+		}
+		return nil
+	}
+
+	var all []reporting.DecisionEvidence
+	for offset := 0; ; offset += timelineEvidenceMaxWindow {
+		evs, err := s.evidence.Search(ctx, reporting.EvidenceSearchOptions{
+			Limit:  timelineEvidenceMaxWindow,
+			Offset: offset,
+		})
+		if err != nil || len(evs) == 0 {
+			return all
+		}
+		all = append(all, evs...)
+		if len(evs) < timelineEvidenceMaxWindow {
+			return all
+		}
+	}
 }
 
 func auditEntryToTimelineEvent(entry audit.AuditEntry) audit.TimelineEvent {

@@ -716,6 +716,16 @@ func ConsoleLayout(view shellView) templ.Component {
 				padding: .64rem;
 				border-radius: 8px;
 			}
+			body[data-density="compact"] .table-wrap td [data-ai-explain-result].empty {
+				height: 0;
+				margin: 0;
+				padding: 0;
+				border: 0;
+				overflow: hidden;
+				font-size: 0;
+				line-height: 0;
+				background: transparent;
+			}
 			.live-panel-root {
 				position: fixed;
 				inset: 0;

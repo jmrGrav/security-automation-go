@@ -9,8 +9,9 @@ preferences, but must not own business decisions or mutations.
 - First page reads must remain windowed by page and limit.
 - Unfiltered `/timeline` evidence reads are bounded to `page * limit + 5 * limit`,
   with a minimum of 100 rows and a hard cap of 1000 rows.
-- Filtered and exported Timeline projections use the same hard cap of 1000
-  evidence rows.
+- Filtered and exported Timeline projections must not silently miss older
+  matching evidence; they read evidence in bounded pages until the persisted
+  evidence stream is exhausted.
 - Timeline merge results are cached for short refresh bursts only:
   `timelineCacheTTL = 3s`.
 - The reference benchmark is `BenchmarkTimelineViewLargeEvidence` in
