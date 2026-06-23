@@ -4,6 +4,16 @@ go 1.25.0
 
 toolchain go1.25.11
 
+// CVE pin: github.com/open-policy-agent/opa transitively requires
+// containerd v1.7.27, vulnerable to GHSA-via Dependabot alerts #7/#8
+// (host-root command execution via image-config LABEL, unbounded group
+// parsing DoS). Neither package is actually imported by this module (see
+// `go mod why`), but Dependabot scans the full resolved module graph, so a
+// plain `go get` bump gets reverted by `go mod tidy` since it's "unused."
+// A replace forces the patched version regardless of what transitive
+// requirers ask for, and survives tidy.
+replace github.com/containerd/containerd => github.com/containerd/containerd v1.7.33
+
 require (
 	github.com/a-h/templ v0.2.778
 	github.com/modelcontextprotocol/go-sdk v1.6.1
