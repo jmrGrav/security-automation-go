@@ -310,6 +310,22 @@ The script:
 5. Runs all browser smoke tests
 6. Writes `SMOKE_TEST_REPORT.md` (gitignored)
 
+### Mutating provider-key smoke test (explicit opt-in required)
+
+The "Replace Key for Spamhaus" spec in `tests/smoke/specs/04-providers.spec.ts`
+POSTs a real key replacement and **cannot recover the original key it
+overwrites** (provider keys are encrypted at rest and never displayed). It
+does not run under `SECURITY_AUTOMATION_SMOKE_LIVE=1` alone — that flag only
+confirms a reachable live server, which on an operator box is frequently the
+real production instance at `:9091`. Set `SMOKE_ALLOW_MUTATIONS=1` only when
+`SMOKE_UI_URL` points at a disposable, isolated instance (separate
+`STATE_DIR`, separate port, throwaway provider keys):
+
+```bash
+SECURITY_AUTOMATION_SMOKE_LIVE=1 SMOKE_ALLOW_MUTATIONS=1 SMOKE_UI_URL=http://127.0.0.1:<isolated-port> \
+  ./scripts/smoke-ui-runtime.sh
+```
+
 ### Admin CLI smoke (destructive — explicit opt-in required)
 
 ```bash

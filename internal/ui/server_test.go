@@ -738,3 +738,24 @@ func TestIntelligenceLookup_Success(t *testing.T) {
 		t.Fatalf("expected 200, got %d", rr.Code)
 	}
 }
+
+func TestStatusLevelFromText(t *testing.T) {
+	cases := []struct {
+		text string
+		want string
+	}{
+		{"SQLite WAL available", "healthy"},
+		{"SQLite WAL unavailable", "degraded"},
+		{"Nginx ready", "healthy"},
+		{"Nginx unavailable / nginx log mode", "degraded"},
+		{"Cloudflare live mutations enabled", "live"},
+		{"Cloudflare configured dry-run", "dry-run"},
+		{"CrowdSec disabled", "disabled"},
+		{"something else entirely", "warning"},
+	}
+	for _, c := range cases {
+		if got := statusLevelFromText(c.text); got != c.want {
+			t.Errorf("statusLevelFromText(%q) = %q, want %q", c.text, got, c.want)
+		}
+	}
+}

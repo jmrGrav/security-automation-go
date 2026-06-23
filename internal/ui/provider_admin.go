@@ -41,8 +41,6 @@ const (
 	providerTestDisabledByOperator = "DISABLED_BY_OPERATOR"
 	providerTestUnsupportedModel   = "UNSUPPORTED_MODEL"
 	providerTestUnknownError       = "TEST_FAILED"
-
-	providerTestPrompt = "provider readiness check"
 )
 
 type ProviderFactory func(ai.ProviderConfig) providers.Provider
@@ -524,19 +522,6 @@ func loadAIStateFromStoreOrFile(ctx context.Context, store SetupStorer, filePath
 	return loadAIProviderState(filePath)
 }
 
-func providerStatePathHint(path string) string {
-	lines := []string{
-		fmt.Sprintf("impossible to write the provider state at %s", path),
-		"Run:",
-		"sudo install -d -m 755 -o root -g root /etc/security-automation-go",
-	}
-	lines = append(lines,
-		"sudo install -d -m 750 -o security-automation -g security-automation /var/lib/security-automation-go/runtime",
-		fmt.Sprintf("sudo install -m 0640 -o security-automation -g security-automation /dev/null %s", path),
-	)
-	return strings.Join(lines, "\n")
-}
-
 func providerManagementEntry(name AIProviderName, cfg ai.ProviderConfig, configured bool, record AIProviderRecord) AIProviderManagementEntry {
 	display, _ := providerSpec(name)
 	displayRecord := providerDisplayRecord(record)
@@ -873,27 +858,6 @@ func providerKeySelection(name string) (AIProviderName, bool) {
 	}
 }
 
-func providerRecordForName(state *AIProviderState, name AIProviderName) *AIProviderRecord {
-	if state == nil {
-		return nil
-	}
-	switch name {
-	case AIProviderOpenAI:
-		return &state.OpenAI
-	case AIProviderAnthropic:
-		return &state.Anthropic
-	case AIProviderGemini:
-		return &state.Gemini
-	default:
-		return nil
-	}
-}
-
-func providerStatusFromRecordAndConfig(record AIProviderRecord, cfg ai.ProviderConfig) string {
-	secretState := providerSecretState(record.Enabled, strings.TrimSpace(cfg.APIKey) != "")
-	return providerManagementStatus(record.Enabled, secretState, record.LastTestStatus)
-}
-
 func providerManagementView(cfg ai.Config, state AIProviderState, loaded bool) AIProviderManagementView {
 	effective := applyAIProviderState(cfg, state, loaded)
 	views := make([]AIProviderManagementEntry, 0, 3)
@@ -930,13 +894,6 @@ func providerConfigForName(cfg ai.Config, name AIProviderName) ai.ProviderConfig
 	default:
 		return ai.ProviderConfig{}
 	}
-}
-
-func providerConfigValidationError(path string, err error) error {
-	if os.IsPermission(err) || errors.Is(err, os.ErrPermission) {
-		return fmt.Errorf("%s: %w\n%s", err.Error(), err, providerStatePathHint(path))
-	}
-	return err
 }
 
 func ProviderManagementPage(view AIProviderManagementView, csrfToken string) templ.Component {
@@ -1080,25 +1037,6 @@ func nonAICredentialKey(name string) string {
 		return "virustotal.api_key"
 	default:
 		return ""
-	}
-}
-
-func nonAIProviderDisplayName(slug string) string {
-	switch strings.ToLower(strings.TrimSpace(slug)) {
-	case "abuseipdb":
-		return "AbuseIPDB"
-	case "spamhaus":
-		return "Spamhaus"
-	case "virustotal":
-		return "VirusTotal"
-	case "cloudflare":
-		return "Cloudflare"
-	case "crowdsec":
-		return "CrowdSec"
-	case "betterstack":
-		return "BetterStack"
-	default:
-		return slug
 	}
 }
 

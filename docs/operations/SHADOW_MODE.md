@@ -1,5 +1,16 @@
 # Shadow Runbook
 
+**Status: historical / pre-cutover validation phase.** This runbook documents
+the shadow-validation step that preceded controlled-authority cutover. Once
+[CUTOVER.md](CUTOVER.md) has been completed, `cf-sync.service` (Go) is the
+live authority for Cloudflare enforcement and AbuseIPDB reporting; the
+legacy Python daemon (`crowdsec-cf-sync.service`) continues running in
+reduced mode for the duties Go does not yet replace (Lua push, ModSecurity,
+recidive) — see CUTOVER.md's "What Python KEEPS" table. The steps below
+describe the read-only validation that ran *before* that promotion and are
+retained for re-running shadow validation against a new environment, not as
+the current authority model.
+
 ## Purpose
 
 Run the `security-automation-go` shadow validator while the Python daemon

@@ -797,16 +797,6 @@ func (s *Server) handleForensicLookup(w http.ResponseWriter, r *http.Request) {
 	renderForensicPage(ctx, w, view, s.csrfTokenFromRequest(r))
 }
 
-func (s *Server) requireAuth(next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if !s.isAuthed(r) {
-			http.Redirect(w, r, "/login", http.StatusFound)
-			return
-		}
-		next(w, r)
-	}
-}
-
 func (s *Server) requireAuthHandler(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if !s.isAuthed(r) {
@@ -941,34 +931,6 @@ func (s *Server) pruneSessionsLocked(now time.Time) {
 	if removed > 0 {
 		metrics.UISessionsPrunedTotal.Add(float64(removed))
 	}
-}
-
-func (s *Server) providerViews() []ProviderView {
-	ctx := context.Background()
-	views := []ProviderView{
-		{
-			Name:       "AbuseIPDB",
-			Enabled:    s.cfg.AbuseIPDB.Enabled,
-			Configured: credentialConfigured(ctx, s.credentialStore, "abuseipdb.api_key"),
-			MaskedKey:  maskedCredentialStoreValue(ctx, s.credentialStore, "abuseipdb.api_key"),
-			Status:     providerStatus(s.cfg.AbuseIPDB.Enabled, credentialConfigured(ctx, s.credentialStore, "abuseipdb.api_key")),
-		},
-		{
-			Name:       "Spamhaus",
-			Enabled:    s.cfg.Spamhaus.Enabled,
-			Configured: credentialConfigured(ctx, s.credentialStore, "spamhaus.api_key"),
-			MaskedKey:  maskedCredentialStoreValue(ctx, s.credentialStore, "spamhaus.api_key"),
-			Status:     providerStatus(s.cfg.Spamhaus.Enabled, credentialConfigured(ctx, s.credentialStore, "spamhaus.api_key")),
-		},
-		{
-			Name:       "VirusTotal",
-			Enabled:    s.cfg.VirusTotal.Enabled,
-			Configured: credentialConfigured(ctx, s.credentialStore, "virustotal.api_key"),
-			MaskedKey:  maskedCredentialStoreValue(ctx, s.credentialStore, "virustotal.api_key"),
-			Status:     providerStatus(s.cfg.VirusTotal.Enabled, credentialConfigured(ctx, s.credentialStore, "virustotal.api_key")),
-		},
-	}
-	return views
 }
 
 func (s *Server) providerHealthViews() []ProviderHealth {
@@ -1292,33 +1254,13 @@ func statusLevelFromText(text string) string {
 		return "dry-run"
 	case strings.Contains(lower, "unavailable"):
 		return "degraded"
+	case strings.Contains(lower, "available"):
+		return "healthy"
 	case strings.Contains(lower, "disabled"):
 		return "disabled"
 	default:
 		return "warning"
 	}
-}
-
-func providerConfiguredValue(cfgValue string, sp SecretProvider, key string) string {
-	if strings.TrimSpace(cfgValue) != "" {
-		return cfgValue
-	}
-	if sp == nil {
-		return ""
-	}
-	v, ok := sp.Lookup(key)
-	if !ok {
-		return ""
-	}
-	return v
-}
-
-func maskedProviderValue(cfgValue string, sp SecretProvider, key string) string {
-	v := providerConfiguredValue(cfgValue, sp, key)
-	if v == "" {
-		return "missing"
-	}
-	return redactValue(v)
 }
 
 func crowdSecStatus(decisionsLog string) string {

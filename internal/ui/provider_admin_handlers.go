@@ -248,14 +248,6 @@ func (s *Server) aiConfigFromCredentialStore(base ai.Config) ai.Config {
 	return base
 }
 
-func (s *Server) providerFactory(name AIProviderName) (ProviderFactory, bool) {
-	if s.providerFactories == nil {
-		return nil, false
-	}
-	factory, ok := s.providerFactories[strings.ToLower(string(name))]
-	return factory, ok && factory != nil
-}
-
 func (s *Server) renderUnifiedProvidersError(w http.ResponseWriter, r *http.Request, status int, errMsg string) {
 	view, _ := s.unifiedProvidersView()
 	view.Error = errMsg
