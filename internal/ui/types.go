@@ -215,9 +215,29 @@ type TrustedNetworkEntryView struct {
 }
 
 type TrustedNetworksView struct {
-	Entries  []TrustedNetworkEntryView
-	SyncMode string // "shadow", "enforce", or "" if the sync registry has never run
-	Error    string
+	Entries        []TrustedNetworkEntryView
+	SyncMode       string // "shadow", "enforce", or "" if the sync registry has never run
+	Error          string
+	CrowdSecHelper CrowdSecHelperStatusView
+}
+
+// CrowdSecHelperStatusView summarizes the root-owned cf-allowlist-sync
+// helper's most recently persisted reconcile result (see
+// trustednetworks.CrowdSecAllowlistStatus). The daemon's own CrowdSec spoke
+// is always nil (it cannot read CrowdSec's root-only credentials file), so
+// this is the only honest source for CrowdSec allowlist status.
+type CrowdSecHelperStatusView struct {
+	// Available is false when no CrowdSecStatusStore is wired at all (e.g.
+	// scoped DB not yet opened by the daemon).
+	Available    bool
+	Configured   bool
+	AuthOK       bool
+	LastSyncAt   string // formatted, or "" if never run
+	LastError    string
+	DesiredCount int
+	CurrentCount int
+	DriftCount   int
+	Mode         string
 }
 
 type BanLifecycleEntryView struct {

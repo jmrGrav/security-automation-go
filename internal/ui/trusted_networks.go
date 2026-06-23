@@ -7,8 +7,10 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/a-h/templ"
+	"github.com/jm/security-automation-go/internal/config"
 	"github.com/jm/security-automation-go/internal/security/enrichment/asn"
 	"github.com/jm/security-automation-go/internal/trustednetworks"
 )
@@ -23,7 +25,7 @@ func (s *Server) handleTrustedNetworksPage(w http.ResponseWriter, r *http.Reques
 		"correlation_id": eventID,
 		"event_id":       eventID,
 	})
-	_ = TrustedNetworksPage(s.trustedNetworksView()).Render(r.Context(), w)
+	_ = TrustedNetworksPage(s.trustedNetworksView(r.Context())).Render(r.Context(), w)
 }
 
 func (s *Server) handleTrustedNetworksRefreshDryRun(w http.ResponseWriter, r *http.Request) {
@@ -62,7 +64,7 @@ func (s *Server) handleTrustedNetworksExport(w http.ResponseWriter, r *http.Requ
 		"event_id":       eventID,
 	})
 
-	view := s.trustedNetworksView()
+	view := s.trustedNetworksView(r.Context())
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	_, _ = fmt.Fprintln(w, "Trusted Networks Registry Export")
@@ -105,6 +107,9 @@ func TrustedNetworksPage(view TrustedNetworksView) templ.Component {
 				return err
 			}
 			if err := writeTrustedNetworksSyncBanner(w, view.SyncMode); err != nil {
+				return err
+			}
+			if err := writeCrowdSecHelperBanner(w, view.CrowdSecHelper); err != nil {
 				return err
 			}
 			if view.Error != "" {
@@ -151,6 +156,52 @@ func writeTrustedNetworksSyncBanner(w io.Writer, syncMode string) error {
 	}
 }
 
+// writeCrowdSecHelperBanner renders the root-owned cf-allowlist-sync
+// helper's last reconcile status. This is the only honest source for
+// CrowdSec allowlist status — the long-lived daemon and the UI never
+// invoke cscli themselves.
+func writeCrowdSecHelperBanner(w io.Writer, helper CrowdSecHelperStatusView) error {
+	if !helper.Available {
+		_, err := fmt.Fprint(w, `<div class="panel"><span class="badge disabled">crowdsec helper: not wired</span> <span class="muted" style="font-size:.85rem">No CrowdSec allowlist status store is configured for this instance.</span></div>`)
+		return err
+	}
+	if !helper.Configured {
+		_, err := fmt.Fprint(w, `<div class="panel"><span class="badge disabled">crowdsec helper: not configured</span> <span class="muted" style="font-size:.85rem">The cf-allowlist-sync helper has not run with a configured allowlist name yet.</span></div>`)
+		return err
+	}
+
+	badge := `<span class="badge healthy">crowdsec helper: ok</span>`
+	if !helper.AuthOK || helper.LastError != "" {
+		badge = `<span class="badge error">crowdsec helper: error</span>`
+	} else if helper.DriftCount > 0 {
+		badge = `<span class="badge warning">crowdsec helper: drift</span>`
+	}
+
+	lastSync := helper.LastSyncAt
+	if lastSync == "" {
+		lastSync = "never"
+	}
+
+	if _, err := fmt.Fprintf(w,
+		`<div class="panel">%s <span class="muted" style="font-size:.85rem">mode: %s · last sync: %s · desired: %d · current: %d · drift: %d</span>`,
+		badge,
+		html.EscapeString(valueOrFallback(helper.Mode, "unknown")),
+		html.EscapeString(lastSync),
+		helper.DesiredCount,
+		helper.CurrentCount,
+		helper.DriftCount,
+	); err != nil {
+		return err
+	}
+	if helper.LastError != "" {
+		if _, err := fmt.Fprintf(w, `<br><span class="muted error" style="font-size:.85rem">last error: %s</span>`, html.EscapeString(helper.LastError)); err != nil {
+			return err
+		}
+	}
+	_, err := fmt.Fprint(w, `</div>`)
+	return err
+}
+
 func trustedNetworksPlaceholderPage(title, description, active string) templ.Component {
 	return ConsoleLayout(shellView{
 		Title:    title,
@@ -166,13 +217,14 @@ func trustedNetworksPlaceholderPage(title, description, active string) templ.Com
 	})
 }
 
-func (s *Server) trustedNetworksView() TrustedNetworksView {
+func (s *Server) trustedNetworksView(ctx context.Context) TrustedNetworksView {
 	report, hasReport := s.trustedNetworksCache.Get()
+	helper := s.crowdSecHelperStatusView(ctx)
 
 	entries := asn.DefaultRegistry()
 	views := make([]TrustedNetworkEntryView, 0, len(entries))
 	for _, entry := range entries {
-		cf, cs, allowlisted := trustedNetworkSyncStatus(report, hasReport, entry.CIDRs)
+		cf, cs, allowlisted := trustedNetworkSyncStatus(report, hasReport, helper, entry.CIDRs)
 		views = append(views, TrustedNetworkEntryView{
 			Organization:        entry.Organization,
 			Kind:                string(entry.Kind),
@@ -193,7 +245,51 @@ func (s *Server) trustedNetworksView() TrustedNetworksView {
 	if hasReport {
 		syncMode = report.Mode
 	}
-	return TrustedNetworksView{Entries: views, SyncMode: syncMode}
+	return TrustedNetworksView{Entries: views, SyncMode: syncMode, CrowdSecHelper: helper}
+}
+
+// crowdSecHelperStatusView reads the root-owned cf-allowlist-sync helper's
+// most recently persisted reconcile result. The daemon's own CrowdSec spoke
+// is always nil (see buildTrustedNetworksRegistry in cmd/cf-sync), so this
+// store is the only honest source of CrowdSec allowlist status — the UI
+// must never shell out to cscli itself.
+func (s *Server) crowdSecHelperStatusView(ctx context.Context) CrowdSecHelperStatusView {
+	if s.crowdSecStatusStore == nil {
+		return CrowdSecHelperStatusView{}
+	}
+	name := crowdSecAllowlistNameFromConfig(s.cfg)
+	status, found, err := s.crowdSecStatusStore.GetCrowdSecAllowlistStatus(ctx, name)
+	if err != nil || !found {
+		return CrowdSecHelperStatusView{Available: true}
+	}
+	lastSync := ""
+	if !status.LastSyncAt.IsZero() {
+		lastSync = status.LastSyncAt.UTC().Format(time.RFC3339)
+	}
+	return CrowdSecHelperStatusView{
+		Available:    true,
+		Configured:   status.Configured,
+		AuthOK:       status.AuthOK,
+		LastSyncAt:   lastSync,
+		LastError:    status.LastError,
+		DesiredCount: status.DesiredCount,
+		CurrentCount: status.CurrentCount,
+		DriftCount:   status.DriftCount,
+		Mode:         status.Mode,
+	}
+}
+
+// crowdSecAllowlistNameFromConfig mirrors app.allowlistNameFromConfig:
+// TrustedNetworks.CrowdSec.AllowlistName when set, falling back to the
+// legacy top-level CrowdSec.AllowlistName.
+func crowdSecAllowlistNameFromConfig(cfg *config.Config) string {
+	if cfg == nil {
+		return ""
+	}
+	if cfg.TrustedNetworks.CrowdSec.AllowlistName != "" {
+		return cfg.TrustedNetworks.CrowdSec.AllowlistName
+	}
+	return cfg.CrowdSec.AllowlistName
 }
 
 // trustedNetworkSyncStatus derives per-organization Cloudflare/CrowdSec
@@ -201,17 +297,55 @@ func (s *Server) trustedNetworksView() TrustedNetworksView {
 // SyncReport. cidrs with no loaded CIDRs (e.g. too-volatile entries that
 // were never seeded into the registry) always report "not seeded" since
 // they were deliberately excluded from seedTrustedNetworksFromASN.
-func trustedNetworkSyncStatus(report trustednetworks.SyncReport, hasReport bool, cidrs []string) (cloudflare, crowdsec string, allowlisted bool) {
+//
+// The daemon's own report.CrowdSec spoke is always disabled (Enabled ==
+// false — see buildTrustedNetworksRegistry), since CrowdSec reconcile now
+// runs entirely inside the separate root-owned cf-allowlist-sync helper.
+// When that's the case, the CrowdSec column falls back to the helper's
+// aggregate status instead of misleadingly reporting "disabled".
+func trustedNetworkSyncStatus(report trustednetworks.SyncReport, hasReport bool, helper CrowdSecHelperStatusView, cidrs []string) (cloudflare, crowdsec string, allowlisted bool) {
 	if len(cidrs) == 0 {
 		return "not seeded", "not seeded", false
 	}
-	if !hasReport {
-		return "awaiting first sync", "awaiting first sync", false
+
+	cfLabel := "awaiting first sync"
+	cfSynced := false
+	if hasReport {
+		cfStatus := spokeStatusForValues(report.Cloudflare, cidrs)
+		cfLabel = spokeStatusLabel(cfStatus, report.Mode)
+		cfSynced = cfStatus == spokeSynced
 	}
 
-	cfStatus := spokeStatusForValues(report.Cloudflare, cidrs)
-	csStatus := spokeStatusForValues(report.CrowdSec, cidrs)
-	return spokeStatusLabel(cfStatus, report.Mode), spokeStatusLabel(csStatus, report.Mode), cfStatus == spokeSynced && csStatus == spokeSynced
+	if hasReport && report.CrowdSec.Enabled {
+		csStatus := spokeStatusForValues(report.CrowdSec, cidrs)
+		csLabel := spokeStatusLabel(csStatus, report.Mode)
+		return cfLabel, csLabel, cfSynced && csStatus == spokeSynced
+	}
+
+	csLabel, csSynced := crowdSecHelperEntryLabel(helper)
+	return cfLabel, csLabel, cfSynced && csSynced
+}
+
+// crowdSecHelperEntryLabel renders a per-entry CrowdSec label from the
+// helper's aggregate status (it does not track per-CIDR sync state, only
+// desired/current/drift counts for the whole allowlist).
+func crowdSecHelperEntryLabel(helper CrowdSecHelperStatusView) (label string, synced bool) {
+	if !helper.Available {
+		return "awaiting helper status", false
+	}
+	if !helper.Configured {
+		return "not configured", false
+	}
+	if !helper.AuthOK || helper.LastError != "" {
+		return "helper error", false
+	}
+	if helper.DriftCount > 0 {
+		return "drift detected (helper)", false
+	}
+	if helper.Mode != "enforce" {
+		return "pending (shadow mode, helper)", false
+	}
+	return "synced (helper)", true
 }
 
 type spokeSyncState int

@@ -1,11 +1,14 @@
 package ui
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/jm/security-automation-go/internal/storage/sqlite"
 	"github.com/jm/security-automation-go/internal/trustednetworks"
 )
 
@@ -47,7 +50,7 @@ func TestTrustedNetworks_RenderRegistryEntries(t *testing.T) {
 		"OpenAI ChatGPT-User",
 		"no hard ban",
 		"CF: awaiting first sync",
-		"CS: awaiting first sync",
+		"CS: awaiting helper status",
 		"manual review required / too volatile",
 		// Table headers
 		"Name", "Kind", "CIDRs", "Protection", "Allowlist", "Status",
@@ -143,6 +146,105 @@ func TestTrustedNetworks_EnforceModeReflectsActualSyncState(t *testing.T) {
 	// with full sync.
 	if !strings.Contains(body, "CS: pending") {
 		t.Fatalf("expected CrowdSec spoke to report pending (partial sync), got: %s", body)
+	}
+}
+
+// TestTrustedNetworks_CrowdSecHelperStatusRendered guards the fix for the
+// gap documented in cmd/cf-sync/trustednetworks_wiring.go: the daemon's own
+// CrowdSec spoke is always disabled (it cannot read CrowdSec's root-only
+// credentials file), so the page must read the root-owned cf-allowlist-sync
+// helper's persisted status instead of perpetually claiming "disabled".
+func TestTrustedNetworks_CrowdSecHelperStatusRendered(t *testing.T) {
+	srv, _, _ := newTestServer(t, nil)
+
+	db, err := sqlite.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("sqlite.New: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	statusStore := sqlite.NewCrowdSecAllowlistStatusStore(db)
+
+	allowlistName := srv.cfg.CrowdSec.AllowlistName
+	if allowlistName == "" {
+		t.Fatal("expected a default CrowdSec allowlist name in test config")
+	}
+	if err := statusStore.PutCrowdSecAllowlistStatus(context.Background(), trustednetworks.CrowdSecAllowlistStatus{
+		AllowlistName: allowlistName,
+		Configured:    true,
+		AuthOK:        true,
+		LastSyncAt:    time.Date(2026, 6, 20, 12, 0, 0, 0, time.UTC),
+		DesiredCount:  5,
+		CurrentCount:  5,
+		DriftCount:    0,
+		Mode:          "enforce",
+	}); err != nil {
+		t.Fatalf("PutCrowdSecAllowlistStatus: %v", err)
+	}
+	srv.crowdSecStatusStore = statusStore
+
+	cookie := loginCookie(t, srv, "test-password-123!@#")
+	req := httptest.NewRequest(http.MethodGet, "/trusted-networks", nil)
+	req.AddCookie(cookie)
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+
+	body := rr.Body.String()
+	for _, want := range []string{
+		"crowdsec helper: ok",
+		"desired: 5",
+		"current: 5",
+		"CS: synced (helper)",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("trusted networks page missing %q: %s", want, body)
+		}
+	}
+	if strings.Contains(body, "awaiting helper status") {
+		t.Fatalf("page should not claim helper status is unavailable once wired: %s", body)
+	}
+}
+
+// TestTrustedNetworks_CrowdSecHelperErrorSurfaced confirms a failed helper
+// reconcile pass (e.g. cscli auth failure) is surfaced as an error, not
+// silently rendered as healthy.
+func TestTrustedNetworks_CrowdSecHelperErrorSurfaced(t *testing.T) {
+	srv, _, _ := newTestServer(t, nil)
+
+	db, err := sqlite.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("sqlite.New: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	statusStore := sqlite.NewCrowdSecAllowlistStatusStore(db)
+
+	allowlistName := srv.cfg.CrowdSec.AllowlistName
+	if err := statusStore.PutCrowdSecAllowlistStatus(context.Background(), trustednetworks.CrowdSecAllowlistStatus{
+		AllowlistName: allowlistName,
+		Configured:    true,
+		AuthOK:        false,
+		LastSyncAt:    time.Date(2026, 6, 20, 12, 0, 0, 0, time.UTC),
+		LastError:     "cscli allowlists inspect: permission denied",
+		Mode:          "enforce",
+	}); err != nil {
+		t.Fatalf("PutCrowdSecAllowlistStatus: %v", err)
+	}
+	srv.crowdSecStatusStore = statusStore
+
+	cookie := loginCookie(t, srv, "test-password-123!@#")
+	req := httptest.NewRequest(http.MethodGet, "/trusted-networks", nil)
+	req.AddCookie(cookie)
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+
+	body := rr.Body.String()
+	for _, want := range []string{
+		"crowdsec helper: error",
+		"cscli allowlists inspect: permission denied",
+		"CS: helper error",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("trusted networks page missing %q: %s", want, body)
+		}
 	}
 }
 
