@@ -37,10 +37,10 @@ import (
 )
 
 func runUI(ctx context.Context, logger *slog.Logger, cfg *config.Config) error {
-	return runUIWithLocker(ctx, logger, cfg, true, nil, nil, nil, nil)
+	return runUIWithLocker(ctx, logger, cfg, true, nil, nil, nil, nil, nil)
 }
 
-func runUIWithLocker(ctx context.Context, logger *slog.Logger, cfg *config.Config, acquireLock bool, evidenceHolder *lazyEvidenceStore, sharedDB *sqlite.DB, trustedNetworksCache *trustednetworks.ReportCache, banLifecycleHolder *lazyBanLifecycleStore) error {
+func runUIWithLocker(ctx context.Context, logger *slog.Logger, cfg *config.Config, acquireLock bool, evidenceHolder *lazyEvidenceStore, sharedDB *sqlite.DB, trustedNetworksCache *trustednetworks.ReportCache, banLifecycleHolder *lazyBanLifecycleStore, crowdSecStatusHolder *lazyCrowdSecStatusStore) error {
 	if !cfg.UI.Enabled {
 		return errors.New("ui mode requires UI_ENABLED=1 or ui.enabled=true")
 	}
@@ -177,6 +177,17 @@ func runUIWithLocker(ctx context.Context, logger *slog.Logger, cfg *config.Confi
 		banLifecycleStore = sqlite.NewBanLifecycleStore(setupDB)
 	}
 
+	// crowdSecStatusHolder resolves against the scoped runtime DB the daemon
+	// opens after this UI goroutine starts (same DB the root-owned
+	// cf-allowlist-sync helper writes its reconcile status to). In
+	// standalone -mode ui (no daemon, holder nil), there is no scoped DB to
+	// read, so the helper status is honestly reported as unavailable rather
+	// than read from the wrong (unscoped) file.
+	var crowdSecStatusStore trustednetworks.CrowdSecStatusStore
+	if crowdSecStatusHolder != nil {
+		crowdSecStatusStore = crowdSecStatusHolder
+	}
+
 	server, err := ui.NewServer(cfg, ui.Options{
 		SetupStore:           setupStore,
 		CredentialStore:      credentialStore,
@@ -185,6 +196,7 @@ func runUIWithLocker(ctx context.Context, logger *slog.Logger, cfg *config.Confi
 		Logger:               logger,
 		EvidenceStore:        evidenceStore,
 		BanLifecycleStore:    banLifecycleStore,
+		CrowdSecStatusStore:  crowdSecStatusStore,
 		TrustedNetworksCache: trustedNetworksCache,
 		ValidateAbuseIPDB:    ui.ValidateAbuseIPDB,
 		AIExplainBuilder: func(effective ai.Config) aigateway.Gateway {

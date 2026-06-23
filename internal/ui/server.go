@@ -1060,7 +1060,7 @@ func (s *Server) dashboardConsoleView(ctx context.Context) DashboardConsoleView 
 		{Label: "SQLite WAL", Level: statusLevelFromText(sqliteWALStatus(s.cfg.StateDir)), Detail: sqliteWALStatus(s.cfg.StateDir)},
 		{Label: "UI", Level: boolStatus(s.cfg.UI.Enabled), Detail: uiStatus(s.cfg.UI.Enabled, s.cfg.UI.Addr)},
 		{Label: "HA / fencing", Level: "disabled", Detail: "read-only UI shell"},
-		{Label: "Ownership", Level: "healthy", Detail: "lineage preserved in runtime"},
+		{Label: "Ownership", Level: "unknown", Detail: "lineage is recorded by the daemon process; not observable from the UI"},
 		{Label: "UI mutations", Level: boolStatus(s.cfg.UI.MutationsEnabled), Detail: boolDetail(s.cfg.UI.MutationsEnabled, "enabled", "disabled")},
 		{Label: "Cloudflare mutations", Level: cloudflareLevel(s.cfSentinelToken(), s.cfZoneIDFromSetup(ctx), s.cfg.Cloudflare.MutationsEnabled), Detail: cloudflareHealthStatus(s.cfSentinelToken(), s.cfZoneIDFromSetup(ctx), s.cfg.Cloudflare.MutationsEnabled)},
 	}

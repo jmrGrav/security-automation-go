@@ -155,6 +155,11 @@ func runCFSync(configPath, mode string, dryRun bool, format string, metricsAddr 
 	// before scope resolution, so it must hold this indirection rather than
 	// a *sqlite.BanLifecycleStore bound to the unscoped bootstrapDB.
 	banLifecycleHolder := &lazyBanLifecycleStore{}
+	// crowdSecStatusHolder is populated below once the scoped runtime DB is
+	// opened. The root-owned cf-allowlist-sync helper writes its reconcile
+	// status to that same scoped DB (see cmd/cf-allowlist-sync), so the UI
+	// must read from it rather than the unscoped bootstrapDB.
+	crowdSecStatusHolder := &lazyCrowdSecStatusStore{}
 	// trustedNetworksCache is created here (before the UI goroutine starts)
 	// and shared with the daemon's sync loop below, so the UI can render the
 	// most recent SyncReport even though the registry itself is built later
@@ -163,7 +168,7 @@ func runCFSync(configPath, mode string, dryRun bool, format string, metricsAddr 
 	if cfg.UI.Enabled {
 		uiCfg := *cfg // snapshot: runUIWithLocker writes its own credential fields; avoid race with writes below
 		go func() {
-			if err := runUIWithLocker(ctx, logger, &uiCfg, false, evidenceHolder, bootstrapDB, trustedNetworksCache, banLifecycleHolder); err != nil {
+			if err := runUIWithLocker(ctx, logger, &uiCfg, false, evidenceHolder, bootstrapDB, trustedNetworksCache, banLifecycleHolder, crowdSecStatusHolder); err != nil {
 				logger.Error("UI server failed", "error", err)
 			}
 		}()
@@ -386,6 +391,7 @@ func runCFSync(configPath, mode string, dryRun bool, format string, metricsAddr 
 	if mode == "daemon" || mode == "ui" {
 		banLifecycleStore := sqlite.NewBanLifecycleStore(sqliteDB)
 		banLifecycleHolder.set(banLifecycleStore)
+		crowdSecStatusHolder.set(sqlite.NewCrowdSecAllowlistStatusStore(sqliteDB))
 		bundle := newWAFBundle(cf, abuse, hc, credentialStore, setupStore, securityTelemetry, trustRegistry, cfg, reportingStores, banLifecycleStore, logger)
 		var cfEnforcer cfpkg.EnforcementClient
 		if cfg.Cloudflare.MutationsEnabled && cfg.Cloudflare.APIToken != "" {
