@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/url"
 	"strings"
+	"time"
 )
 
 const dashboardActivityLimit = 8
@@ -116,4 +117,41 @@ func dashboardSearchTarget(raw string) string {
 		return "/intelligence?q=" + url.QueryEscape(q)
 	}
 	return "/timeline?q=" + url.QueryEscape(q)
+}
+
+func dashboardTimeWindow(raw string) DashboardTimeWindowView {
+	active := strings.TrimSpace(raw)
+	switch active {
+	case "15m", "1h", "24h", "7d":
+	default:
+		active = "24h"
+	}
+	options := []DashboardTimeWindowOption{
+		{Label: "15m", Value: "15m"},
+		{Label: "1h", Value: "1h"},
+		{Label: "24h", Value: "24h"},
+		{Label: "7d", Value: "7d"},
+	}
+	for i := range options {
+		options[i].Active = options[i].Value == active
+		options[i].Href = "/?window=" + url.QueryEscape(options[i].Value)
+	}
+	return DashboardTimeWindowView{Active: active, Options: options}
+}
+
+func dashboardFreshness(label string, available bool, updatedAt time.Time) DashboardFreshnessView {
+	if !available {
+		return DashboardFreshnessView{Label: label, Level: "unavailable", Detail: "source unavailable"}
+	}
+	if updatedAt.IsZero() {
+		return DashboardFreshnessView{Label: label, Level: "warning", Detail: "freshness unknown"}
+	}
+	age := time.Since(updatedAt)
+	if age < 0 {
+		age = 0
+	}
+	if age > 5*time.Minute {
+		return DashboardFreshnessView{Label: label, Level: "warning", Detail: "stale by " + age.Round(time.Second).String()}
+	}
+	return DashboardFreshnessView{Label: label, Level: "healthy", Detail: "updated " + age.Round(time.Second).String() + " ago"}
 }

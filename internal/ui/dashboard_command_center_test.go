@@ -1,6 +1,9 @@
 package ui
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestCommandCenterViewDefaultsAreSafe(t *testing.T) {
 	view := DashboardCommandCenterView{}
@@ -90,5 +93,31 @@ func TestDashboardSearchRoutesGeneralKeywordToTimeline(t *testing.T) {
 	got := dashboardSearchTarget("wordpress probe")
 	if got != "/timeline?q=wordpress+probe" {
 		t.Fatalf("general search target: want timeline route, got %q", got)
+	}
+}
+
+func TestDashboardTimeWindowDefaultsTo24h(t *testing.T) {
+	window := dashboardTimeWindow("")
+	if window.Active != "24h" {
+		t.Fatalf("Active: want 24h, got %q", window.Active)
+	}
+	if len(window.Options) != 4 {
+		t.Fatalf("expected 4 time window options, got %d", len(window.Options))
+	}
+}
+
+func TestDashboardTimeWindowAcceptsAllowedValuesOnly(t *testing.T) {
+	if got := dashboardTimeWindow("7d").Active; got != "7d" {
+		t.Fatalf("Active: want 7d, got %q", got)
+	}
+	if got := dashboardTimeWindow("forever").Active; got != "24h" {
+		t.Fatalf("invalid window should default to 24h, got %q", got)
+	}
+}
+
+func TestDashboardFreshnessMarksUnavailable(t *testing.T) {
+	got := dashboardFreshness("Evidence", false, time.Time{})
+	if got.Level != "unavailable" || got.Detail == "" {
+		t.Fatalf("expected unavailable freshness with detail, got %#v", got)
 	}
 }
