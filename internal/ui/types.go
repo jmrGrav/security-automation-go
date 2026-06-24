@@ -100,6 +100,7 @@ type DashboardCommandCenterView struct {
 	TimeWindow DashboardTimeWindowView
 	Search     DashboardSearchView
 	Activity   DashboardActivityFeedView
+	Threat     DashboardThreatView
 	Freshness  []DashboardFreshnessView
 }
 
@@ -151,6 +152,30 @@ type DashboardActivityItemView struct {
 	Title     string
 	Detail    string
 	Href      string
+}
+
+type DashboardThreatView struct {
+	Wired        bool
+	TotalEvents  int
+	UnknownCount int
+	Countries    []DashboardThreatCountryView
+	Campaigns    []DashboardThreatCampaignView
+	EmptyText    string
+	Source       string
+}
+
+type DashboardThreatCountryView struct {
+	Country string
+	Count   int
+	Level   string
+}
+
+type DashboardThreatCampaignView struct {
+	Source   string
+	Country  string
+	Scenario string
+	Count    int
+	Level    string
 }
 
 type DashboardFreshnessView struct {

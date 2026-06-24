@@ -1067,6 +1067,7 @@ func (s *Server) dashboardConsoleViewForWindow(ctx context.Context, rawWindow st
 	providers := s.providerDashboardEntries()
 	nonAIProviders := s.nonAIProviderEntries()
 	activity := s.dashboardActivityFeedForWindow(ctx, windowFrom)
+	threats := s.dashboardThreatView(ctx, windowFrom)
 	freshness := []DashboardFreshnessView{
 		dashboardFreshness("Dashboard", true, updatedAt),
 		s.dashboardEvidenceFreshness(ctx),
@@ -1081,6 +1082,7 @@ func (s *Server) dashboardConsoleViewForWindow(ctx context.Context, rawWindow st
 			Placeholder: "IP, evidence id, ASN, provider, scenario, forensic keyword",
 		},
 		Activity: activity,
+		Threat:   threats,
 		KPIs: []DashboardKPIView{
 			{Label: "Health", Value: fmt.Sprintf("%d%%", healthScore.Score), Detail: "derived platform score", Href: "/health", Level: healthScore.Level},
 			{Label: "AbuseIPDB reports", Value: strconv.Itoa(reportedWindowTotal), Detail: "windowed evidence-backed", Href: "/evidence?filter=reported", Level: "live"},
