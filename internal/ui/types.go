@@ -91,6 +91,72 @@ type DashboardConsoleView struct {
 	WarningCount  int
 	ErrorCount    int
 	DisabledCount int
+	CommandCenter DashboardCommandCenterView
+}
+
+type DashboardCommandCenterView struct {
+	Health     DashboardHealthScoreView
+	KPIs       []DashboardKPIView
+	TimeWindow DashboardTimeWindowView
+	Search     DashboardSearchView
+	Activity   DashboardActivityFeedView
+	Freshness  []DashboardFreshnessView
+}
+
+type DashboardHealthScoreView struct {
+	Score   int
+	Level   string
+	Summary string
+	Reasons []string
+}
+
+type DashboardKPIView struct {
+	Label  string
+	Value  string
+	Detail string
+	Href   string
+	Level  string
+}
+
+type DashboardTimeWindowView struct {
+	Active  string
+	Options []DashboardTimeWindowOption
+}
+
+type DashboardTimeWindowOption struct {
+	Label  string
+	Value  string
+	Href   string
+	Active bool
+}
+
+type DashboardSearchView struct {
+	Query       string
+	Action      string
+	Placeholder string
+}
+
+type DashboardActivityFeedView struct {
+	Items      []DashboardActivityItemView
+	EmptyText  string
+	MoreHref   string
+	Limit      int
+	Source     string
+	SourceHref string
+}
+
+type DashboardActivityItemView struct {
+	Timestamp string
+	Severity  string
+	Title     string
+	Detail    string
+	Href      string
+}
+
+type DashboardFreshnessView struct {
+	Label  string
+	Level  string
+	Detail string
 }
 
 type AIProviderDashboardView struct {

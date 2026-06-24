@@ -381,12 +381,32 @@ func ConsoleLayout(view shellView) templ.Component {
 				.dashboard-hub .hub-card strong {
 					font-size: 1.03rem;
 				}
-				.dashboard-hub .hub-card span {
-					color: var(--muted);
-					font-size: .86rem;
-				}
-			.grid {
-				display: grid;
+        				.dashboard-hub .hub-card span {
+        					color: var(--muted);
+        					font-size: .86rem;
+        				}
+				.command-center { border-color: #b7d6ff; background: linear-gradient(135deg, #f8fbff 0%, #eef6ff 100%); }
+				.command-reasons { display:flex; gap:.45rem; flex-wrap:wrap; margin:.65rem 0; }
+				.command-search { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:.55rem; margin: .8rem 0; align-items:end; }
+				.command-search label { grid-column: 1 / -1; font-size: .82rem; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+				.command-search input { min-width:0; }
+				.timebar { display:flex; gap:.4rem; flex-wrap:wrap; margin:.65rem 0; align-items:center; }
+				.timebar a[aria-current="true"] { border-color:#2b6cb0; background:#e1efff; }
+				.activity-feed { margin:0; padding-left:1.2rem; display:grid; gap:.4rem; }
+				.activity-feed a { font-weight:700; }
+				.activity-feed small { display:block; color:var(--muted); margin-top:.15rem; }
+				.freshness-rail { display:flex; gap:.45rem; flex-wrap:wrap; margin:.7rem 0; }
+				.command-kpis { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:.65rem; margin:.8rem 0; }
+				.mini-card { display:grid; gap:.25rem; padding:.75rem; border:1px solid var(--border); border-radius:12px; background:#fff; text-decoration:none; }
+				.mini-card strong { font-size:1.2rem; }
+				.mini-card small { color:var(--muted); }
+				.command-palette { position:fixed; inset:0; display:none; align-items:flex-start; justify-content:center; padding:12vh 1rem 1rem; background:rgba(9,17,29,.45); z-index:80; }
+				.command-palette.open { display:flex; }
+				.command-palette form { width:min(680px, calc(100vw - 2rem)); background:#fff; border:1px solid #c8d8ef; border-radius:16px; padding:1rem; box-shadow:0 24px 80px rgba(10,25,50,.24); }
+				.command-palette label { display:block; margin-bottom:.5rem; font-weight:700; }
+				.command-palette input { width:100%; font-size:1.05rem; padding:.8rem .9rem; border:1px solid #b9c9df; border-radius:10px; }
+            			.grid {
+        				display: grid;
 				grid-template-columns: repeat(auto-fit, minmax(17.5rem, 1fr));
 				gap: 1rem;
 				align-items: start;
@@ -938,7 +958,7 @@ func ConsoleLayout(view shellView) templ.Component {
 				return err
 			}
 		}
-		if _, err := fmt.Fprint(w, `</div></main><div class="live-panel-root" data-live-panel-root aria-hidden="true"><div class="live-panel-backdrop" data-live-panel-backdrop="true"></div><aside class="live-panel" role="dialog" aria-modal="true" aria-label="Live detail panel"><div class="live-panel-head"><div><strong data-live-panel-title>Select an item</strong><p class="muted">Open evidence, forensic, or event details without leaving the current page.</p></div><button type="button" class="action-button secondary copy-button" data-live-panel-close="true">Close</button></div><div class="live-panel-body" data-live-panel-body><div class="live-panel-skeleton"><div class="skeleton-line wide"></div><div class="skeleton-line"></div><div class="skeleton-line"></div><div class="skeleton-line narrow"></div><p class="muted" style="margin-top:.85rem">Select an item to inspect live details.</p></div></div></aside></div><div data-live-toast-region="true" class="live-toast-region"></div></div></body></html>`); err != nil {
+		if _, err := fmt.Fprint(w, `</div></main><div class="live-panel-root" data-live-panel-root aria-hidden="true"><div class="live-panel-backdrop" data-live-panel-backdrop="true"></div><aside class="live-panel" role="dialog" aria-modal="true" aria-label="Live detail panel"><div class="live-panel-head"><div><strong data-live-panel-title>Select an item</strong><p class="muted">Open evidence, forensic, or event details without leaving the current page.</p></div><button type="button" class="action-button secondary copy-button" data-live-panel-close="true">Close</button></div><div class="live-panel-body" data-live-panel-body><div class="live-panel-skeleton"><div class="skeleton-line wide"></div><div class="skeleton-line"></div><div class="skeleton-line"></div><div class="skeleton-line narrow"></div><p class="muted" style="margin-top:.85rem">Select an item to inspect live details.</p></div></div></aside></div><div class="command-palette" data-command-palette-root="true" aria-hidden="true"><form method="get" action="/search" data-command-palette-form="true"><label for="command-palette-input">Universal Search</label><input id="command-palette-input" name="q" type="search" placeholder="IP, evidence id, provider, scenario" autocomplete="off"/><p class="muted">Press Escape to close. Search routes to read-only investigation pages.</p></form></div><div data-live-toast-region="true" class="live-toast-region"></div></div></body></html>`); err != nil {
 			return err
 		}
 		return nil
@@ -968,15 +988,172 @@ func consoleNav(active string) []navItem {
 	return items
 }
 
+func renderCommandCenter(w io.Writer, view DashboardConsoleView) error {
+	cc := view.CommandCenter
+	if _, err := fmt.Fprintf(w, `<section class="panel command-center" aria-label="Security Command Center"><div class="pagehead"><div><p class="section-heading">Security Command Center</p><h2>Health Score <span class="badge %s">%d%%</span></h2><p class="muted">%s</p></div><button type="button" class="badge live" data-command-palette-trigger="true">Ctrl+K</button></div>`,
+		html.EscapeString(statusClass(cc.Health.Level)),
+		cc.Health.Score,
+		html.EscapeString(cc.Health.Summary),
+	); err != nil {
+		return err
+	}
+	if err := renderCommandCenterReasons(w, cc.Health.Reasons); err != nil {
+		return err
+	}
+	if err := renderGlobalTimeBar(w, cc.TimeWindow); err != nil {
+		return err
+	}
+	if err := renderUniversalSearch(w, cc.Search); err != nil {
+		return err
+	}
+	if err := renderCommandCenterKPIs(w, cc.KPIs); err != nil {
+		return err
+	}
+	if err := renderFreshnessRail(w, cc.Freshness); err != nil {
+		return err
+	}
+	if err := renderActivityFeed(w, cc.Activity); err != nil {
+		return err
+	}
+	_, err := fmt.Fprint(w, `</section>`)
+	return err
+}
+
+func renderCommandCenterReasons(w io.Writer, reasons []string) error {
+	if _, err := fmt.Fprint(w, `<div class="command-reasons">`); err != nil {
+		return err
+	}
+	for _, reason := range reasons {
+		if _, err := fmt.Fprintf(w, `<span class="badge warning">%s</span>`, html.EscapeString(reason)); err != nil {
+			return err
+		}
+	}
+	_, err := fmt.Fprint(w, `</div>`)
+	return err
+}
+
+func renderGlobalTimeBar(w io.Writer, window DashboardTimeWindowView) error {
+	if _, err := fmt.Fprint(w, `<nav class="timebar" aria-label="Global time bar"><span class="muted">Global time bar</span>`); err != nil {
+		return err
+	}
+	for _, opt := range window.Options {
+		current := "false"
+		if opt.Active {
+			current = "true"
+		}
+		if _, err := fmt.Fprintf(w, `<a class="badge" href="%s" aria-current="%s">%s</a>`, html.EscapeString(opt.Href), current, html.EscapeString(opt.Label)); err != nil {
+			return err
+		}
+	}
+	_, err := fmt.Fprint(w, `</nav>`)
+	return err
+}
+
+func renderUniversalSearch(w io.Writer, search DashboardSearchView) error {
+	action := search.Action
+	if action == "" {
+		action = "/search"
+	}
+	placeholder := search.Placeholder
+	if placeholder == "" {
+		placeholder = "IP, evidence id, provider, scenario"
+	}
+	_, err := fmt.Fprintf(w, `<form method="get" action="%s" class="command-search" data-command-search="true"><label for="dashboard-command-search">Universal Search</label><input id="dashboard-command-search" name="q" type="search" value="%s" placeholder="%s" autocomplete="off"/><button type="submit">Search</button></form>`,
+		html.EscapeString(action),
+		html.EscapeString(search.Query),
+		html.EscapeString(placeholder),
+	)
+	return err
+}
+
+func renderCommandCenterKPIs(w io.Writer, kpis []DashboardKPIView) error {
+	if _, err := fmt.Fprint(w, `<div class="command-kpis">`); err != nil {
+		return err
+	}
+	for _, kpi := range kpis {
+		if _, err := fmt.Fprintf(w, `<a class="mini-card" href="%s"><span class="badge %s">%s</span><strong>%s</strong><small>%s</small></a>`,
+			html.EscapeString(kpi.Href),
+			html.EscapeString(statusClass(kpi.Level)),
+			html.EscapeString(kpi.Label),
+			html.EscapeString(kpi.Value),
+			html.EscapeString(kpi.Detail),
+		); err != nil {
+			return err
+		}
+	}
+	_, err := fmt.Fprint(w, `</div>`)
+	return err
+}
+
+func renderFreshnessRail(w io.Writer, freshness []DashboardFreshnessView) error {
+	if _, err := fmt.Fprint(w, `<div class="freshness-rail" aria-label="Widget freshness">`); err != nil {
+		return err
+	}
+	for _, item := range freshness {
+		if _, err := fmt.Fprintf(w, `<span class="badge %s">%s: %s</span>`,
+			html.EscapeString(statusClass(item.Level)),
+			html.EscapeString(item.Label),
+			html.EscapeString(item.Detail),
+		); err != nil {
+			return err
+		}
+	}
+	_, err := fmt.Fprint(w, `</div>`)
+	return err
+}
+
+func renderActivityFeed(w io.Writer, feed DashboardActivityFeedView) error {
+	if _, err := fmt.Fprint(w, `<section class="panel" aria-label="Live Activity Feed"><div class="section-heading">Live Activity Feed</div>`); err != nil {
+		return err
+	}
+	if len(feed.Items) == 0 {
+		if _, err := fmt.Fprintf(w, `<p class="muted">%s</p>`, html.EscapeString(feed.EmptyText)); err != nil {
+			return err
+		}
+		_, err := fmt.Fprint(w, `</section>`)
+		return err
+	}
+	if _, err := fmt.Fprint(w, `<ol class="activity-feed">`); err != nil {
+		return err
+	}
+	for _, item := range feed.Items {
+		if _, err := fmt.Fprintf(w, `<li><a href="%s">%s</a> <span class="badge %s">%s</span><small>%s</small></li>`,
+			html.EscapeString(item.Href),
+			html.EscapeString(item.Title),
+			html.EscapeString(statusClass(item.Severity)),
+			html.EscapeString(item.Severity),
+			html.EscapeString(item.Detail),
+		); err != nil {
+			return err
+		}
+	}
+	if _, err := fmt.Fprint(w, `</ol>`); err != nil {
+		return err
+	}
+	if feed.MoreHref != "" {
+		if _, err := fmt.Fprintf(w, `<p><a href="%s">Open full timeline</a></p>`, html.EscapeString(feed.MoreHref)); err != nil {
+			return err
+		}
+	}
+	_, err := fmt.Fprint(w, `</section>`)
+	return err
+}
+
 func DashboardConsolePage(view DashboardConsoleView) templ.Component {
 	return ConsoleLayout(shellView{
 		Title:    "Operator Dashboard",
-		Headline: "Dashboard++",
+		Headline: "Security Command Center",
 		Subtitle: "Runtime posture, feature switches, and the main safety rails for the local operator console.",
 		Active:   "/",
 		Body: templ.ComponentFunc(func(ctx context.Context, w io.Writer) error {
-			if _, err := fmt.Fprintf(w, `<div class="stack" data-live-shell="dashboard" data-live-refresh-url="/" data-live-refresh-interval="8000"><div class="panel dashboard-hero"><div class="pagehead" style="align-items:flex-start"><div><p class="section-heading" style="color:rgba(220,232,255,.9)">Live overview</p><h2 style="margin:0">%s <span class="live-chip">Live</span></h2><p class="muted">%s · Updated <span data-live-relative-time="%s">just now</span>.</p></div><div class="badges"><span class="badge live">Runtime live</span><span class="badge healthy">%d healthy</span><span class="badge warning">%d warning</span><span class="badge error">%d error</span><span class="badge disabled">%d disabled</span></div></div><div class="kpi-grid"><div class="kpi"><span class="label">Components healthy</span><strong data-live-kpi>%d/%d</strong><span class="sub">Environment &amp; health</span></div><div class="kpi"><span class="label">AI providers</span><strong data-live-kpi>%d</strong><span class="sub">managed locally</span></div><div class="kpi"><span class="label">AbuseIPDB reports</span><strong data-live-kpi>%d</strong><span class="sub">all-time, evidence-backed</span></div><div class="kpi"><span class="label">Status cards</span><strong data-live-kpi>%d</strong><span class="sub">refresh in place</span></div></div></div><section class="grid">`,
-				html.EscapeString("Dashboard++"),
+			if _, err := fmt.Fprint(w, `<div class="stack" data-live-shell="dashboard" data-live-refresh-url="/" data-live-refresh-interval="8000">`); err != nil {
+				return err
+			}
+			if err := renderCommandCenter(w, view); err != nil {
+				return err
+			}
+			if _, err := fmt.Fprintf(w, `<div class="panel dashboard-hero"><div class="pagehead" style="align-items:flex-start"><div><p class="section-heading" style="color:rgba(220,232,255,.9)">Live overview</p><h2 style="margin:0">%s <span class="live-chip">Live</span></h2><p class="muted">%s · Updated <span data-live-relative-time="%s">just now</span>.</p></div><div class="badges"><span class="badge live">Runtime live</span><span class="badge healthy">%d healthy</span><span class="badge warning">%d warning</span><span class="badge error">%d error</span><span class="badge disabled">%d disabled</span></div></div><div class="kpi-grid"><div class="kpi"><span class="label">Components healthy</span><strong data-live-kpi>%d/%d</strong><span class="sub">Environment &amp; health</span></div><div class="kpi"><span class="label">AI providers</span><strong data-live-kpi>%d</strong><span class="sub">managed locally</span></div><div class="kpi"><span class="label">AbuseIPDB reports</span><strong data-live-kpi>%d</strong><span class="sub">all-time, evidence-backed</span></div><div class="kpi"><span class="label">Status cards</span><strong data-live-kpi>%d</strong><span class="sub">refresh in place</span></div></div></div><section class="grid">`,
+				html.EscapeString("Security Command Center"),
 				html.EscapeString("Runtime posture, feature switches, and the main safety rails for the local operator console"),
 				html.EscapeString(view.UpdatedAt),
 				view.HealthyCount, view.WarningCount, view.ErrorCount, view.DisabledCount,

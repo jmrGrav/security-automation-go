@@ -16,6 +16,7 @@ import (
 	"net/netip"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -275,6 +276,7 @@ func (s *Server) routes() {
 	s.mux.Handle("POST /logout", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleLogout)))))
 	s.mux.Handle("GET /logout", s.setupGuardMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleLogoutGET))))
 	s.mux.Handle("GET /", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleDashboard)))))
+	s.mux.Handle("GET /search", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleDashboardSearch)))))
 	s.mux.Handle("GET /providers", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleProviders)))))
 	s.mux.Handle("POST /admin/providers/{name}/key", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleProviderReplaceKey)))))
 	s.mux.Handle("POST /admin/providers/import-legacy", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleLegacyCredentialImport)))))
@@ -382,7 +384,12 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := stableUIReadContext(r.Context())
 	defer cancel()
-	_ = DashboardConsolePage(s.dashboardConsoleView(ctx)).Render(ctx, w)
+	_ = DashboardConsolePage(s.dashboardConsoleViewForWindow(ctx, r.URL.Query().Get("window"))).Render(ctx, w)
+}
+
+func (s *Server) handleDashboardSearch(w http.ResponseWriter, r *http.Request) {
+	target := dashboardSearchTarget(r.URL.Query().Get("q"))
+	http.Redirect(w, r, target, http.StatusSeeOther)
 }
 
 func (s *Server) handleProviders(w http.ResponseWriter, r *http.Request) {
@@ -993,6 +1000,10 @@ func (s *Server) providerHealthViews() []ProviderHealth {
 }
 
 func (s *Server) dashboardConsoleView(ctx context.Context) DashboardConsoleView {
+	return s.dashboardConsoleViewForWindow(ctx, "")
+}
+
+func (s *Server) dashboardConsoleViewForWindow(ctx context.Context, rawWindow string) DashboardConsoleView {
 	checks := health.RunAll(s.buildHealthConfig())
 	detectors := detect.RunAll(s.buildDetectConfig())
 	statuses := []StatusItem{
@@ -1038,24 +1049,59 @@ func (s *Server) dashboardConsoleView(ctx context.Context) DashboardConsoleView 
 		}
 	}
 
+	updatedAt := time.Now().UTC()
+	window := dashboardTimeWindow(rawWindow)
+	windowFrom := dashboardWindowStart(window.Active, updatedAt)
+
 	reportedTotal := 0
+	reportedWindowTotal := 0
 	if s.evidence != nil {
 		if n, err := s.evidence.Count(ctx, reporting.EvidenceSearchOptions{AbuseIPDBReported: true}); err == nil {
 			reportedTotal = n
 		}
+		if n, err := s.evidence.Count(ctx, reporting.EvidenceSearchOptions{AbuseIPDBReported: true, From: windowFrom}); err == nil {
+			reportedWindowTotal = n
+		}
+	}
+
+	providers := s.providerDashboardEntries()
+	nonAIProviders := s.nonAIProviderEntries()
+	activity := s.dashboardActivityFeedForWindow(ctx, windowFrom)
+	freshness := []DashboardFreshnessView{
+		dashboardFreshness("Dashboard", true, updatedAt),
+		s.dashboardEvidenceFreshness(ctx),
+		dashboardFreshness("Providers", len(providers)+len(nonAIProviders) > 0, latestProviderTestAt(providers, nonAIProviders)),
+	}
+	healthScore := dashboardHealthScore(statuses, env, providers, nonAIProviders, freshness, s.evidence != nil)
+	commandCenter := DashboardCommandCenterView{
+		Health:     healthScore,
+		TimeWindow: window,
+		Search: DashboardSearchView{
+			Action:      "/search",
+			Placeholder: "IP, evidence id, ASN, provider, scenario, forensic keyword",
+		},
+		Activity: activity,
+		KPIs: []DashboardKPIView{
+			{Label: "Health", Value: fmt.Sprintf("%d%%", healthScore.Score), Detail: "derived platform score", Href: "/health", Level: healthScore.Level},
+			{Label: "AbuseIPDB reports", Value: strconv.Itoa(reportedWindowTotal), Detail: "windowed evidence-backed", Href: "/evidence?filter=reported", Level: "live"},
+			{Label: "Providers", Value: strconv.Itoa(len(providers) + len(nonAIProviders)), Detail: "configured provider boundaries", Href: "/providers", Level: "healthy"},
+			{Label: "Recent activity", Value: strconv.Itoa(len(activity.Items)), Detail: "bounded live feed", Href: "/timeline", Level: "live"},
+		},
+		Freshness: freshness,
 	}
 
 	return DashboardConsoleView{
 		Statuses:      statuses,
-		AIProviders:   s.providerDashboardEntries(),
+		AIProviders:   providers,
 		Environment:   env,
 		ReportedTotal: reportedTotal,
 		EvidenceWired: s.evidence != nil,
-		UpdatedAt:     time.Now().UTC().Format(time.RFC3339),
+		UpdatedAt:     updatedAt.Format(time.RFC3339),
 		HealthyCount:  healthyCount,
 		WarningCount:  warningCount,
 		ErrorCount:    errorCount,
 		DisabledCount: disabledCount,
+		CommandCenter: commandCenter,
 	}
 }
 
