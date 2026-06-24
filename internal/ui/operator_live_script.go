@@ -206,6 +206,7 @@ function bindWatchlistAdd(){
       items.splice(existingIdx, 1);
     } else {
       items.unshift({type: type, value: value, label: label, addedAt: new Date().toISOString()});
+      if(items.length > 10){ items = items.slice(0, 10); }
     }
     saveWatchlist(items);
     renderWatchlist();
