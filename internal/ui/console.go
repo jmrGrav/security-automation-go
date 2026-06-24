@@ -934,9 +934,11 @@ func ConsoleLayout(view shellView) templ.Component {
 				transform: translateY(0);
 				max-width: min(24rem, calc(100vw - 2rem));
 			}
-			.toast.success { background: var(--state-healthy); color: #06140d; }
-			.toast.warning { background: var(--state-warning); color: #1f1500; }
-			.toast.error { background: var(--state-error); color: #fff; }
+			.toast.success { background: var(--state-healthy); }
+			.toast.warning { background: var(--state-warning); }
+			.toast.error { background: var(--state-error); }
+			body[data-theme="operations-dark"] .toast.success { color: #06140d; }
+			body[data-theme="operations-dark"] .toast.warning { color: #1f1500; }
 			.toast.dismissed {
 				opacity: 0;
 				transform: translateY(4px);
