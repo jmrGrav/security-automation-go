@@ -570,9 +570,11 @@ func ConsoleLayout(view shellView) templ.Component {
 			button:focus-visible,
 			input:focus-visible,
 			select:focus-visible,
-			textarea:focus-visible {
-				outline: 2px solid rgba(15,29,51,.28);
+			textarea:focus-visible,
+			a:focus-visible {
+				outline: 2px solid var(--live);
 				outline-offset: 2px;
+				border-radius: 4px;
 			}
 			button.action-button {
 				width: 100%;
