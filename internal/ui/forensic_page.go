@@ -79,7 +79,11 @@ func ForensicPage(view ForensicView, csrfToken string) templ.Component {
 				protectedBadge = ` <span class="badge healthy">protected network</span>`
 			}
 
-			if _, err := fmt.Fprintf(w, `<div class="panel"><h2>%s %s%s</h2>`, html.EscapeString(s.IP.String()), cacheBadge, protectedBadge); err != nil {
+			watchBtn := fmt.Sprintf(`<button type="button" class="badge" data-watchlist-add="true" data-watchlist-type="ip" data-watchlist-value="%s" data-watchlist-label="%s" title="Add to watchlist" style="min-height:auto;padding:.12rem .4rem;font-size:.85rem;box-shadow:none;vertical-align:middle">☆</button>`,
+				html.EscapeString(s.IP.String()),
+				html.EscapeString(s.IP.String()),
+			)
+			if _, err := fmt.Fprintf(w, `<div class="panel"><h2>%s %s%s%s</h2>`, html.EscapeString(s.IP.String()), cacheBadge, protectedBadge, watchBtn); err != nil {
 				return err
 			}
 			if _, err := fmt.Fprintf(w, `<p class="muted">Score delta: %+d &nbsp; HardBan allowed: %s</p>`, a.Score, boolBadge(a.HardBanAllowed)); err != nil {

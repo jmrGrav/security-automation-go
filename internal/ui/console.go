@@ -20,10 +20,11 @@ import (
 )
 
 type navItem struct {
-	Label  string
-	Href   string
-	Active bool
-	Soon   bool
+	Label       string
+	Href        string
+	Active      bool
+	Soon        bool
+	KeyShortcut string
 }
 
 type shellView struct {
@@ -569,9 +570,11 @@ func ConsoleLayout(view shellView) templ.Component {
 			button:focus-visible,
 			input:focus-visible,
 			select:focus-visible,
-			textarea:focus-visible {
-				outline: 2px solid rgba(15,29,51,.28);
+			textarea:focus-visible,
+			a:focus-visible {
+				outline: 2px solid var(--live);
 				outline-offset: 2px;
+				border-radius: 4px;
 			}
 			button.action-button {
 				width: 100%;
@@ -983,20 +986,15 @@ func ConsoleLayout(view shellView) templ.Component {
 			return err
 		}
 		for _, item := range items {
-			if _, err := fmt.Fprint(w, `<a href="`); err != nil {
-				return err
-			}
-			if _, err := io.WriteString(w, html.EscapeString(item.Href)); err != nil {
-				return err
-			}
+			var extraAttrs string
 			if item.Active {
-				if _, err := fmt.Fprint(w, `" class="active" aria-current="page">`); err != nil {
-					return err
-				}
-			} else {
-				if _, err := fmt.Fprint(w, `">`); err != nil {
-					return err
-				}
+				extraAttrs += ` class="active" aria-current="page"`
+			}
+			if item.KeyShortcut != "" {
+				extraAttrs += ` aria-keyshortcuts="` + html.EscapeString(item.KeyShortcut) + `"`
+			}
+			if _, err := fmt.Fprintf(w, `<a href="%s"%s>`, html.EscapeString(item.Href), extraAttrs); err != nil {
+				return err
 			}
 			if _, err := io.WriteString(w, html.EscapeString(item.Label)); err != nil {
 				return err
@@ -1010,7 +1008,7 @@ func ConsoleLayout(view shellView) templ.Component {
 				return err
 			}
 		}
-		if _, err := fmt.Fprint(w, `</nav><div class="sidebar-footer"><button type="button" class="theme-toggle" data-theme-toggle="true" aria-pressed="false">Dark operations</button><button type="button" class="density-toggle" data-density-toggle="true" aria-pressed="false">Compact mode</button><a href="/logout" class="logout-link">⏻ Sign out</a></div></aside><main class="main"><div class="`); err != nil {
+		if _, err := fmt.Fprint(w, `</nav><div class="sidebar-watchlist" data-watchlist-widget="true" data-watchlist-key="security-automation:watchlist" style="margin-top:.9rem;border-top:1px solid var(--sidebar-border);padding-top:.75rem"><div style="display:flex;align-items:center;justify-content:space-between;gap:.5rem;margin-bottom:.35rem"><span style="font-size:.78rem;text-transform:uppercase;letter-spacing:.07em;color:var(--sidebar-text);opacity:.65">Watchlist</span><button type="button" class="theme-toggle" data-watchlist-collapse-toggle="true" aria-expanded="false">Show</button></div><div data-watchlist-list data-watchlist-body style="display:none;gap:0"><p class="muted" style="font-size:.82rem;margin:.35rem 0 0;padding:0 .1rem">No items watched.</p></div></div><div class="sidebar-recents" data-recents-widget="true" data-recents-key="security-automation:recents" style="margin-top:.9rem;border-top:1px solid var(--sidebar-border);padding-top:.75rem"><span style="font-size:.78rem;text-transform:uppercase;letter-spacing:.07em;color:var(--sidebar-text);opacity:.65;display:block;margin-bottom:.35rem">Recent</span><div data-recents-list><p class="muted" style="font-size:.82rem;margin:.35rem 0 0;padding:0 .1rem">No recent pages.</p></div></div><div class="sidebar-footer"><button type="button" class="theme-toggle" data-theme-toggle="true" aria-pressed="false">Dark operations</button><button type="button" class="density-toggle" data-density-toggle="true" aria-pressed="false">Compact mode</button><a href="/logout" class="logout-link">⏻ Sign out</a></div></aside><main class="main"><div class="`); err != nil {
 			return err
 		}
 		if _, err := io.WriteString(w, html.EscapeString(view.BodyClass)); err != nil {
@@ -1065,16 +1063,16 @@ func ConsoleLayout(view shellView) templ.Component {
 
 func consoleNav(active string) []navItem {
 	items := []navItem{
-		{Label: "Dashboard", Href: "/"},
+		{Label: "Dashboard", Href: "/", KeyShortcut: "g d"},
 		{Label: "Providers", Href: "/providers"},
-		{Label: "Health", Href: "/health"},
-		{Label: "Forensic", Href: "/forensic"},
-		{Label: "WAF Events", Href: "/evidence"},
+		{Label: "Health", Href: "/health", KeyShortcut: "g h"},
+		{Label: "Forensic", Href: "/forensic", KeyShortcut: "g f"},
+		{Label: "WAF Events", Href: "/evidence", KeyShortcut: "g e"},
 		{Label: "Pipeline Health", Href: "/pipeline"},
 		{Label: "CF Ban Sync", Href: "/sync"},
 		{Label: "Ban Lifecycle", Href: "/ban-lifecycle"},
 		{Label: "Security Intelligence", Href: "/intelligence"},
-		{Label: "Timeline", Href: "/timeline"},
+		{Label: "Timeline", Href: "/timeline", KeyShortcut: "g t"},
 		{Label: "Audit Trail", Href: "/audit"},
 		{Label: "Trusted Networks", Href: "/trusted-networks"},
 		{Label: "Cloudflare Diff", Href: "/cloudflare/diff"},

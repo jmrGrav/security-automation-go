@@ -113,6 +113,116 @@ func TestOperatorLiveScriptSupportsThemePreference(t *testing.T) {
 	}
 }
 
+func TestConsoleLayoutIncludesPR5WatchlistShell(t *testing.T) {
+	comp := ConsoleLayout(shellView{
+		Title:    "Watchlist Test",
+		Headline: "Watchlist Test",
+		Body: templ.ComponentFunc(func(ctx context.Context, w io.Writer) error {
+			_, err := io.WriteString(w, `<div>body</div>`)
+			return err
+		}),
+	})
+	var buf strings.Builder
+	if err := comp.Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render console layout: %v", err)
+	}
+	body := buf.String()
+	for _, want := range []string{
+		`data-watchlist-widget="true"`,
+		`security-automation:watchlist`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("PR5 watchlist shell missing HTML artifact %q: %s", want, body)
+		}
+	}
+
+	script := operatorLiveScript()
+	for _, want := range []string{
+		`renderWatchlist`,
+		`bindWatchlistAdd`,
+		`bindWatchlistRemove`,
+		`data-watchlist-add="true"`,
+		`security-automation:watchlist`,
+	} {
+		if !strings.Contains(script, want) {
+			t.Fatalf("PR5 watchlist shell missing JS artifact %q", want)
+		}
+	}
+}
+
+func TestConsoleLayoutIncludesPR5RecentsShell(t *testing.T) {
+	comp := ConsoleLayout(shellView{
+		Title:    "Recents Test",
+		Headline: "Recents Test",
+		Body: templ.ComponentFunc(func(ctx context.Context, w io.Writer) error {
+			_, err := io.WriteString(w, `<div>body</div>`)
+			return err
+		}),
+	})
+	var buf strings.Builder
+	if err := comp.Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render console layout: %v", err)
+	}
+	body := buf.String()
+	for _, want := range []string{
+		`data-recents-widget="true"`,
+		`security-automation:recents`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("PR5 recents shell missing HTML artifact %q: %s", want, body)
+		}
+	}
+
+	script := operatorLiveScript()
+	for _, want := range []string{
+		`renderRecents`,
+		`pushRecent`,
+		`relativeTime`,
+		`security-automation:recents`,
+	} {
+		if !strings.Contains(script, want) {
+			t.Fatalf("PR5 recents shell missing JS artifact %q", want)
+		}
+	}
+}
+
+func TestOperatorLiveScriptSupportsKeyboardNav(t *testing.T) {
+	script := operatorLiveScript()
+	for _, want := range []string{
+		"bindKeyboardNav",
+		"keyboardNavBound",
+	} {
+		if !strings.Contains(script, want) {
+			t.Fatalf("operator live script missing keyboard nav artifact %q", want)
+		}
+	}
+
+	comp := ConsoleLayout(shellView{
+		Title:    "Keyboard Nav Test",
+		Headline: "Keyboard Nav Test",
+		Body: templ.ComponentFunc(func(ctx context.Context, w io.Writer) error {
+			_, err := io.WriteString(w, `<div>body</div>`)
+			return err
+		}),
+	})
+	var buf strings.Builder
+	if err := comp.Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render console layout: %v", err)
+	}
+	body := buf.String()
+	for _, want := range []string{
+		`aria-keyshortcuts="g d"`,
+		`aria-keyshortcuts="g t"`,
+		`aria-keyshortcuts="g f"`,
+		`aria-keyshortcuts="g e"`,
+		`aria-keyshortcuts="g h"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("console layout missing keyboard nav artifact %q", want)
+		}
+	}
+}
+
 func TestBuildInfoFromConfigUsesSharedBuildMetadata(t *testing.T) {
 	origVersion, origCommit, origBuildDate := buildmeta.Version, buildmeta.Commit, buildmeta.BuildDate
 	t.Cleanup(func() {

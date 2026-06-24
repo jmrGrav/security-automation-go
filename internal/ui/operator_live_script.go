@@ -134,6 +134,240 @@ function bindCollapsiblePanels(){
     setCollapsiblePanel(panel, collapsed);
   });
 }
+var watchlistKey = 'security-automation:watchlist';
+function loadWatchlist(){
+  try{
+    var raw = storageGet(watchlistKey);
+    if(!raw){ return []; }
+    var parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  }catch(e){ return []; }
+}
+function saveWatchlist(items){
+  try{ storageSet(watchlistKey, JSON.stringify(items)); }catch(e){}
+}
+function renderWatchlist(){
+  var widget = document.querySelector('[data-watchlist-widget="true"]');
+  if(!widget){ return; }
+  var list = widget.querySelector('[data-watchlist-list]');
+  if(!list){ return; }
+  var items = loadWatchlist();
+  var capped = items.slice(0, 10);
+  list.innerHTML = '';
+  if(capped.length === 0){
+    var empty = document.createElement('p');
+    empty.className = 'muted';
+    empty.style.cssText = 'font-size:.82rem;margin:.35rem 0 0;padding:0 .1rem';
+    empty.textContent = 'No items watched.';
+    list.appendChild(empty);
+  } else {
+    capped.forEach(function(item, idx){
+      var row = document.createElement('div');
+      row.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:.45rem;padding:.28rem .1rem;border-top:1px solid var(--sidebar-border);font-size:.82rem';
+      var label = document.createElement('span');
+      label.style.cssText = 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--sidebar-text)';
+      label.textContent = item.label || item.value || '';
+      label.title = item.value || '';
+      var rm = document.createElement('button');
+      rm.type = 'button';
+      rm.setAttribute('data-watchlist-remove', String(idx));
+      rm.style.cssText = 'flex:0 0 auto;min-height:auto;padding:.1rem .35rem;font-size:.78rem;border-radius:6px;background:var(--state-error-bg);border-color:var(--state-error);color:var(--state-error);box-shadow:none';
+      rm.textContent = '×';
+      rm.title = 'Remove from watchlist';
+      row.appendChild(label);
+      row.appendChild(rm);
+      list.appendChild(row);
+    });
+  }
+  document.querySelectorAll('[data-watchlist-add="true"]').forEach(function(btn){
+    var type = btn.getAttribute('data-watchlist-type') || '';
+    var value = btn.getAttribute('data-watchlist-value') || '';
+    var watched = items.some(function(it){ return it.type === type && it.value === value; });
+    btn.textContent = watched ? '★' : '☆';
+    btn.setAttribute('aria-pressed', watched ? 'true' : 'false');
+    btn.title = watched ? 'Remove from watchlist' : 'Add to watchlist';
+  });
+}
+function bindWatchlistAdd(){
+  if(state.watchlistAddBound === 'true'){ return; }
+  state.watchlistAddBound = 'true';
+  document.addEventListener('click', function(ev){
+    var btn = ev.target && ev.target.closest ? ev.target.closest('[data-watchlist-add="true"]') : null;
+    if(!btn){ return; }
+    ev.preventDefault();
+    var type = btn.getAttribute('data-watchlist-type') || 'ip';
+    var value = btn.getAttribute('data-watchlist-value') || '';
+    var label = btn.getAttribute('data-watchlist-label') || value;
+    if(!value){ return; }
+    var items = loadWatchlist();
+    var existingIdx = -1;
+    items.forEach(function(it, i){ if(it.type === type && it.value === value){ existingIdx = i; } });
+    if(existingIdx >= 0){
+      items.splice(existingIdx, 1);
+    } else {
+      items.unshift({type: type, value: value, label: label, addedAt: new Date().toISOString()});
+      if(items.length > 10){ items = items.slice(0, 10); }
+    }
+    saveWatchlist(items);
+    renderWatchlist();
+  });
+}
+function bindWatchlistRemove(){
+  if(state.watchlistRemoveBound === 'true'){ return; }
+  state.watchlistRemoveBound = 'true';
+  document.addEventListener('click', function(ev){
+    var btn = ev.target && ev.target.closest ? ev.target.closest('[data-watchlist-remove]') : null;
+    if(!btn){ return; }
+    var widget = btn.closest('[data-watchlist-widget="true"]');
+    if(!widget){ return; }
+    ev.preventDefault();
+    var idx = parseInt(btn.getAttribute('data-watchlist-remove'), 10);
+    if(isNaN(idx)){ return; }
+    var items = loadWatchlist().slice(0, 10);
+    items.splice(idx, 1);
+    saveWatchlist(loadWatchlist().filter(function(it, i){
+      return items.some(function(kept){ return kept.type === it.type && kept.value === it.value && kept.addedAt === it.addedAt; });
+    }));
+    renderWatchlist();
+  });
+}
+var recentsKey = 'security-automation:recents';
+function loadRecents(){
+  try{
+    var raw = storageGet(recentsKey);
+    if(!raw){ return []; }
+    var parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  }catch(e){ return []; }
+}
+function saveRecents(items){
+  try{ storageSet(recentsKey, JSON.stringify(items)); }catch(e){}
+}
+function relativeTime(iso){
+  try{
+    var then = new Date(iso);
+    if(isNaN(then.getTime())){ return ''; }
+    var diff = Math.max(0, Math.floor((Date.now() - then.getTime()) / 1000));
+    if(diff < 60){ return 'just now'; }
+    if(diff < 3600){ return Math.floor(diff / 60) + 'm ago'; }
+    if(diff < 86400){ return Math.floor(diff / 3600) + 'h ago'; }
+    return then.toLocaleDateString();
+  }catch(e){ return ''; }
+}
+function pushRecent(url, title){
+  if(!url){ return; }
+  var items = loadRecents();
+  items = items.filter(function(it){ return it.url !== url; });
+  items.unshift({url: url, title: title || url, ts: new Date().toISOString()});
+  if(items.length > 10){ items = items.slice(0, 10); }
+  saveRecents(items);
+}
+function renderRecents(){
+  var widget = document.querySelector('[data-recents-widget="true"]');
+  if(!widget){ return; }
+  var list = widget.querySelector('[data-recents-list]');
+  if(!list){ return; }
+  var items = loadRecents().slice(0, 5);
+  list.innerHTML = '';
+  if(items.length === 0){
+    var empty = document.createElement('p');
+    empty.className = 'muted';
+    empty.style.cssText = 'font-size:.82rem;margin:.35rem 0 0;padding:0 .1rem';
+    empty.textContent = 'No recent pages.';
+    list.appendChild(empty);
+    return;
+  }
+  items.forEach(function(item){
+    var row = document.createElement('div');
+    row.style.cssText = 'border-top:1px solid var(--sidebar-border);padding:.28rem .1rem';
+    var link = document.createElement('a');
+    link.href = item.url || '#';
+    link.style.cssText = 'display:block;text-decoration:none;color:var(--sidebar-text);font-size:.82rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
+    link.textContent = item.title || item.url || '';
+    link.title = item.title || item.url || '';
+    var hint = document.createElement('span');
+    hint.style.cssText = 'display:block;font-size:.75rem;color:var(--sidebar-text);opacity:.55';
+    hint.textContent = relativeTime(item.ts);
+    row.appendChild(link);
+    row.appendChild(hint);
+    list.appendChild(row);
+  });
+}
+var watchlistOpenKey = 'security-automation:watchlist-open';
+function applyWatchlistCollapse(){
+  var widget = document.querySelector('[data-watchlist-widget="true"]');
+  if(!widget){ return; }
+  var body = widget.querySelector('[data-watchlist-body]');
+  var toggle = widget.querySelector('[data-watchlist-collapse-toggle="true"]');
+  if(!body || !toggle){ return; }
+  var open = storageGet(watchlistOpenKey) === 'true';
+  body.style.display = open ? 'grid' : 'none';
+  toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+  toggle.textContent = open ? 'Hide' : 'Show';
+}
+function bindKeyboardNav(){
+  if(state.keyboardNavBound === 'true'){ return; }
+  state.keyboardNavBound = 'true';
+  var pending = null;
+  var pendingTimer = null;
+  var routes = { d: '/', t: '/timeline', f: '/forensic', e: '/evidence', h: '/health' };
+  document.addEventListener('keydown', function(ev){
+    if(ev.ctrlKey || ev.altKey || ev.metaKey){ return; }
+    var activeTag = document.activeElement && document.activeElement.tagName ? document.activeElement.tagName.toLowerCase() : '';
+    if(activeTag === 'input' || activeTag === 'textarea' || activeTag === 'select'){ return; }
+    if(document.querySelector('.command-palette.open')){ return; }
+    var key = ev.key || '';
+    if(key === '/'){
+      var candidates = document.querySelectorAll('input[type="search"], input[name="q"], input[name="search"]');
+      var visibleSearch = null;
+      for(var si=0; si<candidates.length; si++){
+        if(candidates[si].offsetParent !== null){ visibleSearch = candidates[si]; break; }
+      }
+      if(visibleSearch){
+        ev.preventDefault();
+        visibleSearch.focus();
+        if(visibleSearch.select){ visibleSearch.select(); }
+      }
+      return;
+    }
+    if(pending){
+      var route = routes[key.toLowerCase()];
+      if(route){
+        ev.preventDefault();
+        if(pendingTimer){ window.clearTimeout(pendingTimer); }
+        pending = null;
+        pendingTimer = null;
+        window.location.assign(route);
+      } else {
+        if(pendingTimer){ window.clearTimeout(pendingTimer); }
+        pending = null;
+        pendingTimer = null;
+      }
+      return;
+    }
+    if(key.toLowerCase() === 'g'){
+      pending = 'g';
+      if(pendingTimer){ window.clearTimeout(pendingTimer); }
+      pendingTimer = window.setTimeout(function(){
+        pending = null;
+        pendingTimer = null;
+      }, 1000);
+    }
+  });
+}
+function bindWatchlistCollapse(){
+  if(state.watchlistCollapseBound === 'true'){ return; }
+  state.watchlistCollapseBound = 'true';
+  applyWatchlistCollapse();
+  document.addEventListener('click', function(ev){
+    var toggle = ev.target && ev.target.closest ? ev.target.closest('[data-watchlist-collapse-toggle="true"]') : null;
+    if(!toggle){ return; }
+    ev.preventDefault();
+    var open = storageGet(watchlistOpenKey) === 'true';
+    storageSet(watchlistOpenKey, open ? 'false' : 'true');
+    applyWatchlistCollapse();
+  });
+}
 function escapeHTML(text){
   return String(text || '').replace(/[&<>"']/g, function(ch){
     return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]);
@@ -213,6 +447,8 @@ function refreshShellNode(node){
       applyThemePreference();
       bindCollapsiblePanels();
       updateRelativeTimes();
+      renderWatchlist();
+      renderRecents();
       pulseKPIs(node);
       flashNode(node);
       return true;
@@ -443,11 +679,15 @@ function bindPanelLinks(){
       if(activeTag === 'input' || activeTag === 'textarea' || activeTag === 'select'){
         return;
       }
-      var search = document.querySelector('input[type="search"], input[data-live-search-focus="true"]');
-      if(search){
+      var panelCandidates = document.querySelectorAll('input[type="search"], input[data-live-search-focus="true"]');
+      var visiblePanelSearch = null;
+      for(var pi=0; pi<panelCandidates.length; pi++){
+        if(panelCandidates[pi].offsetParent !== null){ visiblePanelSearch = panelCandidates[pi]; break; }
+      }
+      if(visiblePanelSearch){
         ev.preventDefault();
-        search.focus();
-        if(search.select){ search.select(); }
+        visiblePanelSearch.focus();
+        if(visiblePanelSearch.select){ visiblePanelSearch.select(); }
       }
     }
   });
@@ -476,15 +716,20 @@ function refreshShell(url, selector){
     var doc = new DOMParser().parseFromString(html, 'text/html');
     var fresh = selector ? doc.querySelector(selector) : doc.querySelector('[data-live-shell]');
     if(fresh && current){
+      var h1 = doc.querySelector('h1');
+      var pageTitle = (h1 && h1.textContent.trim()) || doc.title || url;
+      pushRecent(url, pageTitle);
       current.innerHTML = fresh.innerHTML;
       initPanelShell();
       bindCopyButtons();
-              bindSearchForms();
-              bindCommandPalette();
-              applyDensityPreference();
-              applyThemePreference();
-              bindCollapsiblePanels();
+      bindSearchForms();
+      bindCommandPalette();
+      applyDensityPreference();
+      applyThemePreference();
+      bindCollapsiblePanels();
       updateRelativeTimes();
+      renderWatchlist();
+      renderRecents();
       pulseKPIs(current);
       flashNode(current);
       return true;
@@ -499,6 +744,7 @@ function refreshShell(url, selector){
 bindPanelLinks();
 bindThemeToggle();
 bindDensityToggle();
+bindKeyboardNav();
 bindCopyButtons();
 bindSearchForms();
 bindCommandPalette();
@@ -508,6 +754,11 @@ applyThemePreference();
 applyDensityPreference();
 bindCollapsiblePanels();
 updateRelativeTimes();
+renderWatchlist();
+renderRecents();
+bindWatchlistAdd();
+bindWatchlistRemove();
+bindWatchlistCollapse();
 window.setInterval(updateRelativeTimes, 1000);
 state.toast = showToast;
 state.openPanel = openPanel;
