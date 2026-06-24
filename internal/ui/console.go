@@ -51,6 +51,33 @@ func ConsoleLayout(view shellView) templ.Component {
 		if _, err := fmt.Fprint(w, `<style>
 			:root {
 				color-scheme: light;
+				--surface-bg: #f4f7fb;
+				--surface-panel: #ffffff;
+				--surface-panel-strong: #f8fbff;
+				--surface-border: #d8e1ef;
+				--surface-border-soft: #eef2f8;
+				--surface-empty: #fafbfd;
+				--surface-hover: #f8fbff;
+				--surface-input: #ffffff;
+				--surface-button: linear-gradient(180deg, #ffffff, #eef3f9);
+				--surface-button-hover: linear-gradient(180deg, #ffffff, #e7edf7);
+				--shadow-soft: 0 1px 2px rgba(16,36,62,.05);
+				--shadow-panel-hover: 0 8px 24px rgba(16,36,62,.08);
+				--shadow-popover: 0 24px 80px rgba(10,25,50,.24);
+				--state-healthy: #0f8b4c;
+				--state-healthy-bg: #e7f8ef;
+				--state-warning: #8f5c00;
+				--state-warning-bg: #fff4dd;
+				--state-degraded: #8b5e34;
+				--state-degraded-bg: #f3eadf;
+				--state-disabled: #69727d;
+				--state-disabled-bg: #edf0f3;
+				--state-error: #9b1c1c;
+				--state-error-bg: #fdecec;
+				--state-dryrun: #5b4b9a;
+				--state-dryrun-bg: #f0ecff;
+				--state-live: #0a6b75;
+				--state-live-bg: #e8fafb;
 				--bg: #f4f7fb;
 				--panel: #ffffff;
 				--panel-strong: #f8fbff;
@@ -71,6 +98,56 @@ func ConsoleLayout(view shellView) templ.Component {
 				--error: #9b1c1c;
 				--dryrun: #5b4b9a;
 				--live: #0a6b75;
+			}
+			body[data-theme="operations-dark"] {
+				color-scheme: dark;
+				--surface-bg: #07111f;
+				--surface-panel: #0d182b;
+				--surface-panel-strong: #111f35;
+				--surface-border: #263856;
+				--surface-border-soft: #1c2d48;
+				--surface-empty: #0b1628;
+				--surface-hover: #13223a;
+				--surface-input: #091426;
+				--surface-button: linear-gradient(180deg, #182844, #111f35);
+				--surface-button-hover: linear-gradient(180deg, #203353, #172844);
+				--shadow-soft: 0 1px 2px rgba(0,0,0,.22);
+				--shadow-panel-hover: 0 10px 28px rgba(0,0,0,.28);
+				--shadow-popover: 0 28px 84px rgba(0,0,0,.42);
+				--state-healthy: #57d99a;
+				--state-healthy-bg: rgba(87,217,154,.14);
+				--state-warning: #f5c56b;
+				--state-warning-bg: rgba(245,197,107,.15);
+				--state-degraded: #d9a36a;
+				--state-degraded-bg: rgba(217,163,106,.15);
+				--state-disabled: #a9b6c7;
+				--state-disabled-bg: rgba(169,182,199,.14);
+				--state-error: #ff8a8a;
+				--state-error-bg: rgba(255,138,138,.15);
+				--state-dryrun: #b8a7ff;
+				--state-dryrun-bg: rgba(184,167,255,.16);
+				--state-live: #6ee7f2;
+				--state-live-bg: rgba(110,231,242,.14);
+				--bg: var(--surface-bg);
+				--panel: var(--surface-panel);
+				--panel-strong: var(--surface-panel-strong);
+				--border: var(--surface-border);
+				--text: #e8f1ff;
+				--muted: #a9b8cf;
+				--sidebar: #050b15;
+				--sidebar-soft: #0b1628;
+				--sidebar-border: rgba(202,218,245,.11);
+				--sidebar-text: #dce8ff;
+				--sidebar-active: #172844;
+				--badge: #13223a;
+				--badge-text: #d9e6f8;
+				--healthy: var(--state-healthy);
+				--warning: var(--state-warning);
+				--degraded: var(--state-degraded);
+				--disabled: var(--state-disabled);
+				--error: var(--state-error);
+				--dryrun: var(--state-dryrun);
+				--live: var(--state-live);
 			}
 			* { box-sizing: border-box; }
 			html, body { min-height: 100%; }
@@ -122,7 +199,8 @@ func ConsoleLayout(view shellView) templ.Component {
 				display: grid;
 				gap: .45rem;
 			}
-			.density-toggle {
+			.density-toggle,
+			.theme-toggle {
 				width: 100%;
 				justify-content: flex-start;
 				min-height: 2.25rem;
@@ -134,11 +212,13 @@ func ConsoleLayout(view shellView) templ.Component {
 				box-shadow: none;
 				font-size: .86rem;
 			}
-			.density-toggle:hover {
+			.density-toggle:hover,
+			.theme-toggle:hover {
 				background: rgba(255,255,255,.1);
 				transform: none;
 			}
-			.density-toggle[aria-pressed="true"] {
+			.density-toggle[aria-pressed="true"],
+			.theme-toggle[aria-pressed="true"] {
 				background: rgba(232,250,251,.14);
 				color: #e8fafb;
 			}
@@ -224,13 +304,13 @@ func ConsoleLayout(view shellView) templ.Component {
 				border: 1px solid rgba(0,0,0,.04);
 				white-space: nowrap;
 			}
-			.badge.healthy { color: var(--healthy); background: #e7f8ef; }
-			.badge.warning { color: var(--warning); background: #fff4dd; }
-			.badge.degraded { color: var(--degraded); background: #f3eadf; }
-			.badge.disabled { color: var(--disabled); background: #edf0f3; }
-			.badge.error { color: var(--error); background: #fdecec; }
-			.badge.dryrun { color: var(--dryrun); background: #f0ecff; }
-			.badge.live { color: var(--live); background: #e8fafb; }
+			.badge.healthy { color: var(--healthy); background: var(--state-healthy-bg); }
+			.badge.warning { color: var(--warning); background: var(--state-warning-bg); }
+			.badge.degraded { color: var(--degraded); background: var(--state-degraded-bg); }
+			.badge.disabled { color: var(--disabled); background: var(--state-disabled-bg); }
+			.badge.error { color: var(--error); background: var(--state-error-bg); }
+			.badge.dryrun { color: var(--dryrun); background: var(--state-dryrun-bg); }
+			.badge.live { color: var(--live); background: var(--state-live-bg); }
 			.live-chip {
 				display: inline-flex;
 				align-items: center;
@@ -366,17 +446,17 @@ func ConsoleLayout(view shellView) templ.Component {
 					gap: .35rem;
 					padding: .95rem 1rem;
 					border-radius: 14px;
-					background: linear-gradient(180deg, #ffffff, #f7f9fd);
-					border: 1px solid rgba(196,208,226,.95);
-					box-shadow: 0 1px 2px rgba(16,36,62,.05);
+					background: linear-gradient(180deg, var(--surface-panel), var(--surface-panel-strong));
+					border: 1px solid var(--surface-border);
+					box-shadow: var(--shadow-soft);
 					text-decoration: none;
 					color: inherit;
 					transition: transform .15s ease, box-shadow .15s ease, border-color .15s ease;
 				}
 				.dashboard-hub .hub-card:hover {
 					transform: translateY(-1px);
-					box-shadow: 0 10px 24px rgba(16,36,62,.08);
-					border-color: #c8d5ea;
+					box-shadow: var(--shadow-panel-hover);
+					border-color: var(--surface-border);
 				}
 				.dashboard-hub .hub-card strong {
 					font-size: 1.03rem;
@@ -385,13 +465,13 @@ func ConsoleLayout(view shellView) templ.Component {
         					color: var(--muted);
         					font-size: .86rem;
         				}
-				.command-center { border-color: #b7d6ff; background: linear-gradient(135deg, #f8fbff 0%, #eef6ff 100%); }
+				.command-center { border-color: color-mix(in srgb, var(--live) 32%, var(--border)); background: linear-gradient(135deg, var(--surface-panel) 0%, var(--surface-panel-strong) 100%); }
 				.command-reasons { display:flex; gap:.45rem; flex-wrap:wrap; margin:.65rem 0; }
 				.command-search { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:.55rem; margin: .8rem 0; align-items:end; }
 				.command-search label { grid-column: 1 / -1; font-size: .82rem; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
 				.command-search input { min-width:0; }
 				.timebar { display:flex; gap:.4rem; flex-wrap:wrap; margin:.65rem 0; align-items:center; }
-				.timebar a[aria-current="true"] { border-color:#2b6cb0; background:#e1efff; }
+				.timebar a[aria-current="true"] { border-color:var(--live); background:var(--state-live-bg); }
 				.activity-feed { margin:0; padding-left:1.2rem; display:grid; gap:.4rem; }
 				.activity-feed a { font-weight:700; }
 				.activity-feed small { display:block; color:var(--muted); margin-top:.15rem; }
@@ -399,19 +479,19 @@ func ConsoleLayout(view shellView) templ.Component {
 				.command-kpis { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:.65rem; margin:.8rem 0; }
 				.threat-viz { margin:.85rem 0; }
 				.attack-map-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(18rem,1fr)); gap:.85rem; align-items:start; }
-				.attack-map-svg { width:100%; min-height:170px; border:1px solid #d8e2f0; border-radius:16px; background:linear-gradient(135deg,#f8fbff,#edf5ff); }
+				.attack-map-svg { width:100%; min-height:170px; border:1px solid var(--surface-border); border-radius:16px; background:linear-gradient(135deg,var(--surface-panel),var(--surface-panel-strong)); }
 				.attack-country-list, .campaign-list { list-style:none; padding:0; margin:.75rem 0 0; display:grid; gap:.45rem; }
-				.attack-country-list li, .campaign-list li { display:flex; justify-content:space-between; gap:.75rem; align-items:center; border:1px solid var(--border); border-radius:12px; padding:.55rem .65rem; background:#fff; }
+				.attack-country-list li, .campaign-list li { display:flex; justify-content:space-between; gap:.75rem; align-items:center; border:1px solid var(--border); border-radius:12px; padding:.55rem .65rem; background:var(--surface-panel); }
 				.campaign-list li { align-items:flex-start; }
 				.campaign-list small { display:block; color:var(--muted); margin-top:.15rem; }
-				.mini-card { display:grid; gap:.25rem; padding:.75rem; border:1px solid var(--border); border-radius:12px; background:#fff; text-decoration:none; }
+				.mini-card { display:grid; gap:.25rem; padding:.75rem; border:1px solid var(--border); border-radius:12px; background:var(--surface-panel); text-decoration:none; }
 				.mini-card strong { font-size:1.2rem; }
 				.mini-card small { color:var(--muted); }
 				.command-palette { position:fixed; inset:0; display:none; align-items:flex-start; justify-content:center; padding:12vh 1rem 1rem; background:rgba(9,17,29,.45); z-index:80; }
 				.command-palette.open { display:flex; }
-				.command-palette form { width:min(680px, calc(100vw - 2rem)); background:#fff; border:1px solid #c8d8ef; border-radius:16px; padding:1rem; box-shadow:0 24px 80px rgba(10,25,50,.24); }
+				.command-palette form { width:min(680px, calc(100vw - 2rem)); background:var(--surface-panel); border:1px solid var(--surface-border); border-radius:16px; padding:1rem; box-shadow:var(--shadow-popover); }
 				.command-palette label { display:block; margin-bottom:.5rem; font-weight:700; }
-				.command-palette input { width:100%; font-size:1.05rem; padding:.8rem .9rem; border:1px solid #b9c9df; border-radius:10px; }
+				.command-palette input { width:100%; font-size:1.05rem; padding:.8rem .9rem; border:1px solid var(--surface-border); border-radius:10px; }
             			.grid {
         				display: grid;
 				grid-template-columns: repeat(auto-fit, minmax(17.5rem, 1fr));
@@ -425,15 +505,16 @@ func ConsoleLayout(view shellView) templ.Component {
 				letter-spacing: .06em;
 				color: var(--muted);
 			}
-			.panel {
+			.panel,
+			[data-ui-surface="panel"] {
 				background: var(--panel);
 				border: 1px solid var(--border);
 				border-radius: 10px;
 				padding: 1rem;
-				box-shadow: 0 1px 2px rgba(16,36,62,.05);
+				box-shadow: var(--shadow-soft);
 				transition: transform .16s ease, box-shadow .16s ease, border-color .16s ease;
 			}
-			.panel:hover { box-shadow: 0 8px 24px rgba(16,36,62,.08); }
+			.panel:hover { box-shadow: var(--shadow-panel-hover); }
 			.panel h2, .panel h3 {
 				margin: 0 0 .65rem;
 				line-height: 1.15;
@@ -468,16 +549,16 @@ func ConsoleLayout(view shellView) templ.Component {
 				gap: .35rem;
 				padding: .78rem 1rem;
 				min-height: 2.75rem;
-				border: 1px solid #c9d4e4;
+				border: 1px solid var(--surface-border);
 				border-radius: 10px;
-				background: linear-gradient(180deg, #ffffff, #eef3f9);
+				background: var(--surface-button);
 				color: var(--text);
-				box-shadow: 0 1px 1px rgba(16,36,62,.04);
+				box-shadow: var(--shadow-soft);
 				cursor: pointer;
 				transition: transform .14s ease, box-shadow .14s ease, background .14s ease, opacity .14s ease;
 			}
 			button:hover {
-				background: linear-gradient(180deg, #ffffff, #e7edf7);
+				background: var(--surface-button-hover);
 				transform: translateY(-1px);
 			}
 			button:disabled {
@@ -504,7 +585,7 @@ func ConsoleLayout(view shellView) templ.Component {
 				background: linear-gradient(180deg, #2c4a79, #213a64);
 			}
 			button.action-button.secondary {
-				background: linear-gradient(180deg, #f7f9fc, #eef3f9);
+				background: var(--surface-button);
 			}
 			button.badge {
 				min-height: auto;
@@ -520,20 +601,27 @@ func ConsoleLayout(view shellView) templ.Component {
 			input[type="text"],
 			input[type="password"],
 			input[type="search"],
-			input[type="url"] {
+			input[type="url"],
+			input[type="number"],
+			select,
+			textarea {
 				width: 100%;
 				padding: .72rem .85rem;
 				border: 1px solid var(--border);
 				border-radius: 10px;
-				background: #fff;
+				background: var(--surface-input);
 				color: var(--text);
+			}
+			select {
+				width: auto;
+				min-width: min(12rem, 100%);
 			}
 			.table-wrap {
 				overflow: auto;
 				border: 1px solid var(--border);
 				border-radius: 10px;
 				background: var(--panel);
-				box-shadow: 0 1px 2px rgba(16,36,62,.05);
+				box-shadow: var(--shadow-soft);
 				scrollbar-gutter: stable both-edges;
 			}
 			.table-wrap table {
@@ -563,7 +651,7 @@ func ConsoleLayout(view shellView) templ.Component {
 				transition: background-color .15s ease, transform .15s ease;
 			}
 			.table-wrap table tbody tr:hover {
-				background: #f8fbff;
+				background: var(--surface-hover);
 			}
 			.table-wrap td .cell-clip {
 				display: inline-block;
@@ -650,7 +738,7 @@ func ConsoleLayout(view shellView) templ.Component {
 				grid-template-columns: minmax(6rem, 9rem) minmax(0, 1fr);
 				gap: 1rem;
 				align-items: start;
-				border-top: 1px solid #edf1f7;
+				border-top: 1px solid var(--surface-border-soft);
 				padding: .55rem 0;
 			}
 			.row:first-child { border-top: 0; padding-top: 0; }
@@ -675,14 +763,15 @@ func ConsoleLayout(view shellView) templ.Component {
 			}
 			tbody td {
 				padding: .72rem .7rem;
-				border-top: 1px solid #eef2f8;
+				border-top: 1px solid var(--surface-border-soft);
 				vertical-align: top;
 			}
 			tbody tr:first-child td { border-top: 0; }
-			.empty {
+			.empty,
+			[data-ui-state="empty"] {
 				padding: 1rem;
 				color: var(--muted);
-				background: #fafbfd;
+				background: var(--surface-empty);
 				border: 1px dashed var(--border);
 				border-radius: 10px;
 			}
@@ -778,10 +867,10 @@ func ConsoleLayout(view shellView) templ.Component {
 				right: .75rem;
 				bottom: .75rem;
 				width: min(44rem, calc(100vw - 1.5rem));
-				background: #fff;
+				background: var(--surface-panel);
 				border: 1px solid rgba(255,255,255,.18);
 				border-radius: 18px;
-				box-shadow: 0 20px 54px rgba(16,36,62,.22);
+				box-shadow: 0 20px 54px rgba(0,0,0,.28);
 				transform: translateX(106%);
 				transition: transform .2s ease;
 				display: flex;
@@ -798,7 +887,7 @@ func ConsoleLayout(view shellView) templ.Component {
 				gap: 1rem;
 				padding: 1rem 1rem .85rem;
 				border-bottom: 1px solid var(--border);
-				background: linear-gradient(180deg, #fff, #f7f9fd);
+				background: linear-gradient(180deg, var(--surface-panel), var(--surface-panel-strong));
 			}
 			.live-panel-head strong { font-size: 1rem; }
 			.live-panel-head .muted { margin: .2rem 0 0; }
@@ -839,15 +928,15 @@ func ConsoleLayout(view shellView) templ.Component {
 				padding: .7rem .9rem;
 				border-radius: 12px;
 				color: #fff;
-				background: #1f335c;
+				background: var(--sidebar-active);
 				box-shadow: 0 12px 28px rgba(16,36,62,.18);
 				transition: opacity .2s ease, transform .2s ease;
 				transform: translateY(0);
 				max-width: min(24rem, calc(100vw - 2rem));
 			}
-			.toast.success { background: #0f8b4c; }
-			.toast.warning { background: #8f5c00; }
-			.toast.error { background: #9b1c1c; }
+			.toast.success { background: var(--state-healthy); color: #06140d; }
+			.toast.warning { background: var(--state-warning); color: #1f1500; }
+			.toast.error { background: var(--state-error); color: #fff; }
 			.toast.dismissed {
 				opacity: 0;
 				transform: translateY(4px);
@@ -919,7 +1008,7 @@ func ConsoleLayout(view shellView) templ.Component {
 				return err
 			}
 		}
-		if _, err := fmt.Fprint(w, `</nav><div class="sidebar-footer"><button type="button" class="density-toggle" data-density-toggle="true" aria-pressed="false">Compact mode</button><a href="/logout" class="logout-link">⏻ Sign out</a></div></aside><main class="main"><div class="`); err != nil {
+		if _, err := fmt.Fprint(w, `</nav><div class="sidebar-footer"><button type="button" class="theme-toggle" data-theme-toggle="true" aria-pressed="false">Dark operations</button><button type="button" class="density-toggle" data-density-toggle="true" aria-pressed="false">Compact mode</button><a href="/logout" class="logout-link">⏻ Sign out</a></div></aside><main class="main"><div class="`); err != nil {
 			return err
 		}
 		if _, err := io.WriteString(w, html.EscapeString(view.BodyClass)); err != nil {
