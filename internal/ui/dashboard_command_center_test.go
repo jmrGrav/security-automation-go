@@ -2,6 +2,8 @@ package ui
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -160,5 +162,39 @@ func TestDashboardActivityFeedUnavailableWhenEvidenceMissing(t *testing.T) {
 	}
 	if len(feed.Items) != 0 {
 		t.Fatalf("missing evidence store should not fake feed items")
+	}
+}
+
+func TestDashboardSearchEndpointRedirectsToForensicForIP(t *testing.T) {
+	srv, _, _ := newTestServer(t, nil)
+	cookie := loginCookie(t, srv, "test-password-123!@#")
+	req := httptest.NewRequest(http.MethodGet, "/search?q=203.0.113.10", nil)
+	req.AddCookie(cookie)
+	rr := httptest.NewRecorder()
+
+	srv.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusSeeOther {
+		t.Fatalf("expected 303 redirect, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if got := rr.Header().Get("Location"); got != "/forensic?ip=203.0.113.10" {
+		t.Fatalf("Location: got %q", got)
+	}
+}
+
+func TestDashboardSearchEndpointRedirectsBlankToTimeline(t *testing.T) {
+	srv, _, _ := newTestServer(t, nil)
+	cookie := loginCookie(t, srv, "test-password-123!@#")
+	req := httptest.NewRequest(http.MethodGet, "/search", nil)
+	req.AddCookie(cookie)
+	rr := httptest.NewRecorder()
+
+	srv.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusSeeOther {
+		t.Fatalf("expected 303 redirect, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if got := rr.Header().Get("Location"); got != "/timeline" {
+		t.Fatalf("Location: got %q", got)
 	}
 }

@@ -276,6 +276,7 @@ func (s *Server) routes() {
 	s.mux.Handle("POST /logout", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleLogout)))))
 	s.mux.Handle("GET /logout", s.setupGuardMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleLogoutGET))))
 	s.mux.Handle("GET /", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleDashboard)))))
+	s.mux.Handle("GET /search", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleDashboardSearch)))))
 	s.mux.Handle("GET /providers", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleProviders)))))
 	s.mux.Handle("POST /admin/providers/{name}/key", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleProviderReplaceKey)))))
 	s.mux.Handle("POST /admin/providers/import-legacy", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleLegacyCredentialImport)))))
@@ -384,6 +385,11 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := stableUIReadContext(r.Context())
 	defer cancel()
 	_ = DashboardConsolePage(s.dashboardConsoleView(ctx)).Render(ctx, w)
+}
+
+func (s *Server) handleDashboardSearch(w http.ResponseWriter, r *http.Request) {
+	target := dashboardSearchTarget(r.URL.Query().Get("q"))
+	http.Redirect(w, r, target, http.StatusSeeOther)
 }
 
 func (s *Server) handleProviders(w http.ResponseWriter, r *http.Request) {
