@@ -67,6 +67,17 @@ function applyDensityPreference(){
     button.textContent = compact ? 'Comfort mode' : 'Compact mode';
   });
 }
+function applyThemePreference(){
+  var dark = storageGet('security-automation:theme') === 'operations-dark';
+  if(document.body){
+    if(dark){ document.body.setAttribute('data-theme', 'operations-dark'); }
+    else { document.body.removeAttribute('data-theme'); }
+  }
+  document.querySelectorAll('[data-theme-toggle="true"]').forEach(function(button){
+    button.setAttribute('aria-pressed', dark ? 'true' : 'false');
+    button.textContent = dark ? 'Comfort light' : 'Dark operations';
+  });
+}
 function bindDensityToggle(){
   if(state.densityToggleBound === 'true'){ return; }
   state.densityToggleBound = 'true';
@@ -77,6 +88,18 @@ function bindDensityToggle(){
     var compact = document.body && document.body.getAttribute('data-density') === 'compact';
     storageSet('security-automation:density', compact ? 'comfort' : 'compact');
     applyDensityPreference();
+  });
+}
+function bindThemeToggle(){
+  if(state.themeToggleBound === 'true'){ return; }
+  state.themeToggleBound = 'true';
+  document.addEventListener('click', function(ev){
+    var button = ev.target && ev.target.closest ? ev.target.closest('[data-theme-toggle="true"]') : null;
+    if(!button){ return; }
+    ev.preventDefault();
+    var dark = document.body && document.body.getAttribute('data-theme') === 'operations-dark';
+    storageSet('security-automation:theme', dark ? 'comfort-light' : 'operations-dark');
+    applyThemePreference();
   });
 }
 function setCollapsiblePanel(panel, collapsed){
@@ -187,6 +210,7 @@ function refreshShellNode(node){
       bindSearchForms();
       bindCommandPalette();
       applyDensityPreference();
+      applyThemePreference();
       bindCollapsiblePanels();
       updateRelativeTimes();
       pulseKPIs(node);
@@ -455,10 +479,11 @@ function refreshShell(url, selector){
       current.innerHTML = fresh.innerHTML;
       initPanelShell();
       bindCopyButtons();
-      bindSearchForms();
-      bindCommandPalette();
-      applyDensityPreference();
-      bindCollapsiblePanels();
+              bindSearchForms();
+              bindCommandPalette();
+              applyDensityPreference();
+              applyThemePreference();
+              bindCollapsiblePanels();
       updateRelativeTimes();
       pulseKPIs(current);
       flashNode(current);
@@ -472,12 +497,14 @@ function refreshShell(url, selector){
   });
 }
 bindPanelLinks();
+bindThemeToggle();
 bindDensityToggle();
 bindCopyButtons();
 bindSearchForms();
 bindCommandPalette();
 bindLiveRefreshers();
 initPanelShell();
+applyThemePreference();
 applyDensityPreference();
 bindCollapsiblePanels();
 updateRelativeTimes();

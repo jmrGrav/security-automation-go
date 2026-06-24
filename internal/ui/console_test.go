@@ -67,6 +67,52 @@ func TestConsoleLayoutIncludesCommandPaletteShell(t *testing.T) {
 	}
 }
 
+func TestConsoleLayoutIncludesPR4DesignSystemShell(t *testing.T) {
+	comp := ConsoleLayout(shellView{
+		Title:    "Design System",
+		Headline: "Design System",
+		Body: templ.ComponentFunc(func(ctx context.Context, w io.Writer) error {
+			_, err := io.WriteString(w, `<div class="panel"><span class="badge warning">warning</span><div class="empty">empty</div></div>`)
+			return err
+		}),
+	})
+	var buf strings.Builder
+	if err := comp.Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render console layout: %v", err)
+	}
+	body := buf.String()
+	for _, want := range []string{
+		`data-theme-toggle="true"`,
+		`--surface-bg`,
+		`--surface-panel`,
+		`--state-healthy`,
+		`--state-warning`,
+		`--state-error`,
+		`body[data-theme="operations-dark"]`,
+		`data-ui-surface="panel"`,
+		`data-ui-state="empty"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("PR4 design system shell missing %q: %s", want, body)
+		}
+	}
+}
+
+func TestOperatorLiveScriptSupportsThemePreference(t *testing.T) {
+	script := operatorLiveScript()
+	for _, want := range []string{
+		"applyThemePreference",
+		"bindThemeToggle",
+		"security-automation:theme",
+		"operations-dark",
+		`data-theme-toggle="true"`,
+	} {
+		if !strings.Contains(script, want) {
+			t.Fatalf("operator live script missing theme artifact %q: %s", want, script)
+		}
+	}
+}
+
 func TestBuildInfoFromConfigUsesSharedBuildMetadata(t *testing.T) {
 	origVersion, origCommit, origBuildDate := buildmeta.Version, buildmeta.Commit, buildmeta.BuildDate
 	t.Cleanup(func() {
