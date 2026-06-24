@@ -230,6 +230,68 @@ function bindWatchlistRemove(){
     renderWatchlist();
   });
 }
+var recentsKey = 'security-automation:recents';
+function loadRecents(){
+  try{
+    var raw = storageGet(recentsKey);
+    if(!raw){ return []; }
+    var parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  }catch(e){ return []; }
+}
+function saveRecents(items){
+  try{ storageSet(recentsKey, JSON.stringify(items)); }catch(e){}
+}
+function relativeTime(iso){
+  try{
+    var then = new Date(iso);
+    if(isNaN(then.getTime())){ return ''; }
+    var diff = Math.max(0, Math.floor((Date.now() - then.getTime()) / 1000));
+    if(diff < 60){ return 'just now'; }
+    if(diff < 3600){ return Math.floor(diff / 60) + 'm ago'; }
+    if(diff < 86400){ return Math.floor(diff / 3600) + 'h ago'; }
+    return then.toLocaleDateString();
+  }catch(e){ return ''; }
+}
+function pushRecent(url, title){
+  if(!url){ return; }
+  var items = loadRecents();
+  items = items.filter(function(it){ return it.url !== url; });
+  items.unshift({url: url, title: title || url, ts: new Date().toISOString()});
+  if(items.length > 10){ items = items.slice(0, 10); }
+  saveRecents(items);
+}
+function renderRecents(){
+  var widget = document.querySelector('[data-recents-widget="true"]');
+  if(!widget){ return; }
+  var list = widget.querySelector('[data-recents-list]');
+  if(!list){ return; }
+  var items = loadRecents().slice(0, 5);
+  list.innerHTML = '';
+  if(items.length === 0){
+    var empty = document.createElement('p');
+    empty.className = 'muted';
+    empty.style.cssText = 'font-size:.82rem;margin:.35rem 0 0;padding:0 .1rem';
+    empty.textContent = 'No recent pages.';
+    list.appendChild(empty);
+    return;
+  }
+  items.forEach(function(item){
+    var row = document.createElement('div');
+    row.style.cssText = 'border-top:1px solid var(--sidebar-border);padding:.28rem .1rem';
+    var link = document.createElement('a');
+    link.href = item.url || '#';
+    link.style.cssText = 'display:block;text-decoration:none;color:var(--sidebar-text);font-size:.82rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
+    link.textContent = item.title || item.url || '';
+    link.title = item.title || item.url || '';
+    var hint = document.createElement('span');
+    hint.style.cssText = 'display:block;font-size:.75rem;color:var(--sidebar-text);opacity:.55';
+    hint.textContent = relativeTime(item.ts);
+    row.appendChild(link);
+    row.appendChild(hint);
+    list.appendChild(row);
+  });
+}
 var watchlistOpenKey = 'security-automation:watchlist-open';
 function applyWatchlistCollapse(){
   var widget = document.querySelector('[data-watchlist-widget="true"]');
@@ -335,6 +397,7 @@ function refreshShellNode(node){
       bindCollapsiblePanels();
       updateRelativeTimes();
       renderWatchlist();
+      renderRecents();
       pulseKPIs(node);
       flashNode(node);
       return true;
@@ -598,6 +661,9 @@ function refreshShell(url, selector){
     var doc = new DOMParser().parseFromString(html, 'text/html');
     var fresh = selector ? doc.querySelector(selector) : doc.querySelector('[data-live-shell]');
     if(fresh && current){
+      var h1 = doc.querySelector('h1');
+      var pageTitle = (h1 && h1.textContent.trim()) || doc.title || url;
+      pushRecent(url, pageTitle);
       current.innerHTML = fresh.innerHTML;
       initPanelShell();
       bindCopyButtons();
@@ -608,6 +674,7 @@ function refreshShell(url, selector){
       bindCollapsiblePanels();
       updateRelativeTimes();
       renderWatchlist();
+      renderRecents();
       pulseKPIs(current);
       flashNode(current);
       return true;
@@ -632,6 +699,7 @@ applyDensityPreference();
 bindCollapsiblePanels();
 updateRelativeTimes();
 renderWatchlist();
+renderRecents();
 bindWatchlistAdd();
 bindWatchlistRemove();
 bindWatchlistCollapse();
