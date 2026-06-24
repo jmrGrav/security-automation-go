@@ -57,3 +57,4 @@ SMOKE_TEST_REPORT.md
 
 # Agent-generated plan files (superpowers skill)
 docs/superpowers/plans/
+.worktrees/
