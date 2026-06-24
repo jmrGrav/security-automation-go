@@ -20,10 +20,11 @@ import (
 )
 
 type navItem struct {
-	Label  string
-	Href   string
-	Active bool
-	Soon   bool
+	Label       string
+	Href        string
+	Active      bool
+	Soon        bool
+	KeyShortcut string
 }
 
 type shellView struct {
@@ -983,20 +984,15 @@ func ConsoleLayout(view shellView) templ.Component {
 			return err
 		}
 		for _, item := range items {
-			if _, err := fmt.Fprint(w, `<a href="`); err != nil {
-				return err
-			}
-			if _, err := io.WriteString(w, html.EscapeString(item.Href)); err != nil {
-				return err
-			}
+			var extraAttrs string
 			if item.Active {
-				if _, err := fmt.Fprint(w, `" class="active" aria-current="page">`); err != nil {
-					return err
-				}
-			} else {
-				if _, err := fmt.Fprint(w, `">`); err != nil {
-					return err
-				}
+				extraAttrs += ` class="active" aria-current="page"`
+			}
+			if item.KeyShortcut != "" {
+				extraAttrs += ` aria-keyshortcuts="` + html.EscapeString(item.KeyShortcut) + `"`
+			}
+			if _, err := fmt.Fprintf(w, `<a href="%s"%s>`, html.EscapeString(item.Href), extraAttrs); err != nil {
+				return err
 			}
 			if _, err := io.WriteString(w, html.EscapeString(item.Label)); err != nil {
 				return err
@@ -1065,16 +1061,16 @@ func ConsoleLayout(view shellView) templ.Component {
 
 func consoleNav(active string) []navItem {
 	items := []navItem{
-		{Label: "Dashboard", Href: "/"},
+		{Label: "Dashboard", Href: "/", KeyShortcut: "g d"},
 		{Label: "Providers", Href: "/providers"},
-		{Label: "Health", Href: "/health"},
-		{Label: "Forensic", Href: "/forensic"},
-		{Label: "WAF Events", Href: "/evidence"},
+		{Label: "Health", Href: "/health", KeyShortcut: "g h"},
+		{Label: "Forensic", Href: "/forensic", KeyShortcut: "g f"},
+		{Label: "WAF Events", Href: "/evidence", KeyShortcut: "g e"},
 		{Label: "Pipeline Health", Href: "/pipeline"},
 		{Label: "CF Ban Sync", Href: "/sync"},
 		{Label: "Ban Lifecycle", Href: "/ban-lifecycle"},
 		{Label: "Security Intelligence", Href: "/intelligence"},
-		{Label: "Timeline", Href: "/timeline"},
+		{Label: "Timeline", Href: "/timeline", KeyShortcut: "g t"},
 		{Label: "Audit Trail", Href: "/audit"},
 		{Label: "Trusted Networks", Href: "/trusted-networks"},
 		{Label: "Cloudflare Diff", Href: "/cloudflare/diff"},

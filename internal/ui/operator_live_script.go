@@ -304,6 +304,52 @@ function applyWatchlistCollapse(){
   toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
   toggle.textContent = open ? 'Hide' : 'Show';
 }
+function bindKeyboardNav(){
+  if(state.keyboardNavBound === 'true'){ return; }
+  state.keyboardNavBound = 'true';
+  var pending = null;
+  var pendingTimer = null;
+  var routes = { d: '/', t: '/timeline', f: '/forensic', e: '/evidence', h: '/health' };
+  document.addEventListener('keydown', function(ev){
+    if(ev.ctrlKey || ev.altKey || ev.metaKey){ return; }
+    var activeTag = document.activeElement && document.activeElement.tagName ? document.activeElement.tagName.toLowerCase() : '';
+    if(activeTag === 'input' || activeTag === 'textarea' || activeTag === 'select'){ return; }
+    if(document.querySelector('.command-palette.open')){ return; }
+    var key = ev.key || '';
+    if(key === '/'){
+      var search = document.querySelector('input[type="search"], input[name="q"], input[name="search"]');
+      if(search){
+        ev.preventDefault();
+        search.focus();
+        if(search.select){ search.select(); }
+      }
+      return;
+    }
+    if(pending){
+      var route = routes[key.toLowerCase()];
+      if(route){
+        ev.preventDefault();
+        if(pendingTimer){ window.clearTimeout(pendingTimer); }
+        pending = null;
+        pendingTimer = null;
+        window.location.assign(route);
+      } else {
+        if(pendingTimer){ window.clearTimeout(pendingTimer); }
+        pending = null;
+        pendingTimer = null;
+      }
+      return;
+    }
+    if(key.toLowerCase() === 'g'){
+      pending = 'g';
+      if(pendingTimer){ window.clearTimeout(pendingTimer); }
+      pendingTimer = window.setTimeout(function(){
+        pending = null;
+        pendingTimer = null;
+      }, 1000);
+    }
+  });
+}
 function bindWatchlistCollapse(){
   if(state.watchlistCollapseBound === 'true'){ return; }
   state.watchlistCollapseBound = 'true';
@@ -689,6 +735,7 @@ function refreshShell(url, selector){
 bindPanelLinks();
 bindThemeToggle();
 bindDensityToggle();
+bindKeyboardNav();
 bindCopyButtons();
 bindSearchForms();
 bindCommandPalette();

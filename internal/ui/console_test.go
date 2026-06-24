@@ -186,6 +186,43 @@ func TestConsoleLayoutIncludesPR5RecentsShell(t *testing.T) {
 	}
 }
 
+func TestOperatorLiveScriptSupportsKeyboardNav(t *testing.T) {
+	script := operatorLiveScript()
+	for _, want := range []string{
+		"bindKeyboardNav",
+		"keyboardNavBound",
+	} {
+		if !strings.Contains(script, want) {
+			t.Fatalf("operator live script missing keyboard nav artifact %q", want)
+		}
+	}
+
+	comp := ConsoleLayout(shellView{
+		Title:    "Keyboard Nav Test",
+		Headline: "Keyboard Nav Test",
+		Body: templ.ComponentFunc(func(ctx context.Context, w io.Writer) error {
+			_, err := io.WriteString(w, `<div>body</div>`)
+			return err
+		}),
+	})
+	var buf strings.Builder
+	if err := comp.Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render console layout: %v", err)
+	}
+	body := buf.String()
+	for _, want := range []string{
+		`aria-keyshortcuts="g d"`,
+		`aria-keyshortcuts="g t"`,
+		`aria-keyshortcuts="g f"`,
+		`aria-keyshortcuts="g e"`,
+		`aria-keyshortcuts="g h"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("console layout missing keyboard nav artifact %q", want)
+		}
+	}
+}
+
 func TestBuildInfoFromConfigUsesSharedBuildMetadata(t *testing.T) {
 	origVersion, origCommit, origBuildDate := buildmeta.Version, buildmeta.Commit, buildmeta.BuildDate
 	t.Cleanup(func() {
