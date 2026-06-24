@@ -16,6 +16,7 @@ import (
 	"net/netip"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1045,17 +1046,43 @@ func (s *Server) dashboardConsoleView(ctx context.Context) DashboardConsoleView 
 		}
 	}
 
+	updatedAt := time.Now().UTC()
+	providers := s.providerDashboardEntries()
+	healthScore := dashboardHealthScore(statuses, env, providers, s.evidence != nil)
+	activity := s.dashboardActivityFeed(ctx)
+	commandCenter := DashboardCommandCenterView{
+		Health:     healthScore,
+		TimeWindow: dashboardTimeWindow(""),
+		Search: DashboardSearchView{
+			Action:      "/search",
+			Placeholder: "IP, evidence id, ASN, provider, scenario, forensic keyword",
+		},
+		Activity: activity,
+		KPIs: []DashboardKPIView{
+			{Label: "Health", Value: fmt.Sprintf("%d%%", healthScore.Score), Detail: "derived platform score", Href: "/health", Level: healthScore.Level},
+			{Label: "AbuseIPDB reports", Value: strconv.Itoa(reportedTotal), Detail: "all-time evidence-backed", Href: "/evidence?filter=reported", Level: "live"},
+			{Label: "Providers", Value: strconv.Itoa(len(providers)), Detail: "configured provider boundaries", Href: "/providers", Level: "healthy"},
+			{Label: "Recent activity", Value: strconv.Itoa(len(activity.Items)), Detail: "bounded live feed", Href: "/timeline", Level: "live"},
+		},
+		Freshness: []DashboardFreshnessView{
+			dashboardFreshness("Dashboard", true, updatedAt),
+			dashboardFreshness("Evidence", s.evidence != nil, updatedAt),
+			dashboardFreshness("Providers", len(providers) > 0, updatedAt),
+		},
+	}
+
 	return DashboardConsoleView{
 		Statuses:      statuses,
-		AIProviders:   s.providerDashboardEntries(),
+		AIProviders:   providers,
 		Environment:   env,
 		ReportedTotal: reportedTotal,
 		EvidenceWired: s.evidence != nil,
-		UpdatedAt:     time.Now().UTC().Format(time.RFC3339),
+		UpdatedAt:     updatedAt.Format(time.RFC3339),
 		HealthyCount:  healthyCount,
 		WarningCount:  warningCount,
 		ErrorCount:    errorCount,
 		DisabledCount: disabledCount,
+		CommandCenter: commandCenter,
 	}
 }
 

@@ -92,3 +92,23 @@ func TestDashboardViewIgnoresCanceledRequestContextForEvidenceCount(t *testing.T
 		t.Fatalf("dashboard should render stable evidence count despite canceled request context: %s", body)
 	}
 }
+
+func TestDashboardViewPopulatesCommandCenter(t *testing.T) {
+	srv, _, _ := newTestServer(t, nil)
+	srv.evidence = cancelSensitiveEvidenceStore{total: 7}
+
+	view := srv.dashboardConsoleView(context.Background())
+
+	if view.CommandCenter.Health.Level == "" {
+		t.Fatalf("command center health score should be populated")
+	}
+	if view.CommandCenter.Search.Action == "" {
+		t.Fatalf("command center search action should be populated")
+	}
+	if view.CommandCenter.TimeWindow.Active != "24h" {
+		t.Fatalf("default command center window: want 24h, got %q", view.CommandCenter.TimeWindow.Active)
+	}
+	if len(view.CommandCenter.KPIs) == 0 {
+		t.Fatalf("command center KPIs should be populated")
+	}
+}
