@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"sort"
 	"strings"
 	"time"
 
@@ -12,6 +13,11 @@ import (
 )
 
 const dashboardActivityLimit = 8
+const (
+	dashboardThreatEvidenceLimit = 500
+	dashboardThreatCountryLimit  = 8
+	dashboardThreatCampaignLimit = 5
+)
 
 func dashboardHealthScore(statuses []StatusItem, env EnvironmentWidget, providers []AIProviderDashboardView, nonAIProviders []NonAIProviderEntry, freshness []DashboardFreshnessView, evidenceWired bool) DashboardHealthScoreView {
 	total := 0
@@ -219,6 +225,107 @@ func (s *Server) dashboardActivityFeedForWindow(ctx context.Context, from time.T
 	return feed
 }
 
+func (s *Server) dashboardThreatView(ctx context.Context, from time.Time) DashboardThreatView {
+	view := DashboardThreatView{
+		Wired:     s.evidence != nil,
+		Source:    "Evidence",
+		EmptyText: "No threat visualization data available. Evidence events with country data will appear here when the daemon records them.",
+	}
+	if s.evidence == nil {
+		view.EmptyText = "Attack Map unavailable because the evidence store is not wired."
+		return view
+	}
+	rows, err := s.evidence.Search(ctx, reporting.EvidenceSearchOptions{Limit: dashboardThreatEvidenceLimit, From: from})
+	if err != nil {
+		view.EmptyText = "Attack Map unavailable: " + err.Error()
+		return view
+	}
+	if len(rows) == 0 {
+		return view
+	}
+
+	type countryAgg struct {
+		count int
+		level string
+	}
+	countries := map[string]countryAgg{}
+	type campaignAgg struct {
+		source   string
+		country  string
+		scenario string
+		count    int
+		level    string
+	}
+	campaigns := map[string]campaignAgg{}
+
+	for _, row := range rows {
+		view.TotalEvents++
+		country := dashboardThreatCountry(row)
+		if country == dashboardThreatUnknownCountry {
+			view.UnknownCount++
+		}
+		severity := evidenceSeverity(row)
+		c := countries[country]
+		c.count++
+		c.level = dashboardThreatMaxLevel(c.level, severity)
+		countries[country] = c
+
+		source := dashboardThreatValue(row.Source, "unknown source")
+		scenario := dashboardThreatScenario(row)
+		key := source + "\x00" + country + "\x00" + scenario
+		camp := campaigns[key]
+		if camp.count == 0 {
+			camp.source = source
+			camp.country = country
+			camp.scenario = scenario
+		}
+		camp.count++
+		camp.level = dashboardThreatMaxLevel(camp.level, severity)
+		campaigns[key] = camp
+	}
+
+	view.Countries = make([]DashboardThreatCountryView, 0, len(countries))
+	for country, agg := range countries {
+		view.Countries = append(view.Countries, DashboardThreatCountryView{
+			Country: country,
+			Count:   agg.count,
+			Level:   dashboardThreatValue(agg.level, "healthy"),
+		})
+	}
+	sort.SliceStable(view.Countries, func(i, j int) bool {
+		if view.Countries[i].Count == view.Countries[j].Count {
+			return view.Countries[i].Country < view.Countries[j].Country
+		}
+		return view.Countries[i].Count > view.Countries[j].Count
+	})
+	if len(view.Countries) > dashboardThreatCountryLimit {
+		view.Countries = view.Countries[:dashboardThreatCountryLimit]
+	}
+
+	view.Campaigns = make([]DashboardThreatCampaignView, 0, len(campaigns))
+	for _, agg := range campaigns {
+		view.Campaigns = append(view.Campaigns, DashboardThreatCampaignView{
+			Source:   agg.source,
+			Country:  agg.country,
+			Scenario: agg.scenario,
+			Count:    agg.count,
+			Level:    dashboardThreatValue(agg.level, "healthy"),
+		})
+	}
+	sort.SliceStable(view.Campaigns, func(i, j int) bool {
+		if view.Campaigns[i].Count == view.Campaigns[j].Count {
+			left := view.Campaigns[i].Source + view.Campaigns[i].Country + view.Campaigns[i].Scenario
+			right := view.Campaigns[j].Source + view.Campaigns[j].Country + view.Campaigns[j].Scenario
+			return left < right
+		}
+		return view.Campaigns[i].Count > view.Campaigns[j].Count
+	})
+	if len(view.Campaigns) > dashboardThreatCampaignLimit {
+		view.Campaigns = view.Campaigns[:dashboardThreatCampaignLimit]
+	}
+	return view
+}
+
 func (s *Server) dashboardEvidenceFreshness(ctx context.Context) DashboardFreshnessView {
 	if s.evidence == nil {
 		return dashboardFreshness("Evidence", false, time.Time{})
@@ -262,6 +369,12 @@ func dashboardActivityItem(ev reporting.DecisionEvidence) DashboardActivityItemV
 		}
 		detail += ev.Source
 	}
+	if country := dashboardThreatCountry(ev); country != dashboardThreatUnknownCountry {
+		if detail != "" {
+			detail += " · "
+		}
+		detail += country
+	}
 	href := "/evidence"
 	if ev.EvidenceID != "" {
 		href = "/evidence/" + url.PathEscape(ev.EvidenceID)
@@ -274,6 +387,61 @@ func dashboardActivityItem(ev reporting.DecisionEvidence) DashboardActivityItemV
 		Title:     title,
 		Detail:    detail,
 		Href:      href,
+	}
+}
+
+const dashboardThreatUnknownCountry = "unknown / not available"
+
+func dashboardThreatCountry(ev reporting.DecisionEvidence) string {
+	if country := strings.TrimSpace(ev.NormalizedEvent.CountryName); country != "" {
+		return country
+	}
+	for _, key := range []string{"country_name", "country"} {
+		if raw, ok := ev.Metadata[key]; ok {
+			if country, ok := raw.(string); ok && strings.TrimSpace(country) != "" {
+				return strings.TrimSpace(country)
+			}
+		}
+	}
+	return dashboardThreatUnknownCountry
+}
+
+func dashboardThreatScenario(ev reporting.DecisionEvidence) string {
+	if scenario := strings.TrimSpace(ev.AbuseType); scenario != "" {
+		return scenario
+	}
+	if decision := strings.TrimSpace(ev.Decision); decision != "" {
+		return decision
+	}
+	return "unknown scenario"
+}
+
+func dashboardThreatValue(value, fallback string) string {
+	if strings.TrimSpace(value) == "" {
+		return fallback
+	}
+	return strings.TrimSpace(value)
+}
+
+func dashboardThreatMaxLevel(current, next string) string {
+	if dashboardThreatLevelRank(next) > dashboardThreatLevelRank(current) {
+		return next
+	}
+	return current
+}
+
+func dashboardThreatLevelRank(level string) int {
+	switch strings.ToLower(strings.TrimSpace(level)) {
+	case "error", "critical":
+		return 4
+	case "warning", "degraded":
+		return 3
+	case "live":
+		return 2
+	case "healthy", "ready":
+		return 1
+	default:
+		return 0
 	}
 }
 

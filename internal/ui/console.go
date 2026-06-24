@@ -397,6 +397,13 @@ func ConsoleLayout(view shellView) templ.Component {
 				.activity-feed small { display:block; color:var(--muted); margin-top:.15rem; }
 				.freshness-rail { display:flex; gap:.45rem; flex-wrap:wrap; margin:.7rem 0; }
 				.command-kpis { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:.65rem; margin:.8rem 0; }
+				.threat-viz { margin:.85rem 0; }
+				.attack-map-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(18rem,1fr)); gap:.85rem; align-items:start; }
+				.attack-map-svg { width:100%; min-height:170px; border:1px solid #d8e2f0; border-radius:16px; background:linear-gradient(135deg,#f8fbff,#edf5ff); }
+				.attack-country-list, .campaign-list { list-style:none; padding:0; margin:.75rem 0 0; display:grid; gap:.45rem; }
+				.attack-country-list li, .campaign-list li { display:flex; justify-content:space-between; gap:.75rem; align-items:center; border:1px solid var(--border); border-radius:12px; padding:.55rem .65rem; background:#fff; }
+				.campaign-list li { align-items:flex-start; }
+				.campaign-list small { display:block; color:var(--muted); margin-top:.15rem; }
 				.mini-card { display:grid; gap:.25rem; padding:.75rem; border:1px solid var(--border); border-radius:12px; background:#fff; text-decoration:none; }
 				.mini-card strong { font-size:1.2rem; }
 				.mini-card small { color:var(--muted); }
@@ -1009,6 +1016,9 @@ func renderCommandCenter(w io.Writer, view DashboardConsoleView) error {
 	if err := renderCommandCenterKPIs(w, cc.KPIs); err != nil {
 		return err
 	}
+	if err := renderThreatVisualization(w, cc.Threat); err != nil {
+		return err
+	}
 	if err := renderFreshnessRail(w, cc.Freshness); err != nil {
 		return err
 	}
@@ -1083,6 +1093,131 @@ func renderCommandCenterKPIs(w io.Writer, kpis []DashboardKPIView) error {
 	}
 	_, err := fmt.Fprint(w, `</div>`)
 	return err
+}
+
+func renderThreatVisualization(w io.Writer, view DashboardThreatView) error {
+	if _, err := fmt.Fprint(w, `<section class="panel threat-viz" aria-label="Threat Visualization"><div class="pagehead"><div><p class="section-heading">Threat Visualization</p><h2>Attack Map <span class="badge live">Read-only</span></h2><p class="muted">Server-aggregated evidence by country. Unknown geo data stays explicit.</p></div>`); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(w, `<div class="badge %s">%d events</div></div>`, html.EscapeString(statusClass(threatVisualizationLevel(view))), view.TotalEvents); err != nil {
+		return err
+	}
+	if !view.Wired || view.TotalEvents == 0 {
+		if _, err := fmt.Fprintf(w, `<p class="muted">%s</p></section>`, html.EscapeString(view.EmptyText)); err != nil {
+			return err
+		}
+		return nil
+	}
+	if _, err := fmt.Fprint(w, `<div class="attack-map-grid"><div>`); err != nil {
+		return err
+	}
+	if err := renderAttackMapSVG(w, view.Countries); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprint(w, `<ol class="attack-country-list">`); err != nil {
+		return err
+	}
+	for _, country := range view.Countries {
+		if _, err := fmt.Fprintf(w, `<li><span>%s</span><span class="badge %s">%d</span></li>`,
+			html.EscapeString(country.Country),
+			html.EscapeString(statusClass(country.Level)),
+			country.Count,
+		); err != nil {
+			return err
+		}
+	}
+	if _, err := fmt.Fprint(w, `</ol></div><div><h3>Top Campaigns</h3>`); err != nil {
+		return err
+	}
+	if len(view.Campaigns) == 0 {
+		if _, err := fmt.Fprint(w, `<p class="muted">No campaign groups available for this window.</p>`); err != nil {
+			return err
+		}
+	} else {
+		if _, err := fmt.Fprint(w, `<ol class="campaign-list">`); err != nil {
+			return err
+		}
+		for _, campaign := range view.Campaigns {
+			if _, err := fmt.Fprintf(w, `<li><span><strong>%s</strong><small>%s · %s</small></span><span class="badge %s">%d</span></li>`,
+				html.EscapeString(campaign.Scenario),
+				html.EscapeString(campaign.Source),
+				html.EscapeString(campaign.Country),
+				html.EscapeString(statusClass(campaign.Level)),
+				campaign.Count,
+			); err != nil {
+				return err
+			}
+		}
+		if _, err := fmt.Fprint(w, `</ol>`); err != nil {
+			return err
+		}
+	}
+	_, err := fmt.Fprint(w, `</div></div></section>`)
+	return err
+}
+
+func renderAttackMapSVG(w io.Writer, countries []DashboardThreatCountryView) error {
+	maxCount := 1
+	for _, country := range countries {
+		if country.Count > maxCount {
+			maxCount = country.Count
+		}
+	}
+	if _, err := fmt.Fprint(w, `<svg class="attack-map-svg" viewBox="0 0 640 220" role="img" aria-label="Attack Map country distribution">`); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprint(w, `<rect x="0" y="0" width="640" height="220" fill="transparent"></rect>`); err != nil {
+		return err
+	}
+	for i, country := range countries {
+		if i >= 6 {
+			break
+		}
+		y := 24 + i*30
+		width := 60 + (country.Count * 430 / maxCount)
+		if _, err := fmt.Fprintf(w, `<text x="24" y="%d" font-size="13" fill="#334155">%s</text><rect x="170" y="%d" width="%d" height="16" rx="8" fill="%s"></rect><text x="%d" y="%d" font-size="12" fill="#334155">%d</text>`,
+			y,
+			html.EscapeString(country.Country),
+			y-13,
+			width,
+			html.EscapeString(threatSVGColor(country.Level)),
+			180+width,
+			y,
+			country.Count,
+		); err != nil {
+			return err
+		}
+	}
+	_, err := fmt.Fprint(w, `</svg>`)
+	return err
+}
+
+func threatVisualizationLevel(view DashboardThreatView) string {
+	if !view.Wired {
+		return "unavailable"
+	}
+	if view.TotalEvents == 0 {
+		return "warning"
+	}
+	for _, country := range view.Countries {
+		if country.Level == "error" {
+			return "error"
+		}
+	}
+	return "live"
+}
+
+func threatSVGColor(level string) string {
+	switch statusClass(level) {
+	case "error":
+		return "#dc2626"
+	case "warning":
+		return "#d97706"
+	case "live":
+		return "#2563eb"
+	default:
+		return "#16a34a"
+	}
 }
 
 func renderFreshnessRail(w io.Writer, freshness []DashboardFreshnessView) error {
