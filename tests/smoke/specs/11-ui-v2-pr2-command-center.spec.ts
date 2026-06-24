@@ -21,9 +21,9 @@ test.describe('UI v2 PR2 SOC Command Center', () => {
 
   test('Dashboard renders SOC command center and command palette', async ({ page }) => {
     await page.goto('/');
-    await expect(page.getByText('Security Command Center')).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Security Command Center', exact: true })).toBeVisible();
     await expect(page.getByText('Health Score')).toBeVisible();
-    await expect(page.getByText('Universal Search')).toBeVisible();
+    await expect(page.locator('[data-command-search="true"]')).toBeVisible();
     await expect(page.getByText('Live Activity Feed')).toBeVisible();
     await referenceCapture(page, 'ui-v2-pr2-dashboard-command-center-default.png');
 
@@ -36,7 +36,7 @@ test.describe('UI v2 PR2 SOC Command Center', () => {
     await page.goto('/');
     await page.getByRole('button', { name: /Compact mode/i }).click();
     await expect(page.locator('body')).toHaveAttribute('data-density', 'compact');
-    await expect(page.getByText('Security Command Center')).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Security Command Center', exact: true })).toBeVisible();
     await referenceCapture(page, 'ui-v2-pr2-dashboard-command-center-compact.png');
   });
 });
