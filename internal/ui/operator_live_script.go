@@ -171,7 +171,7 @@ function renderWatchlist(){
       var rm = document.createElement('button');
       rm.type = 'button';
       rm.setAttribute('data-watchlist-remove', String(idx));
-      rm.style.cssText = 'flex:0 0 auto;min-height:auto;padding:.1rem .35rem;font-size:.78rem;border-radius:6px;background:rgba(255,80,80,.12);border-color:rgba(255,80,80,.22);color:rgba(255,180,180,.9);box-shadow:none';
+      rm.style.cssText = 'flex:0 0 auto;min-height:auto;padding:.1rem .35rem;font-size:.78rem;border-radius:6px;background:var(--state-error-bg);border-color:var(--state-error);color:var(--state-error);box-shadow:none';
       rm.textContent = '×';
       rm.title = 'Remove from watchlist';
       row.appendChild(label);
@@ -228,6 +228,31 @@ function bindWatchlistRemove(){
       return items.some(function(kept){ return kept.type === it.type && kept.value === it.value && kept.addedAt === it.addedAt; });
     }));
     renderWatchlist();
+  });
+}
+var watchlistOpenKey = 'security-automation:watchlist-open';
+function applyWatchlistCollapse(){
+  var widget = document.querySelector('[data-watchlist-widget="true"]');
+  if(!widget){ return; }
+  var body = widget.querySelector('[data-watchlist-body]');
+  var toggle = widget.querySelector('[data-watchlist-collapse-toggle="true"]');
+  if(!body || !toggle){ return; }
+  var open = storageGet(watchlistOpenKey) === 'true';
+  body.style.display = open ? 'grid' : 'none';
+  toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+  toggle.textContent = open ? 'Hide' : 'Show';
+}
+function bindWatchlistCollapse(){
+  if(state.watchlistCollapseBound === 'true'){ return; }
+  state.watchlistCollapseBound = 'true';
+  applyWatchlistCollapse();
+  document.addEventListener('click', function(ev){
+    var toggle = ev.target && ev.target.closest ? ev.target.closest('[data-watchlist-collapse-toggle="true"]') : null;
+    if(!toggle){ return; }
+    ev.preventDefault();
+    var open = storageGet(watchlistOpenKey) === 'true';
+    storageSet(watchlistOpenKey, open ? 'false' : 'true');
+    applyWatchlistCollapse();
   });
 }
 function escapeHTML(text){
@@ -609,6 +634,7 @@ updateRelativeTimes();
 renderWatchlist();
 bindWatchlistAdd();
 bindWatchlistRemove();
+bindWatchlistCollapse();
 window.setInterval(updateRelativeTimes, 1000);
 state.toast = showToast;
 state.openPanel = openPanel;

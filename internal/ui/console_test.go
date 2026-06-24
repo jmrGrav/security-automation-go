@@ -140,6 +140,7 @@ func TestConsoleLayoutIncludesPR5WatchlistShell(t *testing.T) {
 	for _, want := range []string{
 		`renderWatchlist`,
 		`bindWatchlistAdd`,
+		`bindWatchlistRemove`,
 		`data-watchlist-add="true"`,
 		`security-automation:watchlist`,
 	} {
