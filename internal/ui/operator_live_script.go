@@ -185,6 +185,7 @@ function refreshShellNode(node){
       initPanelShell();
       bindCopyButtons();
       bindSearchForms();
+      bindCommandPalette();
       applyDensityPreference();
       bindCollapsiblePanels();
       updateRelativeTimes();
@@ -247,6 +248,52 @@ function closePanel(){
   if(body && !body.dataset.keepOpen){
     body.innerHTML = panelSkeleton('Select an item to inspect live details.');
   }
+}
+function commandPaletteRoot(){ return document.querySelector('[data-command-palette-root="true"]'); }
+function commandPaletteInput(){
+  var root = commandPaletteRoot();
+  return root ? root.querySelector('input[name="q"]') : null;
+}
+function openCommandPalette(){
+  var root = commandPaletteRoot();
+  var input = commandPaletteInput();
+  if(!root || !input){ return; }
+  root.classList.add('open');
+  root.setAttribute('aria-hidden', 'false');
+  window.setTimeout(function(){ input.focus(); input.select(); }, 0);
+}
+function closeCommandPalette(){
+  var root = commandPaletteRoot();
+  if(!root){ return; }
+  root.classList.remove('open');
+  root.setAttribute('aria-hidden', 'true');
+}
+function bindCommandPalette(){
+  if(state.commandPaletteBound === 'true'){ return; }
+  state.commandPaletteBound = 'true';
+  document.addEventListener('keydown', function(ev){
+    var key = (ev.key || '').toLowerCase();
+    if((ev.ctrlKey || ev.metaKey) && key === 'k'){
+      ev.preventDefault();
+      openCommandPalette();
+      return;
+    }
+    if(key === 'escape'){
+      closeCommandPalette();
+    }
+  });
+  document.addEventListener('click', function(ev){
+    var trigger = ev.target && ev.target.closest ? ev.target.closest('[data-command-palette-trigger="true"]') : null;
+    if(trigger){
+      ev.preventDefault();
+      openCommandPalette();
+      return;
+    }
+    var root = commandPaletteRoot();
+    if(root && ev.target === root){
+      closeCommandPalette();
+    }
+  });
 }
 function submitSearchForm(form){
   if(!form){ return Promise.resolve(false); }
@@ -409,6 +456,7 @@ function refreshShell(url, selector){
       initPanelShell();
       bindCopyButtons();
       bindSearchForms();
+      bindCommandPalette();
       applyDensityPreference();
       bindCollapsiblePanels();
       updateRelativeTimes();
@@ -427,6 +475,7 @@ bindPanelLinks();
 bindDensityToggle();
 bindCopyButtons();
 bindSearchForms();
+bindCommandPalette();
 bindLiveRefreshers();
 initPanelShell();
 applyDensityPreference();

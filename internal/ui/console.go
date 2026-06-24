@@ -400,7 +400,12 @@ func ConsoleLayout(view shellView) templ.Component {
 				.mini-card { display:grid; gap:.25rem; padding:.75rem; border:1px solid var(--border); border-radius:12px; background:#fff; text-decoration:none; }
 				.mini-card strong { font-size:1.2rem; }
 				.mini-card small { color:var(--muted); }
-        			.grid {
+				.command-palette { position:fixed; inset:0; display:none; align-items:flex-start; justify-content:center; padding:12vh 1rem 1rem; background:rgba(9,17,29,.45); z-index:80; }
+				.command-palette.open { display:flex; }
+				.command-palette form { width:min(680px, calc(100vw - 2rem)); background:#fff; border:1px solid #c8d8ef; border-radius:16px; padding:1rem; box-shadow:0 24px 80px rgba(10,25,50,.24); }
+				.command-palette label { display:block; margin-bottom:.5rem; font-weight:700; }
+				.command-palette input { width:100%; font-size:1.05rem; padding:.8rem .9rem; border:1px solid #b9c9df; border-radius:10px; }
+            			.grid {
         				display: grid;
 				grid-template-columns: repeat(auto-fit, minmax(17.5rem, 1fr));
 				gap: 1rem;
@@ -953,7 +958,7 @@ func ConsoleLayout(view shellView) templ.Component {
 				return err
 			}
 		}
-		if _, err := fmt.Fprint(w, `</div></main><div class="live-panel-root" data-live-panel-root aria-hidden="true"><div class="live-panel-backdrop" data-live-panel-backdrop="true"></div><aside class="live-panel" role="dialog" aria-modal="true" aria-label="Live detail panel"><div class="live-panel-head"><div><strong data-live-panel-title>Select an item</strong><p class="muted">Open evidence, forensic, or event details without leaving the current page.</p></div><button type="button" class="action-button secondary copy-button" data-live-panel-close="true">Close</button></div><div class="live-panel-body" data-live-panel-body><div class="live-panel-skeleton"><div class="skeleton-line wide"></div><div class="skeleton-line"></div><div class="skeleton-line"></div><div class="skeleton-line narrow"></div><p class="muted" style="margin-top:.85rem">Select an item to inspect live details.</p></div></div></aside></div><div data-live-toast-region="true" class="live-toast-region"></div></div></body></html>`); err != nil {
+		if _, err := fmt.Fprint(w, `</div></main><div class="live-panel-root" data-live-panel-root aria-hidden="true"><div class="live-panel-backdrop" data-live-panel-backdrop="true"></div><aside class="live-panel" role="dialog" aria-modal="true" aria-label="Live detail panel"><div class="live-panel-head"><div><strong data-live-panel-title>Select an item</strong><p class="muted">Open evidence, forensic, or event details without leaving the current page.</p></div><button type="button" class="action-button secondary copy-button" data-live-panel-close="true">Close</button></div><div class="live-panel-body" data-live-panel-body><div class="live-panel-skeleton"><div class="skeleton-line wide"></div><div class="skeleton-line"></div><div class="skeleton-line"></div><div class="skeleton-line narrow"></div><p class="muted" style="margin-top:.85rem">Select an item to inspect live details.</p></div></div></aside></div><div class="command-palette" data-command-palette-root="true" aria-hidden="true"><form method="get" action="/search" data-command-palette-form="true"><label for="command-palette-input">Universal Search</label><input id="command-palette-input" name="q" type="search" placeholder="IP, evidence id, provider, scenario" autocomplete="off"/><p class="muted">Press Escape to close. Search routes to read-only investigation pages.</p></form></div><div data-live-toast-region="true" class="live-toast-region"></div></div></body></html>`); err != nil {
 			return err
 		}
 		return nil
