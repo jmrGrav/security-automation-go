@@ -134,6 +134,102 @@ function bindCollapsiblePanels(){
     setCollapsiblePanel(panel, collapsed);
   });
 }
+var watchlistKey = 'security-automation:watchlist';
+function loadWatchlist(){
+  try{
+    var raw = storageGet(watchlistKey);
+    if(!raw){ return []; }
+    var parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  }catch(e){ return []; }
+}
+function saveWatchlist(items){
+  try{ storageSet(watchlistKey, JSON.stringify(items)); }catch(e){}
+}
+function renderWatchlist(){
+  var widget = document.querySelector('[data-watchlist-widget="true"]');
+  if(!widget){ return; }
+  var list = widget.querySelector('[data-watchlist-list]');
+  if(!list){ return; }
+  var items = loadWatchlist();
+  var capped = items.slice(0, 10);
+  list.innerHTML = '';
+  if(capped.length === 0){
+    var empty = document.createElement('p');
+    empty.className = 'muted';
+    empty.style.cssText = 'font-size:.82rem;margin:.35rem 0 0;padding:0 .1rem';
+    empty.textContent = 'No items watched.';
+    list.appendChild(empty);
+  } else {
+    capped.forEach(function(item, idx){
+      var row = document.createElement('div');
+      row.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:.45rem;padding:.28rem .1rem;border-top:1px solid var(--sidebar-border);font-size:.82rem';
+      var label = document.createElement('span');
+      label.style.cssText = 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--sidebar-text)';
+      label.textContent = item.label || item.value || '';
+      label.title = item.value || '';
+      var rm = document.createElement('button');
+      rm.type = 'button';
+      rm.setAttribute('data-watchlist-remove', String(idx));
+      rm.style.cssText = 'flex:0 0 auto;min-height:auto;padding:.1rem .35rem;font-size:.78rem;border-radius:6px;background:rgba(255,80,80,.12);border-color:rgba(255,80,80,.22);color:rgba(255,180,180,.9);box-shadow:none';
+      rm.textContent = '×';
+      rm.title = 'Remove from watchlist';
+      row.appendChild(label);
+      row.appendChild(rm);
+      list.appendChild(row);
+    });
+  }
+  document.querySelectorAll('[data-watchlist-add="true"]').forEach(function(btn){
+    var type = btn.getAttribute('data-watchlist-type') || '';
+    var value = btn.getAttribute('data-watchlist-value') || '';
+    var watched = items.some(function(it){ return it.type === type && it.value === value; });
+    btn.textContent = watched ? '★' : '☆';
+    btn.setAttribute('aria-pressed', watched ? 'true' : 'false');
+    btn.title = watched ? 'Remove from watchlist' : 'Add to watchlist';
+  });
+}
+function bindWatchlistAdd(){
+  if(state.watchlistAddBound === 'true'){ return; }
+  state.watchlistAddBound = 'true';
+  document.addEventListener('click', function(ev){
+    var btn = ev.target && ev.target.closest ? ev.target.closest('[data-watchlist-add="true"]') : null;
+    if(!btn){ return; }
+    ev.preventDefault();
+    var type = btn.getAttribute('data-watchlist-type') || 'ip';
+    var value = btn.getAttribute('data-watchlist-value') || '';
+    var label = btn.getAttribute('data-watchlist-label') || value;
+    if(!value){ return; }
+    var items = loadWatchlist();
+    var existingIdx = -1;
+    items.forEach(function(it, i){ if(it.type === type && it.value === value){ existingIdx = i; } });
+    if(existingIdx >= 0){
+      items.splice(existingIdx, 1);
+    } else {
+      items.unshift({type: type, value: value, label: label, addedAt: new Date().toISOString()});
+    }
+    saveWatchlist(items);
+    renderWatchlist();
+  });
+}
+function bindWatchlistRemove(){
+  if(state.watchlistRemoveBound === 'true'){ return; }
+  state.watchlistRemoveBound = 'true';
+  document.addEventListener('click', function(ev){
+    var btn = ev.target && ev.target.closest ? ev.target.closest('[data-watchlist-remove]') : null;
+    if(!btn){ return; }
+    var widget = btn.closest('[data-watchlist-widget="true"]');
+    if(!widget){ return; }
+    ev.preventDefault();
+    var idx = parseInt(btn.getAttribute('data-watchlist-remove'), 10);
+    if(isNaN(idx)){ return; }
+    var items = loadWatchlist().slice(0, 10);
+    items.splice(idx, 1);
+    saveWatchlist(loadWatchlist().filter(function(it, i){
+      return items.some(function(kept){ return kept.type === it.type && kept.value === it.value && kept.addedAt === it.addedAt; });
+    }));
+    renderWatchlist();
+  });
+}
 function escapeHTML(text){
   return String(text || '').replace(/[&<>"']/g, function(ch){
     return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]);
@@ -213,6 +309,7 @@ function refreshShellNode(node){
       applyThemePreference();
       bindCollapsiblePanels();
       updateRelativeTimes();
+      renderWatchlist();
       pulseKPIs(node);
       flashNode(node);
       return true;
@@ -479,12 +576,13 @@ function refreshShell(url, selector){
       current.innerHTML = fresh.innerHTML;
       initPanelShell();
       bindCopyButtons();
-              bindSearchForms();
-              bindCommandPalette();
-              applyDensityPreference();
-              applyThemePreference();
-              bindCollapsiblePanels();
+      bindSearchForms();
+      bindCommandPalette();
+      applyDensityPreference();
+      applyThemePreference();
+      bindCollapsiblePanels();
       updateRelativeTimes();
+      renderWatchlist();
       pulseKPIs(current);
       flashNode(current);
       return true;
@@ -508,6 +606,9 @@ applyThemePreference();
 applyDensityPreference();
 bindCollapsiblePanels();
 updateRelativeTimes();
+renderWatchlist();
+bindWatchlistAdd();
+bindWatchlistRemove();
 window.setInterval(updateRelativeTimes, 1000);
 state.toast = showToast;
 state.openPanel = openPanel;

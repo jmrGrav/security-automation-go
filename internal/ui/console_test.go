@@ -113,6 +113,42 @@ func TestOperatorLiveScriptSupportsThemePreference(t *testing.T) {
 	}
 }
 
+func TestConsoleLayoutIncludesPR5WatchlistShell(t *testing.T) {
+	comp := ConsoleLayout(shellView{
+		Title:    "Watchlist Test",
+		Headline: "Watchlist Test",
+		Body: templ.ComponentFunc(func(ctx context.Context, w io.Writer) error {
+			_, err := io.WriteString(w, `<div>body</div>`)
+			return err
+		}),
+	})
+	var buf strings.Builder
+	if err := comp.Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render console layout: %v", err)
+	}
+	body := buf.String()
+	for _, want := range []string{
+		`data-watchlist-widget="true"`,
+		`security-automation:watchlist`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("PR5 watchlist shell missing HTML artifact %q: %s", want, body)
+		}
+	}
+
+	script := operatorLiveScript()
+	for _, want := range []string{
+		`renderWatchlist`,
+		`bindWatchlistAdd`,
+		`data-watchlist-add="true"`,
+		`security-automation:watchlist`,
+	} {
+		if !strings.Contains(script, want) {
+			t.Fatalf("PR5 watchlist shell missing JS artifact %q", want)
+		}
+	}
+}
+
 func TestBuildInfoFromConfigUsesSharedBuildMetadata(t *testing.T) {
 	origVersion, origCommit, origBuildDate := buildmeta.Version, buildmeta.Commit, buildmeta.BuildDate
 	t.Cleanup(func() {

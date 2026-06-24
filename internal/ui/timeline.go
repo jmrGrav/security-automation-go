@@ -617,7 +617,11 @@ func TimelinePage(view TimelineView, csrfToken string) templ.Component {
 func timelineTargetCell(target string) string {
 	v := auditDisplayValue(target)
 	if addr, err := netip.ParseAddr(strings.TrimSpace(target)); err == nil && addr.IsValid() {
-		return compactLinkCopyHTML("/forensic?ip="+url.QueryEscape(addr.String()), addr.String(), "Explain this IP", "Forensic Lookup", "IP copied", 14)
+		watchBtn := fmt.Sprintf(` <button type="button" class="badge" data-watchlist-add="true" data-watchlist-type="ip" data-watchlist-value="%s" data-watchlist-label="%s" title="Add to watchlist" style="min-height:auto;padding:.1rem .3rem;font-size:.8rem;box-shadow:none">☆</button>`,
+			html.EscapeString(addr.String()),
+			html.EscapeString(addr.String()),
+		)
+		return compactLinkCopyHTML("/forensic?ip="+url.QueryEscape(addr.String()), addr.String(), "Explain this IP", "Forensic Lookup", "IP copied", 14) + watchBtn
 	}
 	return compactCopyHTML(v, 18, "Target copied")
 }
