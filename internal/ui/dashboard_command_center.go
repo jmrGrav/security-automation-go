@@ -1,11 +1,14 @@
 package ui
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/jm/security-automation-go/internal/services/reporting"
 )
 
 const dashboardActivityLimit = 8
@@ -154,4 +157,67 @@ func dashboardFreshness(label string, available bool, updatedAt time.Time) Dashb
 		return DashboardFreshnessView{Label: label, Level: "warning", Detail: "stale by " + age.Round(time.Second).String()}
 	}
 	return DashboardFreshnessView{Label: label, Level: "healthy", Detail: "updated " + age.Round(time.Second).String() + " ago"}
+}
+
+func (s *Server) dashboardActivityFeed(ctx context.Context) DashboardActivityFeedView {
+	feed := DashboardActivityFeedView{
+		Limit:      dashboardActivityLimit,
+		MoreHref:   "/timeline",
+		Source:     "Evidence",
+		SourceHref: "/evidence",
+		EmptyText:  "No recent activity available. Evidence events will appear here when the daemon records security events.",
+	}
+	if s.evidence == nil {
+		feed.EmptyText = "Live activity unavailable because the evidence store is not wired."
+		return feed
+	}
+	rows, err := s.evidence.Search(ctx, reporting.EvidenceSearchOptions{Limit: dashboardActivityLimit})
+	if err != nil {
+		feed.EmptyText = "Live activity unavailable: " + err.Error()
+		return feed
+	}
+	for _, row := range rows {
+		feed.Items = append(feed.Items, dashboardActivityItem(row))
+	}
+	return feed
+}
+
+func dashboardActivityItem(ev reporting.DecisionEvidence) DashboardActivityItemView {
+	title := strings.TrimSpace(ev.Decision)
+	if title == "" {
+		title = "evidence"
+	}
+	detail := strings.TrimSpace(ev.IP)
+	if ev.Source != "" {
+		if detail != "" {
+			detail += " · "
+		}
+		detail += ev.Source
+	}
+	href := "/evidence"
+	if ev.EvidenceID != "" {
+		href = "/evidence/" + url.PathEscape(ev.EvidenceID)
+	} else if ev.IP != "" {
+		href = "/forensic?ip=" + url.QueryEscape(ev.IP)
+	}
+	return DashboardActivityItemView{
+		Timestamp: ev.Timestamp.UTC().Format(time.RFC3339),
+		Severity:  evidenceSeverity(ev),
+		Title:     title,
+		Detail:    detail,
+		Href:      href,
+	}
+}
+
+func evidenceSeverity(ev reporting.DecisionEvidence) string {
+	if ev.AbuseIPDBReported {
+		return "error"
+	}
+	if ev.Suppressed {
+		return "warning"
+	}
+	if strings.Contains(strings.ToLower(ev.Decision), "pending") {
+		return "live"
+	}
+	return "healthy"
 }

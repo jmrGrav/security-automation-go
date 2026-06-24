@@ -1,8 +1,11 @@
 package ui
 
 import (
+	"context"
 	"testing"
 	"time"
+
+	"github.com/jm/security-automation-go/internal/services/reporting"
 )
 
 func TestCommandCenterViewDefaultsAreSafe(t *testing.T) {
@@ -119,5 +122,43 @@ func TestDashboardFreshnessMarksUnavailable(t *testing.T) {
 	got := dashboardFreshness("Evidence", false, time.Time{})
 	if got.Level != "unavailable" || got.Detail == "" {
 		t.Fatalf("expected unavailable freshness with detail, got %#v", got)
+	}
+}
+
+func TestDashboardActivityFeedUsesBoundedEvidenceRead(t *testing.T) {
+	srv, _, _ := newTestServer(t, nil)
+	store := &stubEvidenceStore{
+		items: []reporting.DecisionEvidence{
+			{EvidenceID: "ev1", IP: "203.0.113.10", Source: "cloudflare_waf", Decision: "report_pending", Timestamp: time.Now().UTC()},
+			{EvidenceID: "ev2", IP: "203.0.113.11", Source: "crowdsec_waf", Decision: "suppress", Timestamp: time.Now().UTC()},
+		},
+	}
+	srv.evidence = store
+
+	feed := srv.dashboardActivityFeed(context.Background())
+
+	if feed.Limit != dashboardActivityLimit {
+		t.Fatalf("Limit: want %d, got %d", dashboardActivityLimit, feed.Limit)
+	}
+	if len(store.searchCalls) == 0 {
+		t.Fatalf("expected bounded evidence Search call")
+	}
+	if store.searchCalls[0].Limit != dashboardActivityLimit {
+		t.Fatalf("evidence Search limit: want %d, got %d", dashboardActivityLimit, store.searchCalls[0].Limit)
+	}
+	if len(feed.Items) != 2 {
+		t.Fatalf("feed items: want 2, got %d", len(feed.Items))
+	}
+}
+
+func TestDashboardActivityFeedUnavailableWhenEvidenceMissing(t *testing.T) {
+	srv := newCFTestServer(t, nil, "tok", "zone")
+	feed := srv.dashboardActivityFeed(context.Background())
+
+	if feed.EmptyText == "" {
+		t.Fatalf("missing evidence store should render a degraded empty state")
+	}
+	if len(feed.Items) != 0 {
+		t.Fatalf("missing evidence store should not fake feed items")
 	}
 }
