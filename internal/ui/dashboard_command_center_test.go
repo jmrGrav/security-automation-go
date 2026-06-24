@@ -64,3 +64,31 @@ func stringSliceContains(items []string, want string) bool {
 	}
 	return false
 }
+
+func TestDashboardSearchRoutesIPToForensic(t *testing.T) {
+	got := dashboardSearchTarget("203.0.113.10")
+	if got != "/forensic?ip=203.0.113.10" {
+		t.Fatalf("IP search target: want forensic route, got %q", got)
+	}
+}
+
+func TestDashboardSearchRoutesEvidenceIDToEvidenceDetail(t *testing.T) {
+	got := dashboardSearchTarget("ev-abc123")
+	if got != "/evidence/ev-abc123" {
+		t.Fatalf("evidence search target: want evidence detail, got %q", got)
+	}
+}
+
+func TestDashboardSearchRoutesProviderKeywordToProviders(t *testing.T) {
+	got := dashboardSearchTarget("cloudflare")
+	if got != "/providers?q=cloudflare" {
+		t.Fatalf("provider search target: want providers route, got %q", got)
+	}
+}
+
+func TestDashboardSearchRoutesGeneralKeywordToTimeline(t *testing.T) {
+	got := dashboardSearchTarget("wordpress probe")
+	if got != "/timeline?q=wordpress+probe" {
+		t.Fatalf("general search target: want timeline route, got %q", got)
+	}
+}

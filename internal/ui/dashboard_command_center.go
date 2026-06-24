@@ -2,6 +2,8 @@ package ui
 
 import (
 	"fmt"
+	"net"
+	"net/url"
 	"strings"
 )
 
@@ -91,4 +93,27 @@ func dashboardReason(label, detail, fallback string) string {
 		detail = fallback
 	}
 	return label + ": " + detail
+}
+
+func dashboardSearchTarget(raw string) string {
+	q := strings.TrimSpace(raw)
+	if q == "" {
+		return "/timeline"
+	}
+	if ip := net.ParseIP(q); ip != nil {
+		return "/forensic?ip=" + url.QueryEscape(q)
+	}
+	lower := strings.ToLower(q)
+	if strings.HasPrefix(lower, "ev-") || strings.HasPrefix(lower, "report-ev-") {
+		return "/evidence/" + url.PathEscape(q)
+	}
+	for _, provider := range []string{"cloudflare", "crowdsec", "abuseipdb", "openai", "anthropic", "gemini", "spamhaus", "virustotal"} {
+		if strings.Contains(lower, provider) {
+			return "/providers?q=" + url.QueryEscape(q)
+		}
+	}
+	if strings.HasPrefix(lower, "as") {
+		return "/intelligence?q=" + url.QueryEscape(q)
+	}
+	return "/timeline?q=" + url.QueryEscape(q)
 }
