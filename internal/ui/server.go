@@ -384,7 +384,7 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := stableUIReadContext(r.Context())
 	defer cancel()
-	_ = DashboardConsolePage(s.dashboardConsoleView(ctx)).Render(ctx, w)
+	_ = DashboardConsolePage(s.dashboardConsoleViewForWindow(ctx, r.URL.Query().Get("window"))).Render(ctx, w)
 }
 
 func (s *Server) handleDashboardSearch(w http.ResponseWriter, r *http.Request) {
@@ -1000,6 +1000,10 @@ func (s *Server) providerHealthViews() []ProviderHealth {
 }
 
 func (s *Server) dashboardConsoleView(ctx context.Context) DashboardConsoleView {
+	return s.dashboardConsoleViewForWindow(ctx, "")
+}
+
+func (s *Server) dashboardConsoleViewForWindow(ctx context.Context, rawWindow string) DashboardConsoleView {
 	checks := health.RunAll(s.buildHealthConfig())
 	detectors := detect.RunAll(s.buildDetectConfig())
 	statuses := []StatusItem{
@@ -1045,20 +1049,33 @@ func (s *Server) dashboardConsoleView(ctx context.Context) DashboardConsoleView 
 		}
 	}
 
+	updatedAt := time.Now().UTC()
+	window := dashboardTimeWindow(rawWindow)
+	windowFrom := dashboardWindowStart(window.Active, updatedAt)
+
 	reportedTotal := 0
+	reportedWindowTotal := 0
 	if s.evidence != nil {
 		if n, err := s.evidence.Count(ctx, reporting.EvidenceSearchOptions{AbuseIPDBReported: true}); err == nil {
 			reportedTotal = n
 		}
+		if n, err := s.evidence.Count(ctx, reporting.EvidenceSearchOptions{AbuseIPDBReported: true, From: windowFrom}); err == nil {
+			reportedWindowTotal = n
+		}
 	}
 
-	updatedAt := time.Now().UTC()
 	providers := s.providerDashboardEntries()
-	healthScore := dashboardHealthScore(statuses, env, providers, s.evidence != nil)
-	activity := s.dashboardActivityFeed(ctx)
+	nonAIProviders := s.nonAIProviderEntries()
+	activity := s.dashboardActivityFeedForWindow(ctx, windowFrom)
+	freshness := []DashboardFreshnessView{
+		dashboardFreshness("Dashboard", true, updatedAt),
+		s.dashboardEvidenceFreshness(ctx),
+		dashboardFreshness("Providers", len(providers)+len(nonAIProviders) > 0, latestProviderTestAt(providers, nonAIProviders)),
+	}
+	healthScore := dashboardHealthScore(statuses, env, providers, nonAIProviders, freshness, s.evidence != nil)
 	commandCenter := DashboardCommandCenterView{
 		Health:     healthScore,
-		TimeWindow: dashboardTimeWindow(""),
+		TimeWindow: window,
 		Search: DashboardSearchView{
 			Action:      "/search",
 			Placeholder: "IP, evidence id, ASN, provider, scenario, forensic keyword",
@@ -1066,15 +1083,11 @@ func (s *Server) dashboardConsoleView(ctx context.Context) DashboardConsoleView 
 		Activity: activity,
 		KPIs: []DashboardKPIView{
 			{Label: "Health", Value: fmt.Sprintf("%d%%", healthScore.Score), Detail: "derived platform score", Href: "/health", Level: healthScore.Level},
-			{Label: "AbuseIPDB reports", Value: strconv.Itoa(reportedTotal), Detail: "all-time evidence-backed", Href: "/evidence?filter=reported", Level: "live"},
-			{Label: "Providers", Value: strconv.Itoa(len(providers)), Detail: "configured provider boundaries", Href: "/providers", Level: "healthy"},
+			{Label: "AbuseIPDB reports", Value: strconv.Itoa(reportedWindowTotal), Detail: "windowed evidence-backed", Href: "/evidence?filter=reported", Level: "live"},
+			{Label: "Providers", Value: strconv.Itoa(len(providers) + len(nonAIProviders)), Detail: "configured provider boundaries", Href: "/providers", Level: "healthy"},
 			{Label: "Recent activity", Value: strconv.Itoa(len(activity.Items)), Detail: "bounded live feed", Href: "/timeline", Level: "live"},
 		},
-		Freshness: []DashboardFreshnessView{
-			dashboardFreshness("Dashboard", true, updatedAt),
-			dashboardFreshness("Evidence", s.evidence != nil, updatedAt),
-			dashboardFreshness("Providers", len(providers) > 0, updatedAt),
-		},
+		Freshness: freshness,
 	}
 
 	return DashboardConsoleView{

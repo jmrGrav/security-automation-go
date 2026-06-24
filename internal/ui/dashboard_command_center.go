@@ -13,7 +13,7 @@ import (
 
 const dashboardActivityLimit = 8
 
-func dashboardHealthScore(statuses []StatusItem, env EnvironmentWidget, providers []AIProviderDashboardView, evidenceWired bool) DashboardHealthScoreView {
+func dashboardHealthScore(statuses []StatusItem, env EnvironmentWidget, providers []AIProviderDashboardView, nonAIProviders []NonAIProviderEntry, freshness []DashboardFreshnessView, evidenceWired bool) DashboardHealthScoreView {
 	total := 0
 	points := 0
 	var reasons []string
@@ -56,6 +56,12 @@ func dashboardHealthScore(statuses []StatusItem, env EnvironmentWidget, provider
 	for _, provider := range providers {
 		add(provider.Name, provider.Status, provider.LastError)
 	}
+	for _, provider := range nonAIProviders {
+		add(provider.Name, dashboardNonAIProviderLevel(provider), provider.LastErrorCode)
+	}
+	for _, item := range freshness {
+		add(item.Label+" freshness", item.Level, item.Detail)
+	}
 	if !evidenceWired {
 		total++
 		points += 25
@@ -97,6 +103,20 @@ func dashboardReason(label, detail, fallback string) string {
 		detail = fallback
 	}
 	return label + ": " + detail
+}
+
+func dashboardNonAIProviderLevel(provider NonAIProviderEntry) string {
+	if strings.TrimSpace(provider.Status) != "" {
+		return provider.Status
+	}
+	switch {
+	case provider.Enabled && provider.Configured:
+		return "ready"
+	case provider.Enabled || provider.Configured:
+		return "warning"
+	default:
+		return "disabled"
+	}
 }
 
 func dashboardSearchTarget(raw string) string {
@@ -142,6 +162,19 @@ func dashboardTimeWindow(raw string) DashboardTimeWindowView {
 	return DashboardTimeWindowView{Active: active, Options: options}
 }
 
+func dashboardWindowStart(active string, now time.Time) time.Time {
+	switch active {
+	case "15m":
+		return now.Add(-15 * time.Minute)
+	case "1h":
+		return now.Add(-time.Hour)
+	case "7d":
+		return now.Add(-7 * 24 * time.Hour)
+	default:
+		return now.Add(-24 * time.Hour)
+	}
+}
+
 func dashboardFreshness(label string, available bool, updatedAt time.Time) DashboardFreshnessView {
 	if !available {
 		return DashboardFreshnessView{Label: label, Level: "unavailable", Detail: "source unavailable"}
@@ -160,6 +193,10 @@ func dashboardFreshness(label string, available bool, updatedAt time.Time) Dashb
 }
 
 func (s *Server) dashboardActivityFeed(ctx context.Context) DashboardActivityFeedView {
+	return s.dashboardActivityFeedForWindow(ctx, time.Time{})
+}
+
+func (s *Server) dashboardActivityFeedForWindow(ctx context.Context, from time.Time) DashboardActivityFeedView {
 	feed := DashboardActivityFeedView{
 		Limit:      dashboardActivityLimit,
 		MoreHref:   "/timeline",
@@ -171,7 +208,7 @@ func (s *Server) dashboardActivityFeed(ctx context.Context) DashboardActivityFee
 		feed.EmptyText = "Live activity unavailable because the evidence store is not wired."
 		return feed
 	}
-	rows, err := s.evidence.Search(ctx, reporting.EvidenceSearchOptions{Limit: dashboardActivityLimit})
+	rows, err := s.evidence.Search(ctx, reporting.EvidenceSearchOptions{Limit: dashboardActivityLimit, From: from})
 	if err != nil {
 		feed.EmptyText = "Live activity unavailable: " + err.Error()
 		return feed
@@ -180,6 +217,37 @@ func (s *Server) dashboardActivityFeed(ctx context.Context) DashboardActivityFee
 		feed.Items = append(feed.Items, dashboardActivityItem(row))
 	}
 	return feed
+}
+
+func (s *Server) dashboardEvidenceFreshness(ctx context.Context) DashboardFreshnessView {
+	if s.evidence == nil {
+		return dashboardFreshness("Evidence", false, time.Time{})
+	}
+	rows, err := s.evidence.Search(ctx, reporting.EvidenceSearchOptions{Limit: 1})
+	if err != nil || len(rows) == 0 {
+		return dashboardFreshness("Evidence", true, time.Time{})
+	}
+	return dashboardFreshness("Evidence", true, rows[0].Timestamp)
+}
+
+func latestProviderTestAt(aiProviders []AIProviderDashboardView, nonAIProviders []NonAIProviderEntry) time.Time {
+	var latest time.Time
+	consider := func(raw string) {
+		t, err := time.Parse(time.RFC3339, strings.TrimSpace(raw))
+		if err != nil {
+			return
+		}
+		if t.After(latest) {
+			latest = t
+		}
+	}
+	for _, provider := range aiProviders {
+		consider(provider.LastTestAt)
+	}
+	for _, provider := range nonAIProviders {
+		consider(provider.LastTestAt)
+	}
+	return latest
 }
 
 func dashboardActivityItem(ev reporting.DecisionEvidence) DashboardActivityItemView {

@@ -54,6 +54,12 @@ func (s *stubEvidenceStore) Search(_ context.Context, opts reporting.EvidenceSea
 		if opts.Decision != "" && ev.Decision != opts.Decision {
 			continue
 		}
+		if !opts.From.IsZero() && ev.Timestamp.Before(opts.From) {
+			continue
+		}
+		if !opts.To.IsZero() && ev.Timestamp.After(opts.To) {
+			continue
+		}
 		out = append(out, ev)
 	}
 	sort.SliceStable(out, func(i, j int) bool {
@@ -81,6 +87,8 @@ func (s *stubEvidenceStore) Count(_ context.Context, opts reporting.EvidenceSear
 		AbuseIPDBReported: opts.AbuseIPDBReported,
 		Suppressed:        opts.Suppressed,
 		SuppressionReason: opts.SuppressionReason,
+		From:              opts.From,
+		To:                opts.To,
 	})
 	return len(results), err
 }

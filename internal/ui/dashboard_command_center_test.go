@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -31,7 +32,7 @@ func TestDashboardHealthScoreDerivesHealthyState(t *testing.T) {
 	score := dashboardHealthScore([]StatusItem{
 		{Label: "Runtime", Level: "healthy", Detail: "UI mode active"},
 		{Label: "Cloudflare", Level: "live", Detail: "mutations live"},
-	}, EnvironmentWidget{Healthy: 2, Total: 2, Green: 2}, nil, true)
+	}, EnvironmentWidget{Healthy: 2, Total: 2, Green: 2}, nil, nil, nil, true)
 
 	if score.Score != 100 {
 		t.Fatalf("Score: want 100, got %d", score.Score)
@@ -49,7 +50,7 @@ func TestDashboardHealthScoreSurfacesDegradedReasons(t *testing.T) {
 		{Label: "Runtime", Level: "healthy", Detail: "UI mode active"},
 		{Label: "Cloudflare", Level: "warning", Detail: "zone missing"},
 		{Label: "HA / fencing", Level: "unavailable", Detail: "no HA subsystem configured"},
-	}, EnvironmentWidget{Healthy: 1, Total: 3, Green: 1, Yellow: 1, Red: 1}, nil, false)
+	}, EnvironmentWidget{Healthy: 1, Total: 3, Green: 1, Yellow: 1, Red: 1}, nil, nil, nil, false)
 
 	if score.Score >= 100 {
 		t.Fatalf("degraded inputs must reduce score, got %d", score.Score)
@@ -120,11 +121,78 @@ func TestDashboardTimeWindowAcceptsAllowedValuesOnly(t *testing.T) {
 	}
 }
 
+func TestDashboardTimeWindowFiltersEvidenceMetrics(t *testing.T) {
+	srv, _, _ := newTestServer(t, nil)
+	now := time.Now().UTC()
+	srv.evidence = &stubEvidenceStore{
+		items: []reporting.DecisionEvidence{
+			{EvidenceID: "recent", Source: "cloudflare_waf", AbuseIPDBReported: true, Timestamp: now.Add(-30 * time.Minute)},
+			{EvidenceID: "old", Source: "cloudflare_waf", AbuseIPDBReported: true, Timestamp: now.Add(-48 * time.Hour)},
+		},
+	}
+	cookie := loginCookie(t, srv, "test-password-123!@#")
+	req := httptest.NewRequest(http.MethodGet, "/?window=1h", nil)
+	req.AddCookie(cookie)
+	rr := httptest.NewRecorder()
+
+	srv.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	body := rr.Body.String()
+	if !strings.Contains(body, `aria-current="true">1h`) {
+		t.Fatalf("dashboard should mark 1h time window active: %s", body)
+	}
+	if !strings.Contains(body, `<strong>1</strong><small>windowed evidence-backed</small>`) {
+		t.Fatalf("dashboard should scope evidence-backed metrics to the selected window: %s", body)
+	}
+}
+
+func TestDashboardProvidersKPIIncludesUnifiedProviders(t *testing.T) {
+	srv, _, _ := newTestServer(t, nil)
+
+	view := srv.dashboardConsoleView(context.Background())
+
+	for _, kpi := range view.CommandCenter.KPIs {
+		if kpi.Label != "Providers" {
+			continue
+		}
+		if kpi.Value != "9" {
+			t.Fatalf("Providers KPI must include AI and non-AI providers, got %#v", kpi)
+		}
+		return
+	}
+	t.Fatal("Providers KPI not found")
+}
+
 func TestDashboardFreshnessMarksUnavailable(t *testing.T) {
 	got := dashboardFreshness("Evidence", false, time.Time{})
 	if got.Level != "unavailable" || got.Detail == "" {
 		t.Fatalf("expected unavailable freshness with detail, got %#v", got)
 	}
+}
+
+func TestDashboardFreshnessUsesLatestEvidenceTimestamp(t *testing.T) {
+	srv, _, _ := newTestServer(t, nil)
+	srv.evidence = &stubEvidenceStore{
+		items: []reporting.DecisionEvidence{
+			{EvidenceID: "old", Source: "cloudflare_waf", Timestamp: time.Now().Add(-10 * time.Minute).UTC()},
+		},
+	}
+
+	view := srv.dashboardConsoleView(context.Background())
+
+	for _, item := range view.CommandCenter.Freshness {
+		if item.Label != "Evidence" {
+			continue
+		}
+		if item.Level != "warning" || !strings.Contains(item.Detail, "stale") {
+			t.Fatalf("Evidence freshness must reflect latest evidence timestamp, got %#v", item)
+		}
+		return
+	}
+	t.Fatal("Evidence freshness row not found")
 }
 
 func TestDashboardActivityFeedUsesBoundedEvidenceRead(t *testing.T) {
