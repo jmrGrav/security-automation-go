@@ -1074,6 +1074,7 @@ func consoleNav(active string) []navItem {
 		{Label: "Security Intelligence", Href: "/intelligence"},
 		{Label: "Timeline", Href: "/timeline", KeyShortcut: "g t"},
 		{Label: "Audit Trail", Href: "/audit"},
+		{Label: "Notes", Href: "/notes"},
 		{Label: "Trusted Networks", Href: "/trusted-networks"},
 		{Label: "Cloudflare Diff", Href: "/cloudflare/diff"},
 		{Label: "About/System", Href: "/about"},

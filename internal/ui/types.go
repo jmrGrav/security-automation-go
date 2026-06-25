@@ -288,6 +288,9 @@ type ForensicView struct {
 	HasEnrichment   bool
 	Error           string
 	EnrichmentError string
+	// NoteFormHTML is the rendered HTML for the operator note form.
+	// Empty when noteStore is nil or the IP is not yet known.
+	NoteFormHTML string
 }
 
 type TrustedNetworkEntryView struct {

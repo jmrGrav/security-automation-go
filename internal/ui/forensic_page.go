@@ -183,6 +183,12 @@ func ForensicPage(view ForensicView, csrfToken string) templ.Component {
 			}
 		}
 
+		if view.NoteFormHTML != "" {
+			if _, err := io.WriteString(w, view.NoteFormHTML); err != nil {
+				return err
+			}
+		}
+
 		if _, err := fmt.Fprint(w, `</section></div>`); err != nil {
 			return err
 		}
