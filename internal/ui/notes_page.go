@@ -6,6 +6,7 @@ import (
 	"html"
 	"io"
 	"net/http"
+	"net/url"
 
 	"github.com/a-h/templ"
 	"github.com/jm/security-automation-go/internal/storage/sqlite"
@@ -89,8 +90,8 @@ func NotesPage(notes []sqlite.Note) templ.Component {
 			}
 			for _, n := range notes {
 				deleteURL := fmt.Sprintf("/notes/delete?type=%s&value=%s",
-					html.EscapeString(n.EntityType),
-					html.EscapeString(n.EntityValue),
+					url.QueryEscape(n.EntityType),
+					url.QueryEscape(n.EntityValue),
 				)
 				if _, err := fmt.Fprintf(w,
 					`<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td><form method="post" action="%s"><button type="submit" class="badge warning">Delete</button></form></td></tr>`,
