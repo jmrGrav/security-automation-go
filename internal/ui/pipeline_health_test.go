@@ -269,6 +269,51 @@ func TestPipelineHealthMatrixIncludesHTTPErrorSource(t *testing.T) {
 	}
 }
 
+func TestFormatFreshness(t *testing.T) {
+	got := formatFreshness("")
+	if got != "no events" {
+		t.Errorf("empty: got %q, want %q", got, "no events")
+	}
+	// recent event → "just now"
+	recent := time.Now().UTC().Format(time.RFC3339)
+	got2 := formatFreshness(recent)
+	if got2 != "just now" {
+		t.Errorf("recent: got %q, want %q", got2, "just now")
+	}
+	// 2 hours ago
+	twoHoursAgo := time.Now().UTC().Add(-2 * time.Hour).Format(time.RFC3339)
+	got3 := formatFreshness(twoHoursAgo)
+	if got3 != "2h ago" {
+		t.Errorf("2h ago: got %q, want %q", got3, "2h ago")
+	}
+	// 3 days ago
+	threeDaysAgo := time.Now().UTC().Add(-72 * time.Hour).Format(time.RFC3339)
+	got4 := formatFreshness(threeDaysAgo)
+	if got4 != "3d ago" {
+		t.Errorf("3d ago: got %q, want %q", got4, "3d ago")
+	}
+}
+
+func TestPipelineHealthPageRendersNewColumns(t *testing.T) {
+	view := PipelineHealthView{
+		Rows: []PipelineHealthRow{
+			{Source: "test_waf", State: "active", Classified: 1,
+				Freshness: "2h ago", LastReportAt: ""},
+		},
+		Total: PipelineHealthRow{Source: "Total"},
+	}
+	var buf strings.Builder
+	if err := PipelineHealthPage(view).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	body := buf.String()
+	for _, want := range []string{"Freshness", "Last report", "2h ago", "not exposed"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("pipeline health page missing %q", want)
+		}
+	}
+}
+
 func TestPipelineHealthMatrixNoEvidence(t *testing.T) {
 	srv, _, _ := newTestServer(t, nil)
 	// srv.evidence is nil — daemon not started

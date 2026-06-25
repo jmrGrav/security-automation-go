@@ -288,6 +288,9 @@ type ForensicView struct {
 	HasEnrichment   bool
 	Error           string
 	EnrichmentError string
+	// NoteFormHTML is the rendered HTML for the operator note form.
+	// Empty when noteStore is nil or the IP is not yet known.
+	NoteFormHTML string
 }
 
 type TrustedNetworkEntryView struct {
@@ -387,6 +390,8 @@ type PipelineHealthRow struct {
 	Source               string
 	State                string
 	LastEventAt          string
+	LastReportAt         string // max timestamp where AbuseIPDBReported=true; "" if none or not derivable
+	Freshness            string // human-readable duration since last event; "no events" if none
 	LatestEvidenceID     string
 	Classified           int
 	Reported             int

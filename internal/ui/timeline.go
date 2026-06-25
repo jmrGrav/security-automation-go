@@ -492,7 +492,7 @@ func TimelinePage(view TimelineView, csrfToken string) templ.Component {
 		Active:      "/timeline",
 		BadgeLabels: view.Badges,
 		Body: templ.ComponentFunc(func(ctx context.Context, w io.Writer) error {
-			if _, err := fmt.Fprintf(w, `<div class="stack" data-live-shell="timeline" data-live-refresh-url="%s" data-live-refresh-interval="10000"><div class="panel collapsible-panel" data-collapsible-panel="true" data-collapsible-key="timeline-read-model" data-collapsed="false"><div class="collapsible-head"><div><h2>Read model</h2><p class="muted">Server-rendered projection over audit, evidence, and runtime lineage.</p></div><button type="button" class="badge" data-collapsible-toggle="true" aria-expanded="true">Collapse</button></div><div class="collapsible-body"><p class="muted">This page is read-only. Filters update the projection only; JSON and CSV exports are derived from the same server-side event stream.</p></div></div>`, html.EscapeString(view.RefreshURL)); err != nil {
+			if _, err := fmt.Fprintf(w, `<div class="stack" data-live-shell="timeline" data-live-refresh-url="%s" data-live-refresh-interval="10000"><div class="panel collapsible-panel" data-collapsible-panel="true" data-collapsible-key="timeline-read-model" data-collapsed="false"><div class="collapsible-head"><div><h2>Read model</h2><p class="muted">Server-rendered projection over audit, evidence, and runtime lineage.</p></div><button type="button" class="badge" data-collapsible-toggle="true" aria-expanded="true">Collapse</button></div><div class="collapsible-body"><p class="muted">This page is read-only. Filters update the projection only; JSON and CSV exports are derived from the same server-side event stream.</p><p class="muted"><a href="/timeline/correlated" class="badge">Correlated view</a> — events grouped by IP across all sources.</p></div></div>`, html.EscapeString(view.RefreshURL)); err != nil {
 				return err
 			}
 			if _, err := fmt.Fprint(w, `<div class="panel collapsible-panel" data-collapsible-panel="true" data-collapsible-key="timeline-filters" data-collapsed="false"><div class="collapsible-head"><div><h2>Filters</h2><p class="muted">Server-side filtering; no browser-side business logic.</p></div><button type="button" class="badge" data-collapsible-toggle="true" aria-expanded="true">Collapse</button></div><div class="collapsible-body"><form method="get" action="/timeline" class="stack" data-live-search-form="true">`); err != nil {
@@ -621,7 +621,8 @@ func timelineTargetCell(target string) string {
 			html.EscapeString(addr.String()),
 			html.EscapeString(addr.String()),
 		)
-		return compactLinkCopyHTML("/forensic?ip="+url.QueryEscape(addr.String()), addr.String(), "Explain this IP", "Forensic Lookup", "IP copied", 14) + watchBtn
+		incidentLink := fmt.Sprintf(` <a href="/incident?ip=%s" class="badge" title="Focus Incident">⊕</a>`, url.QueryEscape(addr.String()))
+		return compactLinkCopyHTML("/forensic?ip="+url.QueryEscape(addr.String()), addr.String(), "Explain this IP", "Forensic Lookup", "IP copied", 14) + watchBtn + incidentLink
 	}
 	return compactCopyHTML(v, 18, "Target copied")
 }

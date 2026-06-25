@@ -35,6 +35,7 @@ import (
 	"github.com/jm/security-automation-go/internal/security/audit"
 	"github.com/jm/security-automation-go/internal/security/enrichment"
 	"github.com/jm/security-automation-go/internal/services/reporting"
+	"github.com/jm/security-automation-go/internal/storage/sqlite"
 	"github.com/jm/security-automation-go/internal/trustednetworks"
 )
 
@@ -88,6 +89,14 @@ type BanClearResult struct {
 	Errors    []string
 }
 
+// NoteStorer persists operator annotations locally. Never influences provider decisions.
+type NoteStorer interface {
+	Upsert(ctx context.Context, entityType, entityValue, content string) error
+	Get(ctx context.Context, entityType, entityValue string) (sqlite.Note, bool, error)
+	Delete(ctx context.Context, entityType, entityValue string) error
+	List(ctx context.Context) ([]sqlite.Note, error)
+}
+
 type Options struct {
 	SecretProvider       SecretProvider
 	CredentialStore      CredentialStorer
@@ -113,6 +122,7 @@ type Options struct {
 	AIConfig            ai.Config
 	ProviderFactories   map[string]ProviderFactory
 	SetupStore          SetupStorer
+	NoteStore           NoteStorer
 	ValidateCloudflare  func(context.Context, string, string) error
 	ValidateAbuseIPDB   func(context.Context, string) error
 	ValidateBetterStack func(context.Context, string) error
@@ -142,6 +152,7 @@ type Server struct {
 	aiExplainBuilder      func(ai.Config) aigateway.Gateway
 	providerFactories     map[string]ProviderFactory
 	setupStore            SetupStorer
+	noteStore             NoteStorer
 	evidence              reporting.EvidenceStore
 	banLifecycleStore     banlifecycle.Store
 	banDebanner           BanDebanner
@@ -216,6 +227,7 @@ func NewServer(cfg *config.Config, opts Options) (*Server, error) {
 		aiExplainBuilder:      opts.AIExplainBuilder,
 		providerFactories:     opts.ProviderFactories,
 		setupStore:            opts.SetupStore,
+		noteStore:             opts.NoteStore,
 		validateCloudflare:    opts.ValidateCloudflare,
 		validateAbuseIPDB:     opts.ValidateAbuseIPDB,
 		validateBetterStack:   opts.ValidateBetterStack,
@@ -298,7 +310,12 @@ func (s *Server) routes() {
 	s.mux.Handle("GET /about", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleAboutPage)))))
 	s.mux.Handle("GET /system", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleAboutPage)))))
 	s.mux.Handle("GET /audit", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleAuditTrailPage)))))
+	s.mux.Handle("GET /notes", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleNotesPage)))))
+	s.mux.Handle("POST /notes", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleNoteUpsert)))))
+	s.mux.Handle("POST /notes/delete", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleNoteDelete)))))
 	s.mux.Handle("GET /timeline", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleTimelinePage)))))
+	s.mux.Handle("GET /timeline/correlated", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleCorrelatedTimelinePage)))))
+	s.mux.Handle("GET /incident", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleIncidentPage)))))
 	s.mux.Handle("GET /intelligence", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleIntelligencePage)))))
 	s.mux.Handle("POST /intelligence", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleIntelligenceLookup)))))
 	s.mux.Handle("GET /trusted-networks", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleTrustedNetworksPage)))))
@@ -703,6 +720,10 @@ func (s *Server) handleForensicPage(w http.ResponseWriter, r *http.Request) {
 				view.LocalEvidence = local
 			}
 		}
+		if s.noteStore != nil {
+			existing, _, _ := s.noteStore.Get(ctx, "ip", ipStr)
+			view.NoteFormHTML = NoteFormHTML("ip", ipStr, existing.Content)
+		}
 		view.HasData = view.HasEnrichment || len(view.LocalEvidence) > 0
 		renderForensicPage(ctx, w, view, s.csrfTokenFromRequest(r))
 		return
@@ -755,6 +776,11 @@ func (s *Server) handleForensicLookup(w http.ResponseWriter, r *http.Request) {
 		if err == nil {
 			view.LocalEvidence = local
 		}
+	}
+
+	if s.noteStore != nil {
+		existing, _, _ := s.noteStore.Get(ctx, "ip", ipStr)
+		view.NoteFormHTML = NoteFormHTML("ip", ipStr, existing.Content)
 	}
 
 	view.HasData = view.HasEnrichment || len(view.LocalEvidence) > 0

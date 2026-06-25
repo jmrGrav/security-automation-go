@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"time"
 
 	crowdmodels "github.com/jm/security-automation-go/internal/crowdsec/models"
@@ -70,8 +69,4 @@ func quotaTransitionAction(transition quota.Transition) (string, bool) {
 	default:
 		return "", false
 	}
-}
-
-func quotaTransitionSummary(obs quota.Observation, transition quota.Transition) string {
-	return fmt.Sprintf("%s:%s->%s", obs.Provider, transition.Previous, transition.Current)
 }
