@@ -25,23 +25,9 @@ type NoteStore struct {
 	db *DB
 }
 
-// NewNoteStore returns a NoteStore backed by db and ensures the schema exists.
+// NewNoteStore returns a NoteStore backed by db.
+// Schema is created by migration 22 in runMigrations().
 func NewNoteStore(db *DB) (*NoteStore, error) {
-	const op = "storage.sqlite.NoteStore.init"
-	_, err := db.Conn().Exec(`
-		CREATE TABLE IF NOT EXISTS operator_notes (
-			id           INTEGER PRIMARY KEY AUTOINCREMENT,
-			entity_type  TEXT NOT NULL,
-			entity_value TEXT NOT NULL,
-			content      TEXT NOT NULL DEFAULT '',
-			created_at   DATETIME NOT NULL,
-			updated_at   DATETIME NOT NULL,
-			UNIQUE(entity_type, entity_value)
-		)
-	`)
-	if err != nil {
-		return nil, apperr.Wrap(op, err)
-	}
 	return &NoteStore{db: db}, nil
 }
 

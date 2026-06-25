@@ -84,7 +84,7 @@ func TestSQLiteMigrations_UpgradeFromLegacyRuntimeDB_CreatesAllCurrentTables(t *
 		t.Fatalf("schema not current after re-open: %v", err)
 	}
 
-	for _, table := range []string{"cf_ban_lifecycle", "trusted_networks", "crowdsec_allowlist_status"} {
+	for _, table := range []string{"cf_ban_lifecycle", "trusted_networks", "crowdsec_allowlist_status", "operator_notes"} {
 		var exists int
 		if err := upgraded.Conn().QueryRowContext(context.Background(),
 			"SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?", table).Scan(&exists); err != nil {
@@ -108,8 +108,8 @@ func TestSQLiteMigrations_UpgradeFromLegacyRuntimeDB_CreatesAllCurrentTables(t *
 		appliedVersions = append(appliedVersions, v)
 	}
 	rows.Close()
-	if len(appliedVersions) == 0 || appliedVersions[len(appliedVersions)-1] < 20 {
-		t.Fatalf("expected migrations to be replayed up to at least version 20, got versions: %v", appliedVersions)
+	if len(appliedVersions) == 0 || appliedVersions[len(appliedVersions)-1] < 22 {
+		t.Fatalf("expected migrations to be replayed up to at least version 22, got versions: %v", appliedVersions)
 	}
 
 	// Pre-existing data must survive the upgrade untouched.

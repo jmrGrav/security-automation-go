@@ -47,6 +47,7 @@ var knownTables = map[string]struct{}{
 	"cf_ban_lifecycle":             {},
 	"trusted_networks":             {},
 	"crowdsec_allowlist_status":    {},
+	"operator_notes":               {},
 }
 
 // DB manages a scoped SQLite connection with migrations.
@@ -490,6 +491,21 @@ func (s *DB) runMigrations() error {
 					ALTER TABLE cf_ban_lifecycle ADD COLUMN last_cleanup_attempt_at TIMESTAMP;
 				`,
 		},
+		{
+			Version:     22,
+			Description: "Operator notes — UI annotations keyed by entity type and value",
+			SQL: `
+					CREATE TABLE IF NOT EXISTS operator_notes (
+						id           INTEGER PRIMARY KEY AUTOINCREMENT,
+						entity_type  TEXT NOT NULL,
+						entity_value TEXT NOT NULL,
+						content      TEXT NOT NULL DEFAULT '',
+						created_at   DATETIME NOT NULL,
+						updated_at   DATETIME NOT NULL,
+						UNIQUE(entity_type, entity_value)
+					);
+				`,
+		},
 	}
 
 	return m.Migrate(context.Background(), migrations)
@@ -703,6 +719,7 @@ func (s *DB) VerifySchema(ctx context.Context) error {
 		"ui_settings",
 		"cf_ban_lifecycle",
 		"trusted_networks",
+		"operator_notes",
 	}
 	for _, table := range requiredTables {
 		var exists int
