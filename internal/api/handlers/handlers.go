@@ -82,8 +82,8 @@ func (h *BaseHandler) TriggerReconcile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// TODO: Signal the daemon to trigger a run immediately
-	h.JSONResponse(w, http.StatusAccepted, map[string]string{"message": "reconciliation run triggered", "reason": payload.Reason})
+	// Daemon signal channel not yet wired — planned for v1.8.x.
+	h.ErrorResponse(w, http.StatusNotImplemented, "NOT_IMPLEMENTED", "on-demand reconciliation trigger is not yet available in this build")
 }
 
 func (h *BaseHandler) GetAuditEvents(w http.ResponseWriter, r *http.Request) {
@@ -108,6 +108,6 @@ func (h *BaseHandler) ReleaseQuarantine(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// TODO: Implement release logic
-	h.JSONResponse(w, http.StatusAccepted, map[string]string{"message": "quarantine release triggered"})
+	// Quarantine release not yet implemented — planned for v1.8.x.
+	h.ErrorResponse(w, http.StatusNotImplemented, "NOT_IMPLEMENTED", "quarantine release is not yet available in this build")
 }

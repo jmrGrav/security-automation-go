@@ -9,7 +9,7 @@ Go control-plane that synchronises [CrowdSec](https://crowdsec.net/) decisions t
 [Cloudflare](https://www.cloudflare.com/), reports abusive IPs to
 [AbuseIPDB](https://www.abuseipdb.com/), and drives WAF follow-up actions.
 
-**Status: v1.7.4** — Reputation-gated Cloudflare ban lifecycle (auto-ban/auto-deban via AbuseIPDB + VirusTotal corroboration, never on confidence alone), hub-and-spoke Trusted Networks registry, local WAF/HTTP-error-burst evidence-only signals, and hardened setup-wizard test coverage. Production-ready.
+**Status: v1.7.5** — Complete UI v2 operator console (PR1–PR6): performance baseline, SOC command center, threat visualization, visual identity, operator productivity (watchlist, keyboard nav, recently viewed), and advanced investigation (correlated timeline, operator notes, focus incident). Reputation-gated Cloudflare ban lifecycle, hub-and-spoke Trusted Networks registry. Production-ready.
 
 ## Architecture
 
@@ -32,7 +32,7 @@ go vet ./...
 gofmt -l .
 go test ./...
 go test -race ./...
-make package         # dist/security-automation-go_1.7.4_amd64.deb
+make package         # dist/security-automation-go_1.7.5_amd64.deb
 ```
 
 ## Quick install
@@ -40,10 +40,10 @@ make package         # dist/security-automation-go_1.7.4_amd64.deb
 Download the latest `.deb` from [Releases](https://github.com/jmrGrav/security-automation-go/releases):
 
 ```bash
-curl -LO https://github.com/jmrGrav/security-automation-go/releases/download/v1.7.4/security-automation-go_1.7.4_amd64.deb
-curl -LO https://github.com/jmrGrav/security-automation-go/releases/download/v1.7.4/SHA256SUMS
+curl -LO https://github.com/jmrGrav/security-automation-go/releases/download/v1.7.5/security-automation-go_1.7.5_amd64.deb
+curl -LO https://github.com/jmrGrav/security-automation-go/releases/download/v1.7.5/SHA256SUMS
 sha256sum -c SHA256SUMS
-sudo dpkg -i security-automation-go_1.7.4_amd64.deb
+sudo dpkg -i security-automation-go_1.7.5_amd64.deb
 sudo systemctl start cf-sync
 ```
 

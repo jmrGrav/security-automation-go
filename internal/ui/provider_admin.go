@@ -115,7 +115,11 @@ func providerSpec(name AIProviderName) (display string, prefix string) {
 	case AIProviderGemini:
 		return "Gemini", "AI_PROVIDER_GEMINI"
 	default:
-		return strings.Title(string(name)), ""
+		s := string(name)
+		if len(s) == 0 {
+			return s, ""
+		}
+		return strings.ToUpper(s[:1]) + s[1:], ""
 	}
 }
 
