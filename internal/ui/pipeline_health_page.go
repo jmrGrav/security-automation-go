@@ -28,6 +28,35 @@ func (s *Server) handlePipelineHealthPage(w http.ResponseWriter, r *http.Request
 	_ = PipelineHealthPage(view).Render(ctx, w)
 }
 
+func formatFreshness(lastEventAt string) string {
+	if lastEventAt == "" {
+		return "no events"
+	}
+	formats := []string{time.RFC3339, "2006-01-02 15:04:05", "2006-01-02T15:04:05Z"}
+	var t time.Time
+	var err error
+	for _, f := range formats {
+		t, err = time.Parse(f, lastEventAt)
+		if err == nil {
+			break
+		}
+	}
+	if err != nil {
+		return lastEventAt // fallback: show the raw string
+	}
+	d := time.Since(t)
+	switch {
+	case d < time.Minute:
+		return "just now"
+	case d < time.Hour:
+		return fmt.Sprintf("%dm ago", int(d.Minutes()))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dh ago", int(d.Hours()))
+	default:
+		return fmt.Sprintf("%dd ago", int(d.Hours()/24))
+	}
+}
+
 func (s *Server) buildPipelineHealthView(ctx context.Context) PipelineHealthView {
 	ctx, cancel := stableUIReadContext(ctx)
 	defer cancel()
@@ -58,6 +87,13 @@ func (s *Server) buildPipelineHealthView(ctx context.Context) PipelineHealthView
 				total.LastEventAt = row.LastEventAt
 				total.LatestEvidenceID = row.LatestEvidenceID
 			}
+		}
+		row.Freshness = formatFreshness(row.LastEventAt)
+		// LastReportAt: find the most recent evidence with AbuseIPDBReported=true for this source
+		if reported, err := s.evidence.Search(ctx, reporting.EvidenceSearchOptions{
+			Source: src.slug, AbuseIPDBReported: true, Limit: 1,
+		}); err == nil && len(reported) > 0 {
+			row.LastReportAt = formatEventTimestamp(reported[0].Timestamp)
 		}
 		if det, ok := detectors[detectorNameForSourceSlug(src.slug)]; ok {
 			row.State = pipelineSourceState(det, row.Classified)
@@ -167,7 +203,7 @@ func PipelineHealthPage(view PipelineHealthView) templ.Component {
 			if view.Error != "" {
 				return writeEmptyState(w, view.Error)
 			}
-			if _, err := fmt.Fprint(w, `<div class="panel"><div class="table-wrap"><table><colgroup><col style="width:13rem"><col style="width:9rem"><col style="width:6rem"><col style="width:6rem"><col style="width:6rem"><col style="width:6rem"><col style="width:12rem"><col></colgroup><thead><tr><th>Source</th><th>State</th><th>Classified</th><th>Reported</th><th>Suppressed</th><th>Pending</th><th>Last event</th><th>Latest evidence</th></tr></thead><tbody>`); err != nil {
+			if _, err := fmt.Fprint(w, `<div class="panel"><div class="table-wrap"><table><colgroup><col style="width:13rem"><col style="width:9rem"><col style="width:6rem"><col style="width:6rem"><col style="width:6rem"><col style="width:6rem"><col style="width:7rem"><col style="width:10rem"><col style="width:12rem"><col></colgroup><thead><tr><th>Source</th><th>State</th><th>Classified</th><th>Reported</th><th>Suppressed</th><th>Pending</th><th>Freshness</th><th>Last report</th><th>Last event</th><th>Latest evidence</th></tr></thead><tbody>`); err != nil {
 				return err
 			}
 			for _, row := range view.Rows {
@@ -181,8 +217,12 @@ func PipelineHealthPage(view PipelineHealthView) templ.Component {
 					latestEvidence = evidenceDetailLinkHTML(row.LatestEvidenceID)
 				}
 				suppressedCell := buildSuppressedCell(row.Suppressed, row.SuppressionBreakdown)
+				lastReport := `<span class="muted">not exposed</span>`
+				if row.LastReportAt != "" {
+					lastReport = html.EscapeString(row.LastReportAt)
+				}
 				if _, err := fmt.Fprintf(w,
-					`<tr><td>%s</td><td><span class="badge %s">%s</span></td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>`,
+					`<tr><td>%s</td><td><span class="badge %s">%s</span></td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>`,
 					html.EscapeString(row.Source),
 					pipelineStateBadgeClass(row.State),
 					html.EscapeString(row.State),
@@ -190,6 +230,8 @@ func PipelineHealthPage(view PipelineHealthView) templ.Component {
 					strconv.Itoa(row.Reported),
 					suppressedCell,
 					strconv.Itoa(row.Pending),
+					html.EscapeString(row.Freshness),
+					lastReport,
 					lastEventCell,
 					latestEvidence,
 				); err != nil {
@@ -199,7 +241,7 @@ func PipelineHealthPage(view PipelineHealthView) templ.Component {
 			t := view.Total
 			totalSuppressedCell := buildSuppressedCell(t.Suppressed, t.SuppressionBreakdown)
 			if _, err := fmt.Fprintf(w,
-				`</tbody><tfoot><tr><th>%s</th><th><span class="badge %s">%s</span></th><th>%s</th><th>%s</th><th>%s</th><th>%s</th><th>%s</th><th>%s</th></tr></tfoot></table></div></div>`,
+				`</tbody><tfoot><tr><th>%s</th><th><span class="badge %s">%s</span></th><th>%s</th><th>%s</th><th>%s</th><th>%s</th><th>—</th><th>—</th><th>%s</th><th>%s</th></tr></tfoot></table></div></div>`,
 				html.EscapeString(t.Source),
 				pipelineStateBadgeClass(t.State),
 				html.EscapeString(t.State),

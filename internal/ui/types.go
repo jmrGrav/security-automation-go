@@ -387,6 +387,8 @@ type PipelineHealthRow struct {
 	Source               string
 	State                string
 	LastEventAt          string
+	LastReportAt         string // max timestamp where AbuseIPDBReported=true; "" if none or not derivable
+	Freshness            string // human-readable duration since last event; "no events" if none
 	LatestEvidenceID     string
 	Classified           int
 	Reported             int
