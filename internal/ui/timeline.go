@@ -621,7 +621,8 @@ func timelineTargetCell(target string) string {
 			html.EscapeString(addr.String()),
 			html.EscapeString(addr.String()),
 		)
-		return compactLinkCopyHTML("/forensic?ip="+url.QueryEscape(addr.String()), addr.String(), "Explain this IP", "Forensic Lookup", "IP copied", 14) + watchBtn
+		incidentLink := fmt.Sprintf(` <a href="/incident?ip=%s" class="badge" title="Focus Incident">⊕</a>`, url.QueryEscape(addr.String()))
+		return compactLinkCopyHTML("/forensic?ip="+url.QueryEscape(addr.String()), addr.String(), "Explain this IP", "Forensic Lookup", "IP copied", 14) + watchBtn + incidentLink
 	}
 	return compactCopyHTML(v, 18, "Target copied")
 }

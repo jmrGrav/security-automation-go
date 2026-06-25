@@ -315,6 +315,7 @@ func (s *Server) routes() {
 	s.mux.Handle("POST /notes/delete", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleNoteDelete)))))
 	s.mux.Handle("GET /timeline", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleTimelinePage)))))
 	s.mux.Handle("GET /timeline/correlated", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleCorrelatedTimelinePage)))))
+	s.mux.Handle("GET /incident", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleIncidentPage)))))
 	s.mux.Handle("GET /intelligence", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleIntelligencePage)))))
 	s.mux.Handle("POST /intelligence", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleIntelligenceLookup)))))
 	s.mux.Handle("GET /trusted-networks", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleTrustedNetworksPage)))))

@@ -83,7 +83,8 @@ func ForensicPage(view ForensicView, csrfToken string) templ.Component {
 				html.EscapeString(s.IP.String()),
 				html.EscapeString(s.IP.String()),
 			)
-			if _, err := fmt.Fprintf(w, `<div class="panel"><h2>%s %s%s%s</h2>`, html.EscapeString(s.IP.String()), cacheBadge, protectedBadge, watchBtn); err != nil {
+			incidentBadge := fmt.Sprintf(`<a href="/incident?ip=%s" class="badge" title="Focus Incident">Focus Incident</a>`, html.EscapeString(s.IP.String()))
+			if _, err := fmt.Fprintf(w, `<div class="panel"><h2>%s %s%s%s%s</h2>`, html.EscapeString(s.IP.String()), cacheBadge, protectedBadge, watchBtn, incidentBadge); err != nil {
 				return err
 			}
 			if _, err := fmt.Fprintf(w, `<p class="muted">Score delta: %+d &nbsp; HardBan allowed: %s</p>`, a.Score, boolBadge(a.HardBanAllowed)); err != nil {
