@@ -14,14 +14,15 @@ import (
 	"github.com/jm/security-automation-go/internal/security/audit"
 )
 
-// CorrelatedGroup holds events for a single IP grouped from allTimelineEvents.
+// CorrelatedGroup holds aggregated metadata for a single IP from allTimelineEvents.
+// Individual events are not stored — only counts and metadata — to avoid
+// double-allocating the full event slice on every request.
 type CorrelatedGroup struct {
 	Key        string // IP address (Target field)
 	EventCount int
 	FirstSeen  time.Time
 	LastSeen   time.Time
 	Sources    []string // distinct ActorSource names
-	Events     []audit.TimelineEvent
 }
 
 // CorrelatedTimelineView is the view model for the correlated timeline page.
@@ -50,7 +51,6 @@ func groupTimelineByIP(events []audit.TimelineEvent, filterIP string) []Correlat
 			g = &CorrelatedGroup{Key: key}
 			m[key] = g
 		}
-		g.Events = append(g.Events, ev)
 		g.EventCount++
 
 		// Parse timestamp string (RFC3339Nano) for time comparisons.
