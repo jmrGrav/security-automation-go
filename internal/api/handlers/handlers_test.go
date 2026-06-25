@@ -113,14 +113,14 @@ func TestTriggerReconcile_MalformedJSON_Returns400(t *testing.T) {
 	}
 }
 
-func TestTriggerReconcile_Confirmed_Returns202(t *testing.T) {
+func TestTriggerReconcile_Confirmed_Returns501(t *testing.T) {
 	h := NewBaseHandler(nil, &fakeJournal{}, nil)
 	body := `{"confirmed":true,"reason":"manual test"}`
 	req := withScope(httptest.NewRequest(http.MethodPost, "/reconcile/run", strings.NewReader(body)), auth.ScopeRuntimeExecute)
 	rr := httptest.NewRecorder()
 	h.TriggerReconcile(rr, req)
-	if rr.Code != http.StatusAccepted {
-		t.Errorf("expected 202, got %d: %s", rr.Code, rr.Body.String())
+	if rr.Code != http.StatusNotImplemented {
+		t.Errorf("expected 501, got %d: %s", rr.Code, rr.Body.String())
 	}
 }
 
@@ -159,13 +159,13 @@ func TestReleaseQuarantine_NoScope_Returns403(t *testing.T) {
 	}
 }
 
-func TestReleaseQuarantine_WithScope_Returns202(t *testing.T) {
+func TestReleaseQuarantine_WithScope_Returns501(t *testing.T) {
 	h := NewBaseHandler(nil, &fakeJournal{}, nil)
 	req := withScope(httptest.NewRequest(http.MethodPost, "/quarantine/release", nil), auth.ScopeQuarantineManage)
 	rr := httptest.NewRecorder()
 	h.ReleaseQuarantine(rr, req)
-	if rr.Code != http.StatusAccepted {
-		t.Errorf("expected 202, got %d", rr.Code)
+	if rr.Code != http.StatusNotImplemented {
+		t.Errorf("expected 501, got %d", rr.Code)
 	}
 }
 

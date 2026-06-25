@@ -13,7 +13,6 @@ var (
 	reAuthToken       = regexp.MustCompile(`(?i)Bearer\s+[a-zA-Z0-9._-]+`)
 	reEmail           = regexp.MustCompile(`(?i)[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}`)
 	reZoneID          = regexp.MustCompile(`(?i)\b[0-9a-f]{32}\b`)
-	reAccountID       = regexp.MustCompile(`(?i)\b[0-9a-f]{32}\b`) // Matches same as ZoneID, handled contextually or generically
 	reSensitiveHeader = regexp.MustCompile(`(?i)^(Authorization|X-Auth-Key|X-Auth-Email)$`)
 )
 

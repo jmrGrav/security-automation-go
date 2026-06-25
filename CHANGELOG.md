@@ -2,6 +2,37 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v1.7.5] — 2026-06-25
+
+### Summary
+
+UI v2 complete — six operator console PRs merged (PR1 Performance, PR2 SOC Command Center, PR3 Threat Visualization, PR4 Visual Identity, PR5 Operator Productivity, PR6 Advanced Investigation). Delivers the full investigative layer: correlated IP timeline, operator notes persisted in SQLite, and read-only Focus Incident aggregation. Includes housekeeping: dead code removal, Pipeline Health Matrix expansion (Freshness + Last Report columns), API stub honesty fix (501 instead of silent 202), and migration registry correction (operator_notes now in versioned runner as v22).
+
+### Added
+
+- **UI v2 PR5 — Operator Productivity** (`internal/ui/`) — Watchlist sidebar widget (localStorage, max 10 entries, collapsible), Recently Viewed section, keyboard navigation shortcuts (`g`+`d/t/f/e/h` for pages, `/` for search), ARIA keyboard shortcut annotations.
+- **UI v2 PR6 — Advanced Investigation** (`internal/ui/`) — three new investigative views:
+  - `/timeline/correlated?ip=` — server-side IP grouping of all timeline events; sorted by most-recent-activity-first; links to Timeline, Forensic, Focus Incident per group.
+  - `/notes` — Operator Notes backed by SQLite (`operator_notes` table in `runtime.db`); upsert semantics; CSRF-protected forms; embedded note form on forensic and incident pages; notes never influence provider decisions.
+  - `/incident?ip=` — Focus Incident read-only aggregation of timeline events, evidence, operator note, and external enrichment links (AbuseIPDB, VirusTotal). No mutation actions. Verified by `TestIncidentPage_NoMutationButtons`.
+- **Pipeline Health Matrix expansion** (`internal/ui/pipeline_health_page.go`) — two new columns: **Freshness** (human-readable duration since last event) and **Last report** (last AbuseIPDB-reported timestamp per source). Fields with no pipeline data source show "not exposed" explicitly.
+- **Playwright spec 15** (`tests/smoke/specs/15-ui-v2-pr6-advanced-investigation.spec.ts`) — smoke coverage for all three new PR6 pages.
+
+### Fixes
+
+- **API stubs now return 501** — `POST /api/v1/reconcile/run` and `POST /api/v1/quarantine/release` previously returned HTTP 202 with a success body despite doing nothing. Now return 501 Not Implemented with a clear `NOT_IMPLEMENTED` error code.
+- **operator_notes added to versioned migration runner** — `operator_notes` table is now migration v22 in `runMigrations()`, listed in `VerifySchema()` `requiredTables`, and covered by the upgrade simulation test. Removed the ad-hoc `CREATE TABLE IF NOT EXISTS` from `NewNoteStore()`.
+- **CSRF protection on note forms** — `handleNoteUpsert` and `handleNoteDelete` now call `validCSRF(r)` before processing. All note forms embed `csrf_token` hidden fields.
+- **Dead code removal** (`internal/fixtures/sanitize.go`) — removed `reAccountID`, which was identical to `reZoneID` and never referenced.
+- **Deprecated `strings.Title` replaced** (`internal/ui/provider_admin.go`) — replaced with `strings.ToUpper(s[:1]) + s[1:]` to eliminate the Go 1.18 deprecation warning.
+- **`CorrelatedGroup.Events` removed** — the `Events []audit.TimelineEvent` field was written but never read by the template. Removed to eliminate ~50% of per-request heap allocation on the correlated timeline page.
+- **Dead code** (`cmd/cf-sync/quota_observability.go`) — removed unused `quotaTransitionSummary` helper and its now-orphaned `"fmt"` import.
+
+### Upgrade
+
+- **Migration v22** runs automatically on first start after upgrade. No manual steps required. Adds the `operator_notes` table (empty by default).
+- **Service restart recommended** if upgrading from v1.7.4 to pick up the new UI routes (`/notes`, `/timeline/correlated`, `/incident`).
+
 ## [v1.7.4] — 2026-06-22
 
 ### Summary
