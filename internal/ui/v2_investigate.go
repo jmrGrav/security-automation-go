@@ -73,7 +73,7 @@ func (s *Server) handleV2Investigate(w http.ResponseWriter, r *http.Request) {
 
 	s.audit.Record("forensic_lookup", map[string]string{"ip": q, "source": "ui_v2"})
 
-	_, _ = fmt.Fprint(w, v2Page("Investigate · "+html.EscapeString(q), "/v2/investigate",
+	_, _ = fmt.Fprint(w, v2Page("Investigate · "+ip.String(), "/v2/investigate",
 		renderV2InvestigateIP(view, ipEvidence, noteContent, s.csrfTokenFromRequest(r))))
 }
 

@@ -426,7 +426,8 @@ a{color:inherit}
       <span style="font:500 11px 'JetBrains Mono',monospace;color:#6b7184">read-only · ` + fmt.Sprintf("%d", threat.TotalEvents) + ` events</span>
     </div>
     <div style="padding:8px">
-      <canvas data-attack-map data-origins="` + html.EscapeString(string(originsJSON)) + `" style="width:100%;height:220px;display:block"></canvas>
+      <script type="application/json" id="v2-attack-origins">` + string(originsJSON) + `</script>
+      <canvas data-attack-map style="width:100%;height:220px;display:block"></canvas>
     </div>
     <div style="display:flex;gap:10px;padding:6px 14px 12px;flex-wrap:wrap">
       ` + mapLegend.String() + `
