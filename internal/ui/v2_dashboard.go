@@ -305,11 +305,10 @@ func renderV2Dashboard(view DashboardConsoleView) string {
 	nav := []struct{ href, label, icon string }{
 		{"/v2/", "Dashboard", "◈"},
 		{"/v2/investigate", "Investigate", "⊕"},
-		{"/timeline", "Timeline", "⟳"},
-		{"/pipeline", "Pipeline", "◐"},
+		{"/v2/health", "Health", "♥"},
+		{"/v2/timeline", "Timeline", "⟳"},
 		{"/providers", "Providers", "⬡"},
 		{"/notes", "Notes", "✎"},
-		{"/health", "Health", "♥"},
 		{"/", "Classic UI →", "↗"},
 	}
 	var navHTML strings.Builder
