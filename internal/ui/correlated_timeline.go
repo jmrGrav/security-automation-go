@@ -14,6 +14,8 @@ import (
 	"github.com/jm/security-automation-go/internal/security/audit"
 )
 
+const correlatedTimelineRenderLimit = 100
+
 // CorrelatedGroup holds aggregated metadata for a single IP from allTimelineEvents.
 // Individual events are not stored — only counts and metadata — to avoid
 // double-allocating the full event slice on every request.
@@ -131,8 +133,18 @@ func CorrelatedTimelinePage(view CorrelatedTimelineView) templ.Component {
 			); err != nil {
 				return err
 			}
+			groups := view.Groups
+			if len(groups) > correlatedTimelineRenderLimit {
+				groups = groups[:correlatedTimelineRenderLimit]
+				if _, err := fmt.Fprintf(w,
+					`<p class="muted">Showing first %d groups by last activity. Use the IP filter to narrow the investigation.</p>`,
+					correlatedTimelineRenderLimit,
+				); err != nil {
+					return err
+				}
+			}
 			// Group cards
-			for _, g := range view.Groups {
+			for _, g := range groups {
 				sources := html.EscapeString(strings.Join(g.Sources, ", "))
 				firstSeen := ""
 				if !g.FirstSeen.IsZero() {

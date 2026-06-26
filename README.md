@@ -9,7 +9,7 @@ Go control-plane that synchronises [CrowdSec](https://crowdsec.net/) decisions t
 [Cloudflare](https://www.cloudflare.com/), reports abusive IPs to
 [AbuseIPDB](https://www.abuseipdb.com/), and drives WAF follow-up actions.
 
-**Status: v1.7.5** — Complete UI v2 operator console (PR1–PR6): performance baseline, SOC command center, threat visualization, visual identity, operator productivity (watchlist, keyboard nav, recently viewed), and advanced investigation (correlated timeline, operator notes, focus incident). Reputation-gated Cloudflare ban lifecycle, hub-and-spoke Trusted Networks registry. Production-ready.
+**Status: v1.7.5** — Complete UI v2 operator console (PR1–PR6 + SOC sprint): performance baseline, SOC command center, threat visualization, visual identity, operator productivity (watchlist, keyboard nav, recently viewed), and advanced investigation (correlated timeline, operator notes, focus incident). Full v2 dark shell at `/v2/` with animated login loader, sidebar workflow navigation (Observe / Investigate / Infrastructure / Operations), Timeline Live Tail, Providers integrations page, Focus Incident, Notes, Audit trail. Ctrl+K command palette with IP/ASN/provider routing. Reputation-gated Cloudflare ban lifecycle, hub-and-spoke Trusted Networks registry. Production-ready.
 
 ## Architecture
 

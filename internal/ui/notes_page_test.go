@@ -34,3 +34,42 @@ func TestNotesPageRendersNotes(t *testing.T) {
 		}
 	}
 }
+
+func TestV2NotesPageEmptyStateIsOperational(t *testing.T) {
+	out := renderV2NotesPage(nil)
+	for _, want := range []string{
+		"Operator Notes",
+		"Pinned notes",
+		"Recent notes",
+		"Search",
+		"Filters",
+		"Quick create",
+		"Entities recently annotated",
+		"No notes",
+		"Open Focus Incident",
+		"Browse Timeline",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("v2 notes empty state missing %q: %s", want, out)
+		}
+	}
+}
+
+func TestV2NotesPageRendersNotesAsInvestigationLinks(t *testing.T) {
+	notes := []sqlite.Note{
+		{EntityType: "ip", EntityValue: "1.2.3.4", Content: "scanner", UpdatedAt: time.Date(2026, 6, 25, 10, 0, 0, 0, time.UTC)},
+	}
+
+	out := renderV2NotesPage(notes)
+	for _, want := range []string{
+		"scanner",
+		"1.2.3.4",
+		"/v2/incident?ip=1.2.3.4",
+		"/v2/timeline?q=1.2.3.4",
+		"/v2/investigate?q=1.2.3.4",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("v2 notes page missing %q: %s", want, out)
+		}
+	}
+}

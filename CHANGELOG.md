@@ -2,36 +2,43 @@
 
 All notable changes to this project will be documented in this file.
 
-## [v1.7.5] — 2026-06-25
+## [v1.7.5] — 2026-06-26
 
 ### Summary
 
-UI v2 complete — six operator console PRs merged (PR1 Performance, PR2 SOC Command Center, PR3 Threat Visualization, PR4 Visual Identity, PR5 Operator Productivity, PR6 Advanced Investigation). Delivers the full investigative layer: correlated IP timeline, operator notes persisted in SQLite, and read-only Focus Incident aggregation. Includes housekeeping: dead code removal, Pipeline Health Matrix expansion (Freshness + Last Report columns), API stub honesty fix (501 instead of silent 202), and migration registry correction (operator_notes now in versioned runner as v22).
+UI v2 SOC operator console complete. Adds the full v2 dark shell with sidebar workflow navigation (Observe / Investigate / Infrastructure / Operations), an animated login loader with ~2s asset prefetch, a working sign-out (`POST /v2/logout`), and six new v2 pages: Timeline Live Tail, Providers (fused integrations + boundary + trusted networks), Focus Incident, Notes, Audit trail, and System Health. Ctrl+K palette enriched with IP/ASN/provider/page shortcuts and example cards. Dashboard live-tail now links to `/v2/timeline`. Classic `/` UI is untouched. Playwright smoke: 60 passed / 13 skipped / 0 failed. Also: dead code removal, Pipeline Health Matrix expansion, API stub honesty fix, migration registry correction (operator_notes v22).
 
 ### Added
 
-- **UI v2 PR5 — Operator Productivity** (`internal/ui/`) — Watchlist sidebar widget (localStorage, max 10 entries, collapsible), Recently Viewed section, keyboard navigation shortcuts (`g`+`d/t/f/e/h` for pages, `/` for search), ARIA keyboard shortcut annotations.
-- **UI v2 PR6 — Advanced Investigation** (`internal/ui/`) — three new investigative views:
-  - `/timeline/correlated?ip=` — server-side IP grouping of all timeline events; sorted by most-recent-activity-first; links to Timeline, Forensic, Focus Incident per group.
-  - `/notes` — Operator Notes backed by SQLite (`operator_notes` table in `runtime.db`); upsert semantics; CSRF-protected forms; embedded note form on forensic and incident pages; notes never influence provider decisions.
-  - `/incident?ip=` — Focus Incident read-only aggregation of timeline events, evidence, operator note, and external enrichment links (AbuseIPDB, VirusTotal). No mutation actions. Verified by `TestIncidentPage_NoMutationButtons`.
-- **Pipeline Health Matrix expansion** (`internal/ui/pipeline_health_page.go`) — two new columns: **Freshness** (human-readable duration since last event) and **Last report** (last AbuseIPDB-reported timestamp per source). Fields with no pipeline data source show "not exposed" explicitly.
-- **Playwright spec 15** (`tests/smoke/specs/15-ui-v2-pr6-advanced-investigation.spec.ts`) — smoke coverage for all three new PR6 pages.
+- **UI v2 SOC workflow** (`internal/ui/v2_shell.go`, `v2_dashboard.go`) — sidebar restructured into workflow groups: Observe, Investigate (Timeline, Focus Incident, Forensic), Infrastructure (Providers, Health, Cloudflare Diff), Operations (Notes, Audit, Trusted Networks, Classic UI). Watchlist + Recents sidebar widgets. Ctrl+K enriched with IP/AS/provider/page routing and quick-link example cards.
+- **`/v2/login` animated loader** (`internal/ui/v2_login.go`, `v2_attack_map.go`) — full-screen overlay with spinning rings, pulsing Cloudflare/CrowdSec/OpenResty nodes; intercepts form submit via `fetch()`, prefetches `attack-map.js` and `palette.js` before navigating to `/v2/` (~2s saved on first load). External JS file (CSP-safe).
+- **`POST /v2/logout`** (`internal/ui/v2_login.go`, `server.go`) — dedicated v2 logout handler; no CSRF required (logout CSRF is low-risk); clears session, audits event, redirects to `/v2/login`. Sign-out button now a plain `<form>` POST — no JS, CSP-safe, no caching issues.
+- **`/v2/timeline` Live Tail** (`internal/ui/v2_timeline.go`) — 46-bar div histogram over 24h window, up to 200 stream rows with colored left borders, source pills, key:value pills, IP drill-down actions (Focus Incident, Investigate, AbuseIPDB, VirusTotal).
+- **`/v2/providers` Integrations** (`internal/ui/v2_providers.go`) — fused Providers + Cloudflare Diff + Trusted Networks on one page; posture strip (green/orange dot + headlines + badge counts); advisory banner for operator-needed items; AI / Enrichment & Reporting / Boundary / Trusted Networks sections.
+- **`/v2/incident` Focus Incident** (`internal/ui/v2_incident.go`) — read-only IP aggregation: timeline events, evidence count, operator note, ASN/Country shown as `unavailable` when enrichment is absent (explicitly labelled, never presented as real data), external pivots (AbuseIPDB, VirusTotal) with `target=_blank rel="noopener noreferrer"`.
+- **`/v2/notes`** (`internal/ui/v2_notes.go`) — v2 dark-shell wrapper around operator notes (SQLite-backed).
+- **`/v2/audit`** (`internal/ui/v2_audit.go`) — v2 dark-shell wrapper around audit trail with enriched empty state.
+- **UI v2 PR5 — Operator Productivity** — Watchlist sidebar widget (localStorage, max 10 entries, collapsible), Recently Viewed section, keyboard navigation shortcuts (`g`+`d/t/f/e/h` for pages, `/` for search).
+- **UI v2 PR6 — Advanced Investigation** — `/timeline/correlated?ip=`, `/notes`, `/incident?ip=` (all classic-UI backed).
+- **Pipeline Health Matrix expansion** — Freshness and Last report columns; "not exposed" for missing pipeline data sources.
+- **Playwright spec 15** — smoke coverage for v2 PR6 pages.
 
 ### Fixes
 
-- **API stubs now return 501** — `POST /api/v1/reconcile/run` and `POST /api/v1/quarantine/release` previously returned HTTP 202 with a success body despite doing nothing. Now return 501 Not Implemented with a clear `NOT_IMPLEMENTED` error code.
-- **operator_notes added to versioned migration runner** — `operator_notes` table is now migration v22 in `runMigrations()`, listed in `VerifySchema()` `requiredTables`, and covered by the upgrade simulation test. Removed the ad-hoc `CREATE TABLE IF NOT EXISTS` from `NewNoteStore()`.
-- **CSRF protection on note forms** — `handleNoteUpsert` and `handleNoteDelete` now call `validCSRF(r)` before processing. All note forms embed `csrf_token` hidden fields.
-- **Dead code removal** (`internal/fixtures/sanitize.go`) — removed `reAccountID`, which was identical to `reZoneID` and never referenced.
-- **Deprecated `strings.Title` replaced** (`internal/ui/provider_admin.go`) — replaced with `strings.ToUpper(s[:1]) + s[1:]` to eliminate the Go 1.18 deprecation warning.
-- **`CorrelatedGroup.Events` removed** — the `Events []audit.TimelineEvent` field was written but never read by the template. Removed to eliminate ~50% of per-request heap allocation on the correlated timeline page.
-- **Dead code** (`cmd/cf-sync/quota_observability.go`) — removed unused `quotaTransitionSummary` helper and its now-orphaned `"fmt"` import.
+- **Sign-out broken on v2** — `data-v2-signout` fetch approach failed because `POST /logout` requires a CSRF token. Fixed by adding `POST /v2/logout` (no CSRF) and replacing the JS-based anchor with a plain HTML form button.
+- **Login loader blocked by CSP** — inline `<script>` and `onclick` handlers are blocked by `script-src 'self'` (global `securityHeaders()` wrapper). Fixed by extracting loader logic to `/v2/static/loader.js` (served unauthenticated).
+- **Dashboard live-tail linked to `/timeline` (classic)** — changed to `/v2/timeline` so the Live Tail card stays within the v2 shell.
+- **`rel="noopener"` missing `noreferrer`** — all external AbuseIPDB / VirusTotal links in v2 pages now carry `rel="noopener noreferrer"`.
+- **API stubs now return 501** — `POST /api/v1/reconcile/run` and `POST /api/v1/quarantine/release` now return 501 Not Implemented.
+- **operator_notes added to versioned migration runner** — migration v22; listed in `VerifySchema()` `requiredTables`.
+- **CSRF protection on note forms** — `handleNoteUpsert` and `handleNoteDelete` call `validCSRF(r)`.
+- **Dead code removal** — `reAccountID`, `quotaTransitionSummary`, `CorrelatedGroup.Events` removed.
+- **Deprecated `strings.Title` replaced** — `strings.ToUpper(s[:1]) + s[1:]`.
 
 ### Upgrade
 
-- **Migration v22** runs automatically on first start after upgrade. No manual steps required. Adds the `operator_notes` table (empty by default).
-- **Service restart recommended** if upgrading from v1.7.4 to pick up the new UI routes (`/notes`, `/timeline/correlated`, `/incident`).
+- **Migration v22** runs automatically on first start. Adds `operator_notes` table (empty by default).
+- **Service restart required** to pick up new UI routes (`/v2/logout`, `/v2/providers`, `/v2/incident`, `/v2/notes`, `/v2/audit`, `/v2/timeline`, `/v2/health`).
 
 ## [v1.7.4] — 2026-06-22
 

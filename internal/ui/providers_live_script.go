@@ -27,6 +27,13 @@ function replaceShellFromHTML(html){
     current.innerHTML = fresh.innerHTML;
   }
 }
+function refreshURL(){
+  var current = shell();
+  if(current && current.dataset && current.dataset.refreshUrl){
+    return current.dataset.refreshUrl;
+  }
+  return '/providers';
+}
 function refreshProviders(){
   if(refreshProviders.inFlight){ return Promise.resolve(); }
   refreshProviders.inFlight = true;
@@ -35,7 +42,8 @@ function refreshProviders(){
     refreshProviders.inFlight = false;
     return Promise.resolve();
   }
-  return fetch('/providers', {
+  current.classList.add('is-refreshing');
+  return fetch(refreshURL(), {
     credentials: 'same-origin',
     headers: {
       'X-Live-Refresh': 'providers'
@@ -44,10 +52,20 @@ function refreshProviders(){
     if(!resp.ok){ throw new Error('refresh failed'); }
     return resp.text();
   }).then(replaceShellFromHTML).catch(function(){}).finally(function(){
+    var after = shell();
+    if(after){ after.classList.remove('is-refreshing'); }
     refreshProviders.inFlight = false;
   });
 }
 refreshProviders.inFlight = false;
+function toast(message, kind){
+  var el = document.createElement('div');
+  el.className = 'v2-toast';
+  el.textContent = message;
+  if(kind === 'error'){ el.style.borderColor = 'rgba(239,95,107,.4)'; }
+  document.body.appendChild(el);
+  window.setTimeout(function(){ el.remove(); }, 2200);
+}
 document.addEventListener('submit', function(ev){
   var form = ev.target;
   if(!form || !form.matches || !form.matches('[data-live-provider-form="true"]')){ return; }
@@ -71,17 +89,50 @@ document.addEventListener('submit', function(ev){
     if(!result.ok){
       throw new Error('request failed');
     }
-    replaceShellFromHTML(result.text);
+    return refreshProviders();
+  }).then(function(){
     if(window.__securityAutomationLive && window.__securityAutomationLive.toast){
       window.__securityAutomationLive.toast('Provider action saved', 'success');
+    } else {
+      toast('Provider action saved', 'success');
     }
   }).catch(function(){
     if(window.__securityAutomationLive && window.__securityAutomationLive.toast){
       window.__securityAutomationLive.toast('Provider action failed', 'error');
+    } else {
+      toast('Provider action failed', 'error');
     }
   }).finally(function(){
     setBusy(form, false);
   });
+});
+document.addEventListener('click', function(ev){
+  var button = ev.target && ev.target.closest ? ev.target.closest('[data-copy-diagnostic]') : null;
+  if(!button){ return; }
+  var payload = button.getAttribute('data-copy-diagnostic') || '{}';
+  function copied(){
+    button.dataset.liveLabel = button.dataset.liveLabel || button.textContent || 'Copy diagnostic JSON';
+    button.textContent = 'Copied';
+    window.setTimeout(function(){ button.textContent = button.dataset.liveLabel; }, 1400);
+    toast('Diagnostic JSON copied', 'success');
+  }
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(payload).then(copied, function(){ toast('Copy failed', 'error'); });
+  } else {
+    var text = document.createElement('textarea');
+    text.value = payload;
+    text.style.position = 'fixed';
+    text.style.left = '-9999px';
+    document.body.appendChild(text);
+    text.select();
+    try {
+      document.execCommand('copy');
+      copied();
+    } catch(e) {
+      toast('Copy failed', 'error');
+    }
+    text.remove();
+  }
 });
 refreshProviders();
 var timer = window.setInterval(function(){

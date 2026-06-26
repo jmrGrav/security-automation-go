@@ -293,6 +293,16 @@ function renderRecents(){
     list.appendChild(row);
   });
 }
+function recordCurrentPageRecent(){
+  if(!window.location){ return; }
+  var path = window.location.pathname + window.location.search;
+  if(!path || path === '/login' || path === '/logout'){ return; }
+  var title = '';
+  var h1 = document.querySelector('h1');
+  if(h1 && h1.textContent){ title = h1.textContent.trim(); }
+  if(!title && document.title){ title = document.title.replace(' · Operator Console', '').trim(); }
+  pushRecent(path, title || path);
+}
 var watchlistOpenKey = 'security-automation:watchlist-open';
 function applyWatchlistCollapse(){
   var widget = document.querySelector('[data-watchlist-widget="true"]');
@@ -300,7 +310,7 @@ function applyWatchlistCollapse(){
   var body = widget.querySelector('[data-watchlist-body]');
   var toggle = widget.querySelector('[data-watchlist-collapse-toggle="true"]');
   if(!body || !toggle){ return; }
-  var open = storageGet(watchlistOpenKey) === 'true';
+  var open = widget.getAttribute('data-watchlist-open') === 'true';
   body.style.display = open ? 'grid' : 'none';
   toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
   toggle.textContent = open ? 'Hide' : 'Show';
@@ -363,8 +373,9 @@ function bindWatchlistCollapse(){
     var toggle = ev.target && ev.target.closest ? ev.target.closest('[data-watchlist-collapse-toggle="true"]') : null;
     if(!toggle){ return; }
     ev.preventDefault();
-    var open = storageGet(watchlistOpenKey) === 'true';
-    storageSet(watchlistOpenKey, open ? 'false' : 'true');
+    var widget = toggle.closest('[data-watchlist-widget="true"]');
+    var open = widget && widget.getAttribute('data-watchlist-open') === 'true';
+    if(widget){ widget.setAttribute('data-watchlist-open', open ? 'false' : 'true'); }
     applyWatchlistCollapse();
   });
 }
@@ -755,6 +766,7 @@ applyDensityPreference();
 bindCollapsiblePanels();
 updateRelativeTimes();
 renderWatchlist();
+recordCurrentPageRecent();
 renderRecents();
 bindWatchlistAdd();
 bindWatchlistRemove();

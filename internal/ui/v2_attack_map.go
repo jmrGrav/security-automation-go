@@ -34,8 +34,27 @@ func (s *Server) handleV2LoaderScript(w http.ResponseWriter, r *http.Request) {
 const paletteJS = `
 (function(){
   'use strict';
+  var state = window.__securityAutomationV2 || (window.__securityAutomationV2 = {});
   function palette(){ return document.getElementById('v2-palette'); }
   function paletteInput(){ return document.getElementById('v2-palette-input'); }
+  function storageGet(key){ try { return window.localStorage ? window.localStorage.getItem(key) : ''; } catch(e){ return ''; } }
+  function storageSet(key, value){ try { if(window.localStorage){ window.localStorage.setItem(key, value); } } catch(e){} }
+  function isIP(value){ return /^(\d{1,3}\.){3}\d{1,3}$/.test(value) || /^[0-9a-f:]+:[0-9a-f:]+/i.test(value); }
+  // Routes IP, AS13335, providers, pages, and event terms without turning the UI into a SPA.
+  function routeQuery(value){
+    var q=(value||'').trim();
+    var lower=q.toLowerCase();
+    if(!q){ return '/v2/investigate'; }
+    if(isIP(q)){ return '/v2/investigate?q='+encodeURIComponent(q); }
+    if(/^as\d+$/i.test(q)){ return '/v2/timeline?q='+encodeURIComponent(q); }
+    if(lower.indexOf('timeline')>=0){ return '/v2/timeline'; }
+    if(lower.indexOf('audit')>=0){ return '/v2/audit'; }
+    if(lower.indexOf('note')>=0){ return '/v2/notes'; }
+    if(lower.indexOf('health')>=0 || lower.indexOf('sqlite')>=0 || lower.indexOf('runtime')>=0){ return '/v2/health'; }
+    if(lower.indexOf('cloudflare')>=0 || lower.indexOf('crowdsec')>=0 || lower.indexOf('provider')>=0 || lower.indexOf('abuseipdb')>=0 || lower.indexOf('virustotal')>=0 || lower.indexOf('openai')>=0 || lower.indexOf('anthropic')>=0 || lower.indexOf('gemini')>=0){ return '/v2/providers?q='+encodeURIComponent(q); }
+    if(lower.indexOf('blocked')>=0 || lower.indexOf('ban')>=0 || lower.indexOf('waf')>=0){ return '/v2/timeline?q='+encodeURIComponent(q); }
+    return '/v2/timeline?q='+encodeURIComponent(q);
+  }
 
   function openPalette(){
     var el=palette(), inp=paletteInput();
@@ -53,7 +72,7 @@ const paletteJS = `
     val=val.trim();
     if(!val) return;
     closePalette();
-    window.location='/v2/investigate?q='+encodeURIComponent(val);
+    window.location=routeQuery(val);
   }
 
   // Keyboard shortcut: Ctrl+K / ⌘K
@@ -61,6 +80,15 @@ const paletteJS = `
     var k=(ev.key||'').toLowerCase();
     if((ev.ctrlKey||ev.metaKey) && k==='k'){ ev.preventDefault(); openPalette(); return; }
     if(k==='escape'){ closePalette(); }
+    if(k==='g' && !ev.ctrlKey && !ev.metaKey && !ev.altKey){ state.navPrefixAt = Date.now(); return; }
+    if(state.navPrefixAt && Date.now()-state.navPrefixAt < 900){
+      if(k==='d'){ window.location='/v2/'; }
+      if(k==='t'){ window.location='/v2/timeline'; }
+      if(k==='i'){ window.location='/v2/investigate'; }
+      if(k==='p'){ window.location='/v2/providers'; }
+      if(k==='h'){ window.location='/v2/health'; }
+      state.navPrefixAt = 0;
+    }
   });
 
   // Click outside to close
@@ -95,6 +123,112 @@ const paletteJS = `
       });
     }
   });
+
+  var watchlistKey='security-automation:watchlist';
+  function loadList(key){ try{ var raw=storageGet(key); var parsed=raw?JSON.parse(raw):[]; return Array.isArray(parsed)?parsed:[]; }catch(e){ return []; } }
+  function saveList(key, items){ storageSet(key, JSON.stringify(items)); }
+  function renderWatchlist(){
+    var widget=document.querySelector('[data-watchlist-widget="true"]');
+    if(!widget){ return; }
+    var list=widget.querySelector('[data-watchlist-list]');
+    if(!list){ return; }
+    var items=loadList(watchlistKey).slice(0,10);
+    list.innerHTML='';
+    if(items.length===0){
+      var empty=document.createElement('p');
+      empty.className='muted';
+      empty.textContent='No items watched.';
+      list.appendChild(empty);
+    } else {
+      items.forEach(function(item, idx){
+        var row=document.createElement('div');
+        row.style.cssText='display:flex;align-items:center;justify-content:space-between;gap:6px;border-top:1px solid #1a1e29;padding:5px 0;font:600 11px Hanken Grotesk,sans-serif;color:#c5cad8';
+        var link=document.createElement('a');
+        link.href=item.type==='ip'?'/v2/investigate?q='+encodeURIComponent(item.value||''):'/v2/timeline?q='+encodeURIComponent(item.value||'');
+        link.textContent=item.label||item.value||'watched';
+        link.style.cssText='min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-decoration:none;color:#c5cad8';
+        var rm=document.createElement('button');
+        rm.type='button';
+        rm.setAttribute('data-watchlist-remove', String(idx));
+        rm.textContent='x';
+        row.appendChild(link);
+        row.appendChild(rm);
+        list.appendChild(row);
+      });
+    }
+    document.querySelectorAll('[data-watchlist-add="true"]').forEach(function(btn){
+      var type=btn.getAttribute('data-watchlist-type')||'ip';
+      var value=btn.getAttribute('data-watchlist-value')||'';
+      var watched=loadList(watchlistKey).some(function(it){ return it.type===type && it.value===value; });
+      btn.textContent=watched?'★':'☆';
+      btn.setAttribute('aria-pressed', watched?'true':'false');
+    });
+  }
+  function bindWatchlist(){
+    renderWatchlist();
+    document.addEventListener('click', function(ev){
+      var toggle=ev.target && ev.target.closest ? ev.target.closest('[data-watchlist-collapse-toggle="true"]') : null;
+      if(toggle){
+        ev.preventDefault();
+        var body=document.querySelector('[data-watchlist-body]');
+        var visible=body && body.style.display!=='none';
+        if(body){ body.style.display=visible?'none':'block'; }
+        toggle.textContent=visible?'Show':'Hide';
+        toggle.setAttribute('aria-expanded', visible?'false':'true');
+      }
+      var add=ev.target && ev.target.closest ? ev.target.closest('[data-watchlist-add="true"]') : null;
+      if(add){
+        ev.preventDefault();
+        var type=add.getAttribute('data-watchlist-type')||'ip';
+        var value=add.getAttribute('data-watchlist-value')||'';
+        if(!value){ return; }
+        var label=add.getAttribute('data-watchlist-label')||value;
+        var items=loadList(watchlistKey);
+        var idx=-1;
+        items.forEach(function(it, i){ if(it.type===type && it.value===value){ idx=i; } });
+        if(idx>=0){ items.splice(idx,1); }
+        else { items.unshift({type:type,value:value,label:label,addedAt:new Date().toISOString()}); }
+        saveList(watchlistKey, items.slice(0,10));
+        renderWatchlist();
+      }
+      var rm=ev.target && ev.target.closest ? ev.target.closest('[data-watchlist-remove]') : null;
+      if(rm){
+        ev.preventDefault();
+        var items=loadList(watchlistKey);
+        items.splice(parseInt(rm.getAttribute('data-watchlist-remove')||'0',10),1);
+        saveList(watchlistKey, items);
+        renderWatchlist();
+      }
+    });
+  }
+  function renderRecents(){
+    var key='security-automation:recents';
+    var path=window.location.pathname+window.location.search;
+    var title=(document.title||path).replace(' · Operator Console','').replace('Operator Console v2','Dashboard');
+    var items=loadList(key).filter(function(it){ return it.href!==path; });
+    if(path.indexOf('/v2/login')!==0){ items.unshift({href:path,label:title,seenAt:new Date().toISOString()}); }
+    saveList(key, items.slice(0,8));
+    var widget=document.querySelector('[data-recents-widget="true"]');
+    if(!widget){ return; }
+    var list=widget.querySelector('[data-recents-list]');
+    if(!list){ return; }
+    list.innerHTML='';
+    loadList(key).slice(0,5).forEach(function(item){
+      var link=document.createElement('a');
+      link.href=item.href;
+      link.textContent=item.label||item.href;
+      link.style.cssText='display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-decoration:none;color:#9aa0b2;font:600 11px Hanken Grotesk,sans-serif;padding:3px 0';
+      list.appendChild(link);
+    });
+    if(!list.firstChild){
+      var empty=document.createElement('p');
+      empty.className='muted';
+      empty.textContent='No recent pages.';
+      list.appendChild(empty);
+    }
+  }
+  bindWatchlist();
+  renderRecents();
 })();
 `
 

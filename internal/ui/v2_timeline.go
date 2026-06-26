@@ -52,6 +52,10 @@ func renderV2TimelinePage(events []audit.TimelineEvent, query string) string {
 .tl-col-header span{font:600 10px 'JetBrains Mono',monospace;color:#4b5166;letter-spacing:.06em;text-transform:uppercase}
 .tl-row{display:grid;grid-template-columns:150px 120px 1fr;gap:8px;padding:8px 16px;border-left:2px solid transparent;transition:background .1s}
 .tl-row:hover{background:rgba(255,255,255,.022)}
+.tl-row details{grid-column:1/-1}
+.tl-row summary{cursor:pointer;color:#7c6cf2;font:600 11px 'Hanken Grotesk',sans-serif;margin-top:6px}
+.tl-row-actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+.tl-row-actions a{font:600 11px 'Hanken Grotesk',sans-serif;color:#c5cad8;text-decoration:none;border:1px solid #20242f;background:#10121a;border-radius:7px;padding:5px 8px}
 .tl-row-warn{border-left-color:#f59e0b}
 .tl-row-error{border-left-color:#ef4444}
 .tl-ts{font:400 11px 'JetBrains Mono',monospace;color:#6b7184;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;align-self:center}
@@ -166,11 +170,17 @@ func renderV2TimelineHistogram(events []audit.TimelineEvent) string {
 
 func renderV2TimelineStream(events []audit.TimelineEvent, query string) string {
 	if len(events) == 0 {
-		msg := "No timeline events yet."
+		msg := "No investigation started."
 		if query != "" {
-			msg = "No events match the filter."
+			msg = "No matching timeline events."
 		}
-		return `<div class="tl-empty">` + html.EscapeString(msg) + `</div>`
+		return `<div class="tl-empty"><div style="font:700 16px 'Hanken Grotesk',sans-serif;color:#c5cad8;margin-bottom:5px">` + html.EscapeString(msg) + `</div><div style="font:500 12px 'Hanken Grotesk',sans-serif;color:#6b7184">Recent activity and suggested pivots stay available even before data arrives.</div><div class="v2-empty-actions" style="max-width:860px;margin:16px auto 0">
+<a class="v2-empty-action" href="/v2/investigate">Search IP <span>›</span></a>
+<a class="v2-empty-action" href="/v2/timeline">Browse Timeline <span>›</span></a>
+<a class="v2-empty-action" href="/v2/investigate">Recent Evidence <span>›</span></a>
+<a class="v2-empty-action" href="/v2/timeline?q=waf">Recent WAF Events <span>›</span></a>
+<a class="v2-empty-action" href="/v2/timeline?q=abuseipdb">Recent AbuseIPDB Reports <span>›</span></a>
+</div><div style="font:700 10px 'JetBrains Mono',monospace;letter-spacing:.12em;text-transform:uppercase;color:#52596d;margin-top:18px">Quick actions</div></div>`
 	}
 
 	const limit = 200
@@ -207,11 +217,12 @@ func renderV2TimelineRow(ev audit.TimelineEvent) string {
 	}
 
 	return fmt.Sprintf(
-		`<div class="%s"><span class="tl-ts">%s</span><div class="tl-src">%s</div><div class="tl-pills">%s</div></div>`,
+		`<div class="%s"><span class="tl-ts">%s</span><div class="tl-src">%s</div><div class="tl-pills">%s</div>%s</div>`,
 		rowClass,
 		html.EscapeString(ts),
 		v2TimelineSourcePill(ev.ActorSource),
 		v2TimelinePills(ev),
+		v2TimelineRowDetails(ev),
 	)
 }
 
@@ -291,6 +302,25 @@ func v2TimelinePills(ev audit.TimelineEvent) string {
 	}
 
 	return strings.Join(parts, "")
+}
+
+func v2TimelineRowDetails(ev audit.TimelineEvent) string {
+	if ev.Target == "" && ev.EvidenceID == "" && ev.CorrelationID == "" {
+		return ""
+	}
+	var actions []string
+	if ev.Target != "" {
+		q := url.QueryEscape(ev.Target)
+		actions = append(actions,
+			fmt.Sprintf(`<a href="/v2/incident?ip=%s">Open Focus Incident</a>`, q),
+			fmt.Sprintf(`<a href="/v2/investigate?q=%s">Open Evidence</a>`, q),
+			fmt.Sprintf(`<a href="/v2/timeline?q=%s">Open Timeline filtered</a>`, q),
+			fmt.Sprintf(`<a href="/forensic?ip=%s">Open Forensic</a>`, q),
+			fmt.Sprintf(`<a href="https://www.abuseipdb.com/check/%s" target="_blank" rel="noopener noreferrer">Open AbuseIPDB</a>`, q),
+			fmt.Sprintf(`<a href="https://www.virustotal.com/gui/ip-address/%s" target="_blank" rel="noopener noreferrer">Open VirusTotal</a>`, q),
+		)
+	}
+	return fmt.Sprintf(`<details><summary>row details</summary><div class="tl-row-actions">%s</div></details>`, strings.Join(actions, ""))
 }
 
 func v2TimelineKVPill(key, value, sev string) string {
