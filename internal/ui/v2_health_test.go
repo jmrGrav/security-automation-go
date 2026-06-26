@@ -103,19 +103,18 @@ func TestV2ShellUsesWorkflowNavigationAndDarkOnly(t *testing.T) {
 		"Infrastructure",
 		"Operations",
 		"/v2/timeline",
-		"/v2/incident",
 		"/v2/notes",
 		"/v2/audit",
-		"Watchlist",
-		"Recent",
+		"Sign out",
+		"Search",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("v2 shell missing %q: %s", want, out)
 		}
 	}
-	for _, forbidden := range []string{"Comfort light", `data-theme-toggle="true"`} {
+	for _, forbidden := range []string{"Comfort light", `data-theme-toggle="true"`, "Watchlist", "Classic UI"} {
 		if strings.Contains(out, forbidden) {
-			t.Fatalf("v2 shell should be dark-only and omit %q: %s", forbidden, out)
+			t.Fatalf("v2 shell should omit %q: %s", forbidden, out)
 		}
 	}
 }
