@@ -47,6 +47,16 @@ const paletteJS = `
     if(!q){ return '/v2/investigate'; }
     if(isIP(q)){ return '/v2/investigate?q='+encodeURIComponent(q); }
     if(/^as\d+$/i.test(q)){ return '/v2/timeline?q='+encodeURIComponent(q); }
+    // Explicit page-name navigation (exact or prefix match on trimmed lower input)
+    if(lower==='dashboard'){ return '/v2/'; }
+    if(lower==='investigate'){ return '/v2/investigate'; }
+    if(lower==='timeline'){ return '/v2/timeline'; }
+    if(lower==='providers'){ return '/v2/providers'; }
+    if(lower==='health'){ return '/v2/health'; }
+    if(lower==='cloudflare'){ return '/v2/cloudflare'; }
+    if(lower==='notes'){ return '/v2/notes'; }
+    if(lower==='audit'){ return '/v2/audit'; }
+    if(lower==='trusted' || lower==='trusted-networks'){ return '/trusted-networks'; }
     if(lower.indexOf('timeline')>=0){ return '/v2/timeline'; }
     if(lower.indexOf('audit')>=0){ return '/v2/audit'; }
     if(lower.indexOf('note')>=0){ return '/v2/notes'; }
