@@ -31,12 +31,12 @@ type cfLifecycleStats struct {
 }
 
 type cfReasonGroup struct {
-	Reason  string
-	IsRed   bool // burst_malicious style
-	First   int
-	Second  int
-	Third   int
-	Total   int
+	Reason string
+	IsRed  bool // burst_malicious style
+	First  int
+	Second int
+	Third  int
+	Total  int
 }
 
 func (s *Server) handleV2CloudflarePage(w http.ResponseWriter, r *http.Request) {
