@@ -13,6 +13,69 @@ func (s *Server) handleV2AttackMapScript(w http.ResponseWriter, r *http.Request)
 	_, _ = w.Write([]byte(attackMapJS))
 }
 
+// handleV2PaletteScript serves the Ctrl+K command palette logic.
+// Extracted to a separate file so CSP script-src 'self' allows it (no unsafe-inline needed).
+func (s *Server) handleV2PaletteScript(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
+	w.Header().Set("Cache-Control", "max-age=3600")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(paletteJS))
+}
+
+const paletteJS = `
+(function(){
+  'use strict';
+  function palette(){ return document.getElementById('v2-palette'); }
+  function paletteInput(){ return document.getElementById('v2-palette-input'); }
+
+  function openPalette(){
+    var el=palette(), inp=paletteInput();
+    if(!el||!inp) return;
+    el.style.display='flex';
+    setTimeout(function(){ inp.focus(); inp.select(); }, 0);
+  }
+  function closePalette(){
+    var el=palette();
+    if(el) el.style.display='none';
+  }
+
+  function submit(){
+    var val=(paletteInput()||{}).value||'';
+    val=val.trim();
+    if(!val) return;
+    closePalette();
+    window.location='/v2/investigate?q='+encodeURIComponent(val);
+  }
+
+  // Keyboard shortcut: Ctrl+K / ⌘K
+  document.addEventListener('keydown', function(ev){
+    var k=(ev.key||'').toLowerCase();
+    if((ev.ctrlKey||ev.metaKey) && k==='k'){ ev.preventDefault(); openPalette(); return; }
+    if(k==='escape'){ closePalette(); }
+  });
+
+  // Click outside to close
+  document.addEventListener('click', function(ev){
+    var el=palette();
+    if(el && ev.target===el) closePalette();
+  });
+
+  // Button triggers
+  document.addEventListener('click', function(ev){
+    var trigger = ev.target && ev.target.closest ? ev.target.closest('[data-palette-trigger]') : null;
+    if(trigger){ ev.preventDefault(); openPalette(); }
+  });
+
+  // Form submit inside palette
+  document.addEventListener('submit', function(ev){
+    if(ev.target && ev.target.id==='v2-palette-form'){
+      ev.preventDefault();
+      submit();
+    }
+  });
+})();
+`
+
 // attackMapJS is the self-contained canvas animation for the v2 attack map.
 // Takes a `data-origins` JSON attribute on the canvas element for real country data.
 const attackMapJS = `

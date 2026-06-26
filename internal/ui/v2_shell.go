@@ -146,9 +146,9 @@ a{color:inherit}
 </main>
 
 <!-- Command palette -->
-<div class="v2-palette-overlay" id="v2-palette" onclick="if(event.target===this)closePalette()">
+<div class="v2-palette-overlay" id="v2-palette">
   <div class="v2-palette-box">
-    <form class="v2-palette-input-row" onsubmit="paletteSubmit(event)">
+    <form id="v2-palette-form" class="v2-palette-input-row">
       <span class="v2-palette-icon">⊕</span>
       <input class="v2-palette-input" id="v2-palette-input" type="text" placeholder="IP address or evidence ID…" autocomplete="off" autocorrect="off" spellcheck="false">
     </form>
@@ -160,38 +160,7 @@ a{color:inherit}
   </div>
 </div>
 
-<script>
-(function(){
-  function openPalette(){
-    var el=document.getElementById('v2-palette');
-    var inp=document.getElementById('v2-palette-input');
-    if(!el||!inp)return;
-    el.classList.add('open');
-    setTimeout(function(){inp.focus();inp.select();},0);
-  }
-  function closePalette(){
-    var el=document.getElementById('v2-palette');
-    if(el)el.classList.remove('open');
-  }
-  window.closePalette=closePalette;
-  window.paletteSubmit=function(ev){
-    ev.preventDefault();
-    var val=(document.getElementById('v2-palette-input')||{}).value||'';
-    val=val.trim();
-    if(!val)return;
-    closePalette();
-    window.location='/v2/investigate?q='+encodeURIComponent(val);
-  };
-  document.addEventListener('keydown',function(ev){
-    var k=(ev.key||'').toLowerCase();
-    if((ev.ctrlKey||ev.metaKey)&&k==='k'){ev.preventDefault();openPalette();return;}
-    if(k==='escape')closePalette();
-  });
-  document.querySelectorAll('[data-palette-trigger]').forEach(function(el){
-    el.addEventListener('click',function(ev){ev.preventDefault();openPalette();});
-  });
-})();
-</script>
+<script src="/v2/static/palette.js"></script>
 </body>
 </html>`
 }
