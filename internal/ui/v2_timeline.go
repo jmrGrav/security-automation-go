@@ -221,7 +221,7 @@ func renderV2TimelineRow(ev audit.TimelineEvent) string {
 		rowClass,
 		html.EscapeString(ts),
 		v2TimelineSourcePill(ev.ActorSource),
-		v2TimelinePills(ev),
+		v2TimelinePrimaryPills(ev),
 		v2TimelineRowDetails(ev),
 	)
 }
@@ -247,7 +247,10 @@ func v2TimelineSourcePill(source string) string {
 	)
 }
 
-func v2TimelinePills(ev audit.TimelineEvent) string {
+// v2TimelinePrimaryPills renders the always-visible pills: action + ip.
+// Secondary detail (result, summary, correlation, evidence) is moved into the
+// expandable details element by v2TimelineRowDetails so the feed stays compact.
+func v2TimelinePrimaryPills(ev audit.TimelineEvent) string {
 	var parts []string
 
 	if ev.Action != "" {
@@ -260,6 +263,14 @@ func v2TimelinePills(ev audit.TimelineEvent) string {
 			url.QueryEscape(ev.Target), html.EscapeString(ev.Target),
 		))
 	}
+
+	return strings.Join(parts, "")
+}
+
+// v2TimelineSecondaryPills renders result, summary, correlation and evidence
+// pills that are shown only inside the details expansion.
+func v2TimelineSecondaryPills(ev audit.TimelineEvent) string {
+	var parts []string
 
 	if ev.Result != "" {
 		sev := ""
@@ -305,21 +316,37 @@ func v2TimelinePills(ev audit.TimelineEvent) string {
 }
 
 func v2TimelineRowDetails(ev audit.TimelineEvent) string {
-	if ev.Target == "" && ev.EvidenceID == "" && ev.CorrelationID == "" {
+	secondary := v2TimelineSecondaryPills(ev)
+	hasTarget := ev.Target != ""
+	hasSecondary := secondary != ""
+
+	if !hasTarget && ev.EvidenceID == "" && ev.CorrelationID == "" && !hasSecondary {
 		return ""
 	}
+
 	var actions []string
-	if ev.Target != "" {
+	if hasTarget {
 		q := url.QueryEscape(ev.Target)
 		actions = append(actions,
 			fmt.Sprintf(`<a href="/v2/incident?ip=%s">Open Focus Incident</a>`, q),
 			fmt.Sprintf(`<a href="/v2/investigate?q=%s">Open Evidence</a>`, q),
 			fmt.Sprintf(`<a href="/v2/timeline?q=%s">Open Timeline filtered</a>`, q),
+			fmt.Sprintf(`<a href="/forensic?ip=%s">Open Forensic</a>`, q),
 			fmt.Sprintf(`<a href="https://www.abuseipdb.com/check/%s" target="_blank" rel="noopener noreferrer">Open AbuseIPDB</a>`, q),
 			fmt.Sprintf(`<a href="https://www.virustotal.com/gui/ip-address/%s" target="_blank" rel="noopener noreferrer">Open VirusTotal</a>`, q),
 		)
 	}
-	return fmt.Sprintf(`<details><summary>row details</summary><div class="tl-row-actions">%s</div></details>`, strings.Join(actions, ""))
+
+	secondarySection := ""
+	if hasSecondary {
+		secondarySection = fmt.Sprintf(`<div class="tl-pills" style="margin-top:6px">%s</div>`, secondary)
+	}
+	actionsSection := ""
+	if len(actions) > 0 {
+		actionsSection = fmt.Sprintf(`<div class="tl-row-actions">%s</div>`, strings.Join(actions, ""))
+	}
+
+	return fmt.Sprintf(`<details><summary>row details</summary>%s%s</details>`, secondarySection, actionsSection)
 }
 
 func v2TimelineKVPill(key, value, sev string) string {

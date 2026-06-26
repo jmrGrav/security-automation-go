@@ -13,19 +13,18 @@ type v2NavItem struct {
 	href  string
 	label string
 	group string
-	icon  string
 }
 
 var v2NavItems = []v2NavItem{
-	{href: "/v2/", label: "Dashboard", group: "Observe", icon: "◈"},
-	{href: "/v2/investigate", label: "Investigate", group: "Investigate", icon: "⊕"},
-	{href: "/v2/timeline", label: "Timeline", group: "Investigate", icon: "⟳"},
-	{href: "/v2/providers", label: "Providers", group: "Infrastructure", icon: "⬡"},
-	{href: "/v2/health", label: "Health", group: "Infrastructure", icon: "♥"},
-	{href: "/v2/cloudflare", label: "Cloudflare", group: "Infrastructure", icon: "☁"},
-	{href: "/v2/notes", label: "Notes", group: "Operations", icon: "✎"},
-	{href: "/v2/audit", label: "Audit", group: "Operations", icon: "◷"},
-	{href: "/trusted-networks", label: "Trusted Networks", group: "Operations", icon: "◇"},
+	{href: "/v2/", label: "Dashboard", group: "Observe"},
+	{href: "/v2/investigate", label: "Investigate", group: "Investigate"},
+	{href: "/v2/timeline", label: "Timeline", group: "Investigate"},
+	{href: "/v2/providers", label: "Providers", group: "Infrastructure"},
+	{href: "/v2/health", label: "Health", group: "Infrastructure"},
+	{href: "/v2/cloudflare", label: "Cloudflare", group: "Infrastructure"},
+	{href: "/v2/notes", label: "Notes", group: "Operations"},
+	{href: "/v2/audit", label: "Audit", group: "Operations"},
+	{href: "/trusted-networks", label: "Trusted Networks", group: "Operations"},
 }
 
 // v2Page renders a full HTML page with the v2 dark shell (sidebar, Ctrl+K palette).
@@ -63,11 +62,10 @@ func v2Page(title, activeHref, mainContent string) string {
 		}
 		linkStyle += fmt.Sprintf("font:%s 12.5px 'Hanken Grotesk',sans-serif;color:%s;", fontWeight, textColor)
 		nav.WriteString(fmt.Sprintf(
-			`<a href="%s" style="%s"><span style="width:5px;height:5px;border-radius:50%%;flex:none;background:%s"></span><span style="font-size:13px;width:18px;text-align:center;color:#7c6cf2;flex:none">%s</span><span>%s</span></a>`,
+			`<a href="%s" style="%s"><span style="width:5px;height:5px;border-radius:50%%;flex:none;background:%s"></span><span>%s</span></a>`,
 			html.EscapeString(item.href),
 			linkStyle,
 			dotColor,
-			item.icon,
 			html.EscapeString(item.label),
 		))
 	}
@@ -238,7 +236,6 @@ body{display:block}
   </div>
 </div>
 
-<script src="/v2/static/nav-progress.js"></script>
 <script src="/v2/static/palette.js"></script>
 </body>
 </html>`

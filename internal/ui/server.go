@@ -351,7 +351,6 @@ func (s *Server) routes() {
 	s.mux.Handle("GET /v2/investigate", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandlerV2(s.handleV2Investigate)))))
 	s.mux.Handle("GET /v2/static/attack-map.js", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandlerV2(s.handleV2AttackMapScript)))))
 	s.mux.Handle("GET /v2/static/palette.js", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandlerV2(s.handleV2PaletteScript)))))
-	s.mux.Handle("GET /v2/static/nav-progress.js", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandlerV2(s.handleV2NavProgressScript)))))
 	s.mux.Handle("GET /v2/static/providers-live.js", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandlerV2(s.handleProvidersLiveScript)))))
 	s.mux.Handle("GET /v2/health", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandlerV2(s.handleV2Health)))))
 	s.mux.Handle("GET /v2/timeline", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandlerV2(s.handleV2Timeline)))))
