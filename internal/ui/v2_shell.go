@@ -17,11 +17,10 @@ type v2NavItem struct {
 var v2NavItems = []v2NavItem{
 	{href: "/v2/", label: "Dashboard", icon: "◈"},
 	{href: "/v2/investigate", label: "Investigate", icon: "⊕"},
+	{href: "/v2/health", label: "Health", icon: "♥"},
 	{href: "/timeline", label: "Timeline", icon: "⟳"},
-	{href: "/pipeline", label: "Pipeline", icon: "◐"},
 	{href: "/providers", label: "Providers", icon: "⬡"},
 	{href: "/notes", label: "Notes", icon: "✎"},
-	{href: "/health", label: "Health", icon: "♥"},
 	{href: "/", label: "Classic UI →", icon: "↗"},
 }
 
