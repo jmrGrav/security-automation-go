@@ -101,9 +101,9 @@ const attackMapJS = `
   };
 
   function init(canvas) {
-    const raw = canvas.getAttribute('data-origins');
+    const dataEl = document.getElementById('v2-attack-origins');
     let origins = [];
-    try { origins = JSON.parse(raw || '[]'); } catch(_) {}
+    try { origins = JSON.parse(dataEl ? dataEl.textContent : '[]'); } catch(_) {}
 
     // node = our server (France, fixed)
     const node = {lon:2, lat:46.2};
