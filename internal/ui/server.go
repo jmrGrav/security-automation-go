@@ -345,6 +345,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v2/login", s.handleV2LoginPage)
 	s.mux.HandleFunc("POST /v2/login", s.handleV2Login)
 	s.mux.Handle("GET /v2/", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandlerV2(s.handleV2Dashboard)))))
+	s.mux.Handle("GET /v2/investigate", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandlerV2(s.handleV2Investigate)))))
 	s.mux.Handle("GET /v2/static/attack-map.js", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandlerV2(s.handleV2AttackMapScript)))))
 }
 

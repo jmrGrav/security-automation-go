@@ -304,8 +304,7 @@ func renderV2Dashboard(view DashboardConsoleView) string {
 	// Sidebar nav links
 	nav := []struct{ href, label, icon string }{
 		{"/v2/", "Dashboard", "◈"},
-		{"/forensic", "Forensic", "⊕"},
-		{"/evidence", "Evidence", "≡"},
+		{"/v2/investigate", "Investigate", "⊕"},
 		{"/timeline", "Timeline", "⟳"},
 		{"/pipeline", "Pipeline", "◐"},
 		{"/providers", "Providers", "⬡"},
@@ -395,6 +394,7 @@ a{color:inherit}
     <span class="topbar-title">Dashboard</span>
     <span style="display:inline-flex;align-items:center;gap:6px;padding:3px 9px;border-radius:6px;background:#1c2030;border:1px solid #2a2f42;font:500 11px 'JetBrains Mono',monospace;color:#aab0c2">crowdsec-decisions</span>
     <span style="flex:1"></span>
+    <button data-palette-trigger style="display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:6px;background:#1a1e29;border:1px solid #2a2f42;font:500 11px 'JetBrains Mono',monospace;color:#7b8196;cursor:pointer">⊕ <kbd style="background:#10121a;border:1px solid #20242f;border-radius:4px;padding:1px 5px;font-size:10px">Ctrl+K</kbd></button>
     <div class="window-row">` + windowLinks + `</div>
     <span class="live-badge"><span class="live-dot"></span>LIVE</span>
   </div>
@@ -474,6 +474,52 @@ a{color:inherit}
 </main>
 
 <script src="/v2/static/attack-map.js"></script>
+
+<!-- Command palette (Ctrl+K) -->
+<div style="display:none;position:fixed;inset:0;background:rgba(5,7,12,.6);z-index:200;align-items:flex-start;justify-content:center;padding:14vh 1rem 1rem" id="v2-palette" onclick="if(event.target===this)closePalette()">
+  <div style="width:min(640px,calc(100vw - 2rem));background:#13151c;border:1px solid #2a2f42;border-radius:14px;box-shadow:0 24px 64px rgba(0,0,0,.5);overflow:hidden">
+    <form style="display:flex;align-items:center;gap:12px;padding:14px 16px;border-bottom:1px solid #20242f" onsubmit="paletteSubmit(event)">
+      <span style="font-size:16px;color:#6b7184">⊕</span>
+      <input id="v2-palette-input" type="text" placeholder="IP address or evidence ID…" autocomplete="off" spellcheck="false" style="flex:1;background:transparent;border:none;outline:none;font:500 16px 'JetBrains Mono',monospace;color:#eef0f6;caret-color:#7c6cf2">
+    </form>
+    <div style="padding:10px 16px 12px;font:500 11px 'JetBrains Mono',monospace;color:#5b6070;display:flex;gap:12px">
+      <span><kbd style="background:#1a1e29;border:1px solid #2a2f42;border-radius:4px;padding:1px 6px;color:#9aa0b2">↵</kbd> Investigate</span>
+      <span><kbd style="background:#1a1e29;border:1px solid #2a2f42;border-radius:4px;padding:1px 6px;color:#9aa0b2">Esc</kbd> Close</span>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+  function openPalette(){
+    var el=document.getElementById('v2-palette');
+    var inp=document.getElementById('v2-palette-input');
+    if(!el||!inp)return;
+    el.style.display='flex';
+    setTimeout(function(){inp.focus();inp.select();},0);
+  }
+  function closePalette(){
+    var el=document.getElementById('v2-palette');
+    if(el)el.style.display='none';
+  }
+  window.closePalette=closePalette;
+  window.paletteSubmit=function(ev){
+    ev.preventDefault();
+    var val=(document.getElementById('v2-palette-input')||{}).value||'';
+    val=val.trim();
+    if(!val)return;
+    closePalette();
+    window.location='/v2/investigate?q='+encodeURIComponent(val);
+  };
+  document.addEventListener('keydown',function(ev){
+    var k=(ev.key||'').toLowerCase();
+    if((ev.ctrlKey||ev.metaKey)&&k==='k'){ev.preventDefault();openPalette();return;}
+    if(k==='escape')closePalette();
+  });
+  document.querySelectorAll('[data-palette-trigger]').forEach(function(el){
+    el.addEventListener('click',function(ev){ev.preventDefault();openPalette();});
+  });
+})();
+</script>
 </body>
 </html>`
 }
