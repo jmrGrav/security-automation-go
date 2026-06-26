@@ -358,6 +358,7 @@ func (s *Server) routes() {
 	s.mux.Handle("GET /v2/incident", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandlerV2(s.handleV2IncidentPage)))))
 	s.mux.Handle("GET /v2/notes", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandlerV2(s.handleV2NotesPage)))))
 	s.mux.Handle("GET /v2/audit", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandlerV2(s.handleV2AuditTrailPage)))))
+	s.mux.Handle("GET /v2/cloudflare", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandlerV2(s.handleV2CloudflarePage)))))
 }
 
 func (s *Server) handleLoginPage(w http.ResponseWriter, r *http.Request) {
