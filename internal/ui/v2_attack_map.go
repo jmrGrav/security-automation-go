@@ -22,6 +22,15 @@ func (s *Server) handleV2PaletteScript(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write([]byte(paletteJS))
 }
 
+// handleV2LoaderScript serves the login-page loader/prefetch logic.
+// Served WITHOUT authentication so it is accessible on GET /v2/login.
+func (s *Server) handleV2LoaderScript(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
+	w.Header().Set("Cache-Control", "max-age=3600")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(loaderJS))
+}
+
 const paletteJS = `
 (function(){
   'use strict';
@@ -72,6 +81,77 @@ const paletteJS = `
       ev.preventDefault();
       submit();
     }
+  });
+
+  // Sign out: POST /logout then redirect, without inline onclick (blocked by CSP)
+  document.addEventListener('click', function(ev){
+    var el = ev.target && ev.target.closest ? ev.target.closest('[data-v2-signout]') : null;
+    if(el){
+      ev.preventDefault();
+      fetch('/logout',{method:'POST',credentials:'same-origin'}).then(function(){
+        window.location.href='/v2/login';
+      }).catch(function(){
+        window.location.href='/v2/login';
+      });
+    }
+  });
+})();
+`
+
+// loaderJS drives the login-page loader overlay: intercepts the form submit, shows the
+// animated overlay, POSTs credentials via fetch, prefetches dashboard assets on success,
+// and injects the server error inline on failure — all without an unsafe-inline script tag.
+const loaderJS = `
+(function(){
+  'use strict';
+  var msgs=[
+    'connecting cloudflare edge…',
+    'loading crowdsec decisions…',
+    'starting openresty \xb7 lua…',
+    'verifying event pipeline…',
+    'loading dashboard…'
+  ];
+  var loader=document.getElementById('v2-loader');
+  var statusEl=document.getElementById('v2-loader-status');
+  var form=document.getElementById('v2-login-form');
+  var errBox=document.getElementById('v2-err-box');
+  if(!loader||!form||!statusEl||!errBox) return;
+  var timer;
+
+  function startCycle(){
+    var step=0;
+    statusEl.textContent=msgs[step];
+    timer=setInterval(function(){step=(step+1)%(msgs.length-1);statusEl.textContent=msgs[step];},1100);
+  }
+  function stopCycle(msg){ clearInterval(timer); if(msg) statusEl.textContent=msg; }
+  function showErr(msg){ loader.style.display='none'; errBox.textContent=msg; errBox.style.display='block'; }
+
+  form.addEventListener('submit',function(e){
+    e.preventDefault();
+    errBox.style.display='none';
+    loader.style.display='flex';
+    startCycle();
+    var body=new URLSearchParams(new FormData(form)).toString();
+    fetch('/v2/login',{
+      method:'POST',
+      headers:{'Content-Type':'application/x-www-form-urlencoded'},
+      body:body,
+      credentials:'same-origin',
+      redirect:'follow'
+    }).then(function(r){
+      if(r.ok){
+        stopCycle(msgs[msgs.length-1]);
+        return Promise.all([
+          fetch('/v2/static/attack-map.js',{credentials:'same-origin'}),
+          fetch('/v2/static/palette.js',{credentials:'same-origin'})
+        ]).catch(function(){}).then(function(){ window.location.href='/v2/'; });
+      }
+      return r.text().then(function(html){
+        var doc=new DOMParser().parseFromString(html,'text/html');
+        var el=doc.getElementById('v2-login-error');
+        showErr(el?el.textContent.trim():'Invalid password.');
+      }).catch(function(){ showErr('Authentication failed.'); });
+    }).catch(function(){ showErr('Connection error. Please try again.'); });
   });
 })();
 `
