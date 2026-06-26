@@ -18,7 +18,7 @@ var v2NavItems = []v2NavItem{
 	{href: "/v2/", label: "Dashboard", icon: "◈"},
 	{href: "/v2/investigate", label: "Investigate", icon: "⊕"},
 	{href: "/v2/health", label: "Health", icon: "♥"},
-	{href: "/timeline", label: "Timeline", icon: "⟳"},
+	{href: "/v2/timeline", label: "Timeline", icon: "⟳"},
 	{href: "/providers", label: "Providers", icon: "⬡"},
 	{href: "/notes", label: "Notes", icon: "✎"},
 	{href: "/", label: "Classic UI →", icon: "↗"},
