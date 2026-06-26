@@ -384,7 +384,7 @@ a{color:inherit}
   </div>
   ` + navHTML.String() + `
   <div style="flex:1"></div>
-  <a href="/v2/login" onclick="fetch('/logout',{method:'POST'});return true" style="display:flex;align-items:center;gap:10px;padding:8px 12px;border-radius:7px;text-decoration:none;color:#5b6070;font:500 12px 'Hanken Grotesk',sans-serif;margin-top:8px"><span style="font-size:13px;width:18px;text-align:center">⏻</span>Sign out</a>
+  <a href="/v2/login" data-v2-signout style="display:flex;align-items:center;gap:10px;padding:8px 12px;border-radius:7px;text-decoration:none;color:#5b6070;font:500 12px 'Hanken Grotesk',sans-serif;margin-top:8px"><span style="font-size:13px;width:18px;text-align:center">⏻</span>Sign out</a>
 </nav>
 
 <main class="main">

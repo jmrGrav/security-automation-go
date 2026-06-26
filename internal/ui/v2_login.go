@@ -194,62 +194,7 @@ button:hover{background:#8e81f5}
   <div class="v1-link">Looking for <a href="/login">the classic UI?</a></div>
 </div>
 
-<script>
-(function(){
-  'use strict';
-  var msgs=[
-    'connecting cloudflare edge…',
-    'loading crowdsec decisions…',
-    'starting openresty \xb7 lua…',
-    'verifying event pipeline…',
-    'loading dashboard…'
-  ];
-  var loader=document.getElementById('v2-loader');
-  var statusEl=document.getElementById('v2-loader-status');
-  var errBox=document.getElementById('v2-err-box');
-  var form=document.getElementById('v2-login-form');
-  var timer;
-
-  function startCycle(){
-    var step=0;
-    statusEl.textContent=msgs[step];
-    timer=setInterval(function(){step=(step+1)%(msgs.length-1);statusEl.textContent=msgs[step];},1100);
-  }
-  function stopCycle(msg){ clearInterval(timer); if(msg) statusEl.textContent=msg; }
-  function showErr(msg){ loader.style.display='none'; errBox.textContent=msg; errBox.style.display='block'; }
-
-  form.addEventListener('submit',function(e){
-    e.preventDefault();
-    errBox.style.display='none';
-    loader.style.display='flex';
-    startCycle();
-
-    var body=new URLSearchParams(new FormData(form)).toString();
-    fetch('/v2/login',{
-      method:'POST',
-      headers:{'Content-Type':'application/x-www-form-urlencoded'},
-      body:body,
-      credentials:'same-origin',
-      redirect:'follow'
-    }).then(function(r){
-      if(r.ok){
-        // Auth succeeded — prefetch JS bundles the dashboard needs so first paint is instant
-        stopCycle(msgs[msgs.length-1]);
-        return Promise.all([
-          fetch('/v2/static/attack-map.js',{credentials:'same-origin'}),
-          fetch('/v2/static/palette.js',{credentials:'same-origin'})
-        ]).catch(function(){}).then(function(){ window.location.href='/v2/'; });
-      }
-      // Auth failed — parse error from server response without a full reload
-      return r.text().then(function(html){
-        var doc=new DOMParser().parseFromString(html,'text/html');
-        var el=doc.getElementById('v2-login-error');
-        showErr(el?el.textContent.trim():'Invalid password.');
-      }).catch(function(){ showErr('Authentication failed.'); });
-    }).catch(function(){ showErr('Connection error. Please try again.'); });
-  });
-})();
-</script>
+<script src="/v2/static/loader.js"></script>
 </body>
 </html>`
 }
