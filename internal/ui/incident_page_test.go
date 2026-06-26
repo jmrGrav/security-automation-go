@@ -82,7 +82,7 @@ func TestV2IncidentPageRendersOperatorWorkspace(t *testing.T) {
 		NoteUpdatedAt: "2026-06-25T10:00:00Z",
 	}
 
-	out := renderV2IncidentPage(view)
+	out := renderV2IncidentPage(view, v2IncidentEnrichment{})
 	for _, want := range []string{
 		"Focus Incident",
 		"1.2.3.4",
