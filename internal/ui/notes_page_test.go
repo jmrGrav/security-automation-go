@@ -39,7 +39,6 @@ func TestV2NotesPageEmptyStateIsOperational(t *testing.T) {
 	out := renderV2NotesPage(nil)
 	for _, want := range []string{
 		"Operator Notes",
-		"Pinned notes",
 		"Recent notes",
 		"Search",
 		"Filters",
@@ -52,6 +51,9 @@ func TestV2NotesPageEmptyStateIsOperational(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Fatalf("v2 notes empty state missing %q: %s", want, out)
 		}
+	}
+	if strings.Contains(out, "Pinned notes") {
+		t.Fatal("v2 notes page must not contain removed 'Pinned notes' section")
 	}
 }
 
