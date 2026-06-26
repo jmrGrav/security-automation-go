@@ -23,7 +23,7 @@ var v2NavItems = []v2NavItem{
 	{href: "/forensic", label: "Forensic", icon: "⌕", group: "Investigate"},
 	{href: "/v2/providers", label: "Providers", icon: "⬡", group: "Infrastructure"},
 	{href: "/v2/health", label: "Health", icon: "♥", group: "Infrastructure"},
-	{href: "/cloudflare/diff", label: "Cloudflare", icon: "☁", group: "Infrastructure"},
+	{href: "/v2/cloudflare", label: "Cloudflare", icon: "☁", group: "Infrastructure"},
 	{href: "/v2/notes", label: "Notes", icon: "✎", group: "Operations"},
 	{href: "/v2/audit", label: "Audit", icon: "◷", group: "Operations"},
 	{href: "/trusted-networks", label: "Trusted Networks", icon: "◇", group: "Operations"},
