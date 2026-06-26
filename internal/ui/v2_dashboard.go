@@ -362,28 +362,28 @@ func renderV2Dashboard(view DashboardConsoleView) string {
   <span class="v2-topbar-title">Dashboard</span>
   <span style="display:inline-flex;align-items:center;gap:6px;padding:3px 9px;border-radius:6px;background:#1c2030;border:1px solid #2a2f42;font:500 11px 'JetBrains Mono',monospace;color:#aab0c2">crowdsec-decisions</span>
   <span style="flex:1"></span>
-  <div class="window-row">` + windowLinks + `</div>
+  <div class="window-row">`+windowLinks+`</div>
   <span class="v2-live-badge"><span class="v2-live-dot"></span>LIVE</span>
 </div>
 
 <div class="section-title">Current posture</div>
 <div class="stats-row">
   <a href="/v2/health" class="stat">
-    <div class="stat-label"><span class="stat-dot" style="background:` + healthColor + `"></span>Platform health</div>
-    <div class="stat-value" style="color:` + healthColor + `">` + healthPct + `<span style="font:600 16px 'Hanken Grotesk',sans-serif;color:#6b7184">%</span></div>
-    <div class="stat-sub">` + fmt.Sprintf("%d/%d", view.HealthyCount, totalStatuses) + ` components</div>
+    <div class="stat-label"><span class="stat-dot" style="background:`+healthColor+`"></span>Platform health</div>
+    <div class="stat-value" style="color:`+healthColor+`">`+healthPct+`<span style="font:600 16px 'Hanken Grotesk',sans-serif;color:#6b7184">%</span></div>
+    <div class="stat-sub">`+fmt.Sprintf("%d/%d", view.HealthyCount, totalStatuses)+` components</div>
     <div class="stat-sub">Uptime · Last reload · Runtime version</div>
   </a>
   <a href="/v2/timeline" class="stat">
     <div class="stat-label"><span class="stat-dot" style="background:#f5921e"></span>Active threats</div>
-    <div class="stat-value" style="color:#f5a443">` + fmt.Sprintf("%d", activeThreats) + `<span style="font:500 12px 'JetBrains Mono',monospace;color:#6b7184;margin-left:6px">origins</span></div>
-    <div class="stat-sub">` + html.EscapeString(countryLine) + `</div>
+    <div class="stat-value" style="color:#f5a443">`+fmt.Sprintf("%d", activeThreats)+`<span style="font:500 12px 'JetBrains Mono',monospace;color:#6b7184;margin-left:6px">origins</span></div>
+    <div class="stat-sub">`+html.EscapeString(countryLine)+`</div>
     <div class="stat-sub">Worker count · Current activity</div>
   </a>
   <a href="/v2/providers" class="stat">
     <div class="stat-label"><span class="stat-dot" style="background:#7c6cf2"></span>Blocked</div>
-    <div class="stat-value" style="color:#eef0f6">` + fmt.Sprintf("%d", blocked24h) + `</div>
-    <div class="stat-sub">` + fmt.Sprintf("%d reported", reported) + `</div>
+    <div class="stat-value" style="color:#eef0f6">`+fmt.Sprintf("%d", blocked24h)+`</div>
+    <div class="stat-sub">`+fmt.Sprintf("%d reported", reported)+`</div>
     <div class="stat-sub">SQLite schema · Provider mesh</div>
   </a>
 </div>
@@ -393,14 +393,14 @@ func renderV2Dashboard(view DashboardConsoleView) string {
   <div class="v2-card-header">
     <span class="v2-card-title">Live attack map</span>
     <span style="flex:1"></span>
-    <span style="font:500 11px 'JetBrains Mono',monospace;color:#6b7184">read-only · ` + fmt.Sprintf("%d", threat.TotalEvents) + ` events</span>
+    <span style="font:500 11px 'JetBrains Mono',monospace;color:#6b7184">read-only · `+fmt.Sprintf("%d", threat.TotalEvents)+` events</span>
   </div>
   <div style="padding:8px">
-    <script type="application/json" id="v2-attack-origins">` + string(originsJSON) + `</script>
+    <script type="application/json" id="v2-attack-origins">`+string(originsJSON)+`</script>
     <canvas data-attack-map style="width:100%;height:220px;display:block"></canvas>
   </div>
   <div style="display:flex;gap:10px;padding:6px 14px 12px;flex-wrap:wrap">
-    ` + mapLegend.String() + `
+    `+mapLegend.String()+`
     <span style="display:inline-flex;align-items:center;gap:6px;font:500 11px 'JetBrains Mono',monospace;color:#8b91a4"><span style="width:7px;height:7px;border-radius:50%;background:#9b8cff"></span>node FR</span>
   </div>
 </div>
@@ -413,16 +413,16 @@ func renderV2Dashboard(view DashboardConsoleView) string {
     </div>
     <div style="padding:14px 18px">
       <div style="display:flex;padding:14px 0 16px;border-bottom:1px solid #1a1e29;margin-bottom:14px">
-        <div style="flex:1;text-align:center"><div style="font:700 20px 'Hanken Grotesk',sans-serif;color:#f5a443">` + fmt.Sprintf("%d", blocked24h) + `</div><div style="font:600 10px 'Hanken Grotesk',sans-serif;letter-spacing:.06em;color:#7b8196;text-transform:uppercase">Events</div></div>
+        <div style="flex:1;text-align:center"><div style="font:700 20px 'Hanken Grotesk',sans-serif;color:#f5a443">`+fmt.Sprintf("%d", blocked24h)+`</div><div style="font:600 10px 'Hanken Grotesk',sans-serif;letter-spacing:.06em;color:#7b8196;text-transform:uppercase">Events</div></div>
         <div style="width:1px;background:#20242f"></div>
-        <div style="flex:1;text-align:center"><div style="font:700 20px 'Hanken Grotesk',sans-serif;color:#eef0f6">` + fmt.Sprintf("%d", uniqueIPs) + `</div><div style="font:600 10px 'Hanken Grotesk',sans-serif;letter-spacing:.06em;color:#7b8196;text-transform:uppercase">Unique IPs</div></div>
+        <div style="flex:1;text-align:center"><div style="font:700 20px 'Hanken Grotesk',sans-serif;color:#eef0f6">`+fmt.Sprintf("%d", uniqueIPs)+`</div><div style="font:600 10px 'Hanken Grotesk',sans-serif;letter-spacing:.06em;color:#7b8196;text-transform:uppercase">Unique IPs</div></div>
         <div style="width:1px;background:#20242f"></div>
-        <div style="flex:1;text-align:center"><div style="font:700 20px 'Hanken Grotesk',sans-serif;color:#eef0f6">` + fmt.Sprintf("%d", scenarios) + `</div><div style="font:600 10px 'Hanken Grotesk',sans-serif;letter-spacing:.06em;color:#7b8196;text-transform:uppercase">Scenarios</div></div>
+        <div style="flex:1;text-align:center"><div style="font:700 20px 'Hanken Grotesk',sans-serif;color:#eef0f6">`+fmt.Sprintf("%d", scenarios)+`</div><div style="font:600 10px 'Hanken Grotesk',sans-serif;letter-spacing:.06em;color:#7b8196;text-transform:uppercase">Scenarios</div></div>
         <div style="width:1px;background:#20242f"></div>
-        <div style="flex:1;text-align:center"><div style="font:700 20px 'Hanken Grotesk',sans-serif;color:#eef0f6">` + fmt.Sprintf("%d", countries) + `</div><div style="font:600 10px 'Hanken Grotesk',sans-serif;letter-spacing:.06em;color:#7b8196;text-transform:uppercase">Countries</div></div>
+        <div style="flex:1;text-align:center"><div style="font:700 20px 'Hanken Grotesk',sans-serif;color:#eef0f6">`+fmt.Sprintf("%d", countries)+`</div><div style="font:600 10px 'Hanken Grotesk',sans-serif;letter-spacing:.06em;color:#7b8196;text-transform:uppercase">Countries</div></div>
       </div>
       <div style="display:flex;flex-direction:column;gap:10px">
-        ` + campaignsHTML.String() + `
+        `+campaignsHTML.String()+`
       </div>
     </div>
   </div>
@@ -433,7 +433,7 @@ func renderV2Dashboard(view DashboardConsoleView) string {
       <a href="/v2/timeline" style="font:500 11px 'JetBrains Mono',monospace;color:#7c6cf2;text-decoration:none">full timeline ↗</a>
     </div>
     <div style="padding:8px">
-      ` + tailHTML.String() + `
+      `+tailHTML.String()+`
     </div>
   </div>
 </div>
@@ -452,7 +452,7 @@ func renderV2Dashboard(view DashboardConsoleView) string {
       <span class="v2-pill">SQLite schema observed</span>
       <span class="v2-pill">Worker count projected</span>
     </div>
-    ` + componentsHTML.String() + `
+    `+componentsHTML.String()+`
   </div>
 </div>
 
@@ -463,7 +463,7 @@ func renderV2Dashboard(view DashboardConsoleView) string {
     <span style="flex:1"></span>
     <a href="/v2/providers" style="font:500 11px 'JetBrains Mono',monospace;color:#7c6cf2;text-decoration:none">open providers ›</a>
   </div>
-  <div style="padding:14px 18px">` + providersHTML.String() + `</div>
+  <div style="padding:14px 18px">`+providersHTML.String()+`</div>
 </div>
 
 <script src="/v2/static/attack-map.js"></script>`)
