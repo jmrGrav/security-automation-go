@@ -321,7 +321,7 @@ func renderV2BoundaryStrip(infra []NonAIProviderEntry) string {
 		status = "configuration incomplete"
 		detail = "Cloudflare token or zone missing"
 	}
-	return fmt.Sprintf(`<div class="v2-boundary-strip"><div class="v2-boundary-row"><span class="v2-status-dot %s"></span><span class="v2-provider-name">Cloudflare boundary</span><span class="v2-state %s">%s</span><span style="flex:1"></span><span class="v2-muted">%s</span><a class="v2-action primary" href="/cloudflare/diff">View diff</a></div><div class="v2-chip-row" style="margin-top:10px"><span class="v2-chip"><span style="color:#787f93">desired</span> live</span><span class="v2-chip"><span style="color:#787f93">observed</span> config-backed</span><span class="v2-chip ok">no mutation exposed here</span></div></div>`,
+	return fmt.Sprintf(`<div class="v2-boundary-strip"><div class="v2-boundary-row"><span class="v2-status-dot %s"></span><span class="v2-provider-name">Cloudflare boundary</span><span class="v2-state %s">%s</span><span style="flex:1"></span><span class="v2-muted">%s</span><a class="v2-action primary" href="/v2/cloudflare">View diff</a></div><div class="v2-chip-row" style="margin-top:10px"><span class="v2-chip"><span style="color:#787f93">desired</span> live</span><span class="v2-chip"><span style="color:#787f93">observed</span> config-backed</span><span class="v2-chip ok">no mutation exposed here</span></div></div>`,
 		html.EscapeString(tone),
 		html.EscapeString(tone),
 		html.EscapeString(status),
@@ -394,7 +394,7 @@ func jsonEscape(s string) string {
 func infraProviderHref(name string) string {
 	switch strings.ToLower(strings.TrimSpace(name)) {
 	case "cloudflare":
-		return "/cloudflare/diff"
+		return "/v2/cloudflare"
 	case "crowdsec":
 		return "/trusted-networks"
 	case "betterstack":
