@@ -315,7 +315,6 @@ func v2TimelineRowDetails(ev audit.TimelineEvent) string {
 			fmt.Sprintf(`<a href="/v2/incident?ip=%s">Open Focus Incident</a>`, q),
 			fmt.Sprintf(`<a href="/v2/investigate?q=%s">Open Evidence</a>`, q),
 			fmt.Sprintf(`<a href="/v2/timeline?q=%s">Open Timeline filtered</a>`, q),
-			fmt.Sprintf(`<a href="/forensic?ip=%s">Open Forensic</a>`, q),
 			fmt.Sprintf(`<a href="https://www.abuseipdb.com/check/%s" target="_blank" rel="noopener noreferrer">Open AbuseIPDB</a>`, q),
 			fmt.Sprintf(`<a href="https://www.virustotal.com/gui/ip-address/%s" target="_blank" rel="noopener noreferrer">Open VirusTotal</a>`, q),
 		)
