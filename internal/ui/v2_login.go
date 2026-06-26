@@ -86,7 +86,8 @@ func (s *Server) handleV2Login(w http.ResponseWriter, r *http.Request) {
 func v2LoginPage(errMsg string) string {
 	errHTML := ""
 	if errMsg != "" {
-		errHTML = `<div style="color:#f08591;font:500 13px 'JetBrains Mono',monospace;margin-bottom:16px;padding:10px 14px;border:1px solid rgba(239,95,107,0.24);border-radius:8px;background:rgba(239,95,107,0.08)">` + errMsg + `</div>`
+		// id="v2-login-error" is read by the fetch handler to extract error text without a page reload.
+		errHTML = `<div id="v2-login-error" style="color:#f08591;font:500 13px 'JetBrains Mono',monospace;margin-bottom:16px;padding:10px 14px;border:1px solid rgba(239,95,107,0.24);border-radius:8px;background:rgba(239,95,107,0.08)">` + errMsg + `</div>`
 	}
 	return `<!DOCTYPE html>
 <html lang="en">
@@ -117,9 +118,63 @@ button:hover{background:#8e81f5}
 .badge{display:inline-flex;align-items:center;gap:5px;padding:2px 8px;border-radius:5px;background:rgba(124,108,242,.12);border:1px solid rgba(124,108,242,.22);font:500 11px 'JetBrains Mono',monospace;color:#9b8cff;margin-bottom:24px}
 .badge-dot{width:6px;height:6px;border-radius:50%;background:#4cc79a;animation:livepulse 1.8s infinite}
 @keyframes livepulse{0%,100%{opacity:1}50%{opacity:.35}}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes spinrev{to{transform:rotate(-360deg)}}
+@keyframes halo{0%{transform:scale(.6);opacity:.5}100%{transform:scale(2.6);opacity:0}}
+@keyframes beat{0%,100%{transform:scale(.82);opacity:.65}50%{transform:scale(1.12);opacity:1}}
+@keyframes shimmer{0%{transform:translateX(-120%)}100%{transform:translateX(420%)}}
+@keyframes floaty{0%,100%{transform:rotate(45deg) scale(1)}50%{transform:rotate(45deg) scale(1.12)}}
+#v2-loader{display:none;position:fixed;inset:0;z-index:999;align-items:center;justify-content:center;background:radial-gradient(120% 120% at 50% 38%,#14161f 0%,#0c0e15 55%,#090a10 100%)}
 </style>
 </head>
 <body>
+
+<!-- Loader overlay (shown on form submit) -->
+<div id="v2-loader">
+  <div style="display:flex;flex-direction:column;align-items:center">
+    <!-- animated mark -->
+    <div style="position:relative;width:220px;height:190px">
+      <div style="position:absolute;left:30px;top:20px;width:160px;height:160px;border-radius:50%;border:1px solid rgba(255,255,255,.06)"></div>
+      <div style="position:absolute;left:24px;top:14px;width:172px;height:172px;border-radius:50%;border:1.5px solid transparent;border-top-color:#7c6cf2;opacity:.85;animation:spin 1.6s linear infinite"></div>
+      <div style="position:absolute;left:34px;top:24px;width:152px;height:152px;border-radius:50%;border:1.5px solid transparent;border-bottom-color:rgba(245,146,30,.7);animation:spinrev 2.4s linear infinite"></div>
+      <!-- center diamond -->
+      <div style="position:absolute;left:101px;top:91px;width:18px;height:18px;background:linear-gradient(135deg,#aa9cff,#7c6cf2);border-radius:4px;animation:floaty 2s ease-in-out infinite;box-shadow:0 0 18px rgba(124,108,242,.6)"></div>
+      <!-- Cloudflare node (top, orange) -->
+      <div style="position:absolute;left:97px;top:7px;width:26px;height:26px">
+        <div style="position:absolute;inset:0;border-radius:50%;background:#f5921e;animation:halo 1.8s ease-out infinite"></div>
+        <div style="position:absolute;inset:0;border-radius:50%;background:radial-gradient(circle at 35% 30%,#ffb45a,#f5921e);box-shadow:0 0 14px rgba(245,146,30,.7);animation:beat 1.8s ease-in-out infinite"></div>
+      </div>
+      <!-- CrowdSec node (bottom-right, indigo) -->
+      <div style="position:absolute;left:166px;top:127px;width:26px;height:26px">
+        <div style="position:absolute;inset:0;border-radius:50%;background:#7c6cf2;animation:halo 1.8s ease-out infinite .6s"></div>
+        <div style="position:absolute;inset:0;border-radius:50%;background:radial-gradient(circle at 35% 30%,#a99cff,#7c6cf2);box-shadow:0 0 14px rgba(124,108,242,.7);animation:beat 1.8s ease-in-out infinite .6s"></div>
+      </div>
+      <!-- OpenResty node (bottom-left, green) -->
+      <div style="position:absolute;left:27px;top:127px;width:26px;height:26px">
+        <div style="position:absolute;inset:0;border-radius:50%;background:#4cc79a;animation:halo 1.8s ease-out infinite 1.2s"></div>
+        <div style="position:absolute;inset:0;border-radius:50%;background:radial-gradient(circle at 35% 30%,#7fe0bd,#4cc79a);box-shadow:0 0 14px rgba(76,199,154,.7);animation:beat 1.8s ease-in-out infinite 1.2s"></div>
+      </div>
+    </div>
+    <!-- wordmark -->
+    <div style="display:flex;align-items:center;gap:9px;margin-top:18px">
+      <span style="width:9px;height:9px;border-radius:50%;background:#7c6cf2;box-shadow:0 0 10px #7c6cf2"></span>
+      <span style="font:800 17px 'Hanken Grotesk',sans-serif;letter-spacing:.18em;color:#eef0f6">OPERATOR</span>
+    </div>
+    <!-- status line -->
+    <div id="v2-loader-status" style="height:18px;margin-top:12px;font:500 12px 'JetBrains Mono',monospace;color:#9aa0b2;letter-spacing:.02em"></div>
+    <!-- shimmer progress bar -->
+    <div style="position:relative;width:240px;height:3px;border-radius:3px;background:rgba(255,255,255,.07);overflow:hidden;margin-top:14px">
+      <div style="position:absolute;top:0;left:0;height:100%;width:40%;border-radius:3px;background:linear-gradient(90deg,transparent,#7c6cf2,#a99cff,transparent);animation:shimmer 1.4s ease-in-out infinite"></div>
+    </div>
+    <!-- provider legend -->
+    <div style="display:flex;gap:18px;margin-top:22px">
+      <span style="display:inline-flex;align-items:center;gap:7px;font:500 11px 'Hanken Grotesk',sans-serif;color:#7b8196"><span style="width:7px;height:7px;border-radius:50%;background:#f5921e"></span>Cloudflare</span>
+      <span style="display:inline-flex;align-items:center;gap:7px;font:500 11px 'Hanken Grotesk',sans-serif;color:#7b8196"><span style="width:7px;height:7px;border-radius:50%;background:#7c6cf2"></span>CrowdSec</span>
+      <span style="display:inline-flex;align-items:center;gap:7px;font:500 11px 'Hanken Grotesk',sans-serif;color:#7b8196"><span style="width:7px;height:7px;border-radius:50%;background:#4cc79a"></span>OpenResty · Lua</span>
+    </div>
+  </div>
+</div>
+
 <div class="card">
   <div class="logo">
     <span class="logo-dot"></span>
@@ -129,13 +184,72 @@ button:hover{background:#8e81f5}
   <h1>Sign in</h1>
   <p class="subtitle">Security automation dashboard</p>
   ` + errHTML + `
-  <form method="POST" action="/v2/login">
+  <!-- JS error box (shown inline without reload on failed fetch) -->
+  <div id="v2-err-box" style="display:none;color:#f08591;font:500 13px 'JetBrains Mono',monospace;margin-bottom:16px;padding:10px 14px;border:1px solid rgba(239,95,107,0.24);border-radius:8px;background:rgba(239,95,107,0.08)"></div>
+  <form id="v2-login-form" method="POST" action="/v2/login">
     <label>Password</label>
     <input type="password" name="password" autofocus autocomplete="current-password" placeholder="Admin password">
     <button type="submit">Continue →</button>
   </form>
   <div class="v1-link">Looking for <a href="/login">the classic UI?</a></div>
 </div>
+
+<script>
+(function(){
+  'use strict';
+  var msgs=[
+    'connecting cloudflare edge…',
+    'loading crowdsec decisions…',
+    'starting openresty \xb7 lua…',
+    'verifying event pipeline…',
+    'loading dashboard…'
+  ];
+  var loader=document.getElementById('v2-loader');
+  var statusEl=document.getElementById('v2-loader-status');
+  var errBox=document.getElementById('v2-err-box');
+  var form=document.getElementById('v2-login-form');
+  var timer;
+
+  function startCycle(){
+    var step=0;
+    statusEl.textContent=msgs[step];
+    timer=setInterval(function(){step=(step+1)%(msgs.length-1);statusEl.textContent=msgs[step];},1100);
+  }
+  function stopCycle(msg){ clearInterval(timer); if(msg) statusEl.textContent=msg; }
+  function showErr(msg){ loader.style.display='none'; errBox.textContent=msg; errBox.style.display='block'; }
+
+  form.addEventListener('submit',function(e){
+    e.preventDefault();
+    errBox.style.display='none';
+    loader.style.display='flex';
+    startCycle();
+
+    var body=new URLSearchParams(new FormData(form)).toString();
+    fetch('/v2/login',{
+      method:'POST',
+      headers:{'Content-Type':'application/x-www-form-urlencoded'},
+      body:body,
+      credentials:'same-origin',
+      redirect:'follow'
+    }).then(function(r){
+      if(r.ok){
+        // Auth succeeded — prefetch JS bundles the dashboard needs so first paint is instant
+        stopCycle(msgs[msgs.length-1]);
+        return Promise.all([
+          fetch('/v2/static/attack-map.js',{credentials:'same-origin'}),
+          fetch('/v2/static/palette.js',{credentials:'same-origin'})
+        ]).catch(function(){}).then(function(){ window.location.href='/v2/'; });
+      }
+      // Auth failed — parse error from server response without a full reload
+      return r.text().then(function(html){
+        var doc=new DOMParser().parseFromString(html,'text/html');
+        var el=doc.getElementById('v2-login-error');
+        showErr(el?el.textContent.trim():'Invalid password.');
+      }).catch(function(){ showErr('Authentication failed.'); });
+    }).catch(function(){ showErr('Connection error. Please try again.'); });
+  });
+})();
+</script>
 </body>
 </html>`
 }
