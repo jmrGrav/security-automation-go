@@ -4,8 +4,19 @@ import (
 	"fmt"
 	"html"
 	"net/http"
+	"net/netip"
 	"strings"
+
+	"github.com/jm/security-automation-go/internal/security/enrichment"
 )
+
+// v2IncidentEnrichment carries the enrichment data shown in the Focus Incident matrix.
+// Country and ISP come from the AbuseIPDB ProviderVerdict note (via ipinfo.io).
+type v2IncidentEnrichment struct {
+	ASN     string // e.g. "AS15169 Google LLC" — from trusted-networks registry or enrichment
+	Country string // ISO 3166-1 alpha-2 from AbuseIPDB
+	ISP     string // ISP/org string from AbuseIPDB
+}
 
 func (s *Server) handleV2IncidentPage(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := stableUIReadContext(r.Context())
@@ -16,14 +27,61 @@ func (s *Server) handleV2IncidentPage(w http.ResponseWriter, r *http.Request) {
 		_, _ = fmt.Fprint(w, v2Page("Focus Incident", "/v2/incident", renderV2IncidentEmpty()))
 		return
 	}
-	_, _ = fmt.Fprint(w, v2Page("Focus Incident "+ip, "/v2/incident", renderV2IncidentPage(s.buildIncidentView(ctx, ip))))
+
+	var enrich v2IncidentEnrichment
+	if addr, err := netip.ParseAddr(ip); err == nil {
+		if svc := s.securityIntelligenceService(); svc != nil {
+			if summary, err := svc.Enrich(ctx, addr, enrichment.LookupOptions{ManualForensics: true}); err == nil {
+				// ASN from trusted-networks registry (structured, best quality)
+				if summary.ASN.Org != "" {
+					enrich.ASN = summary.ASN.Org
+					if summary.ASN.Network != "" {
+						enrich.ASN += " / " + summary.ASN.Network
+					}
+				}
+				// Country and ISP from AbuseIPDB note (backed by ipinfo.io)
+				for _, v := range summary.Providers {
+					if v.Provider == "abuseipdb" {
+						enrich.Country = v2NoteExtract(v.Note, "country")
+						enrich.ISP = v2NoteExtract(v.Note, "isp")
+						break
+					}
+				}
+			}
+		}
+	}
+
+	_, _ = fmt.Fprint(w, v2Page("Focus Incident "+ip, "/v2/incident", renderV2IncidentPage(s.buildIncidentView(ctx, ip), enrich)))
+}
+
+// v2NoteExtract extracts a key=value or key="quoted value" from a gitleaks-style note string.
+func v2NoteExtract(note, key string) string {
+	prefix := key + "="
+	idx := strings.Index(note, prefix)
+	if idx < 0 {
+		return ""
+	}
+	val := note[idx+len(prefix):]
+	if strings.HasPrefix(val, `"`) {
+		// Go %q quoted: isp="Google LLC"
+		end := strings.Index(val[1:], `"`)
+		if end < 0 {
+			return ""
+		}
+		return val[1 : end+1]
+	}
+	// Unquoted (space-terminated): country=CN
+	if sp := strings.IndexByte(val, ' '); sp >= 0 {
+		return val[:sp]
+	}
+	return val
 }
 
 func renderV2IncidentEmpty() string {
 	return `<div class="v2-topbar"><span class="v2-topbar-title">Focus Incident</span><span style="flex:1"></span><button class="v2-kbd-trigger" data-palette-trigger>Search IP</button></div><div class="v2-card"><div class="v2-card-body"><div class="v2-empty"><div style="font:700 16px 'Hanken Grotesk',sans-serif;color:#c5cad8;margin-bottom:5px">No investigation started.</div><div>Select an IP from Timeline, Evidence, Notes, or Ctrl+K.</div><div class="v2-empty-actions"><a class="v2-empty-action" href="/v2/investigate">Search IP <span>›</span></a><a class="v2-empty-action" href="/v2/timeline">Browse Timeline <span>›</span></a><a class="v2-empty-action" href="/v2/notes">Recent notes <span>›</span></a><a class="v2-empty-action" href="/v2/audit">Audit pivots <span>›</span></a></div></div></div></div>`
 }
 
-func renderV2IncidentPage(view IncidentView) string {
+func renderV2IncidentPage(view IncidentView, enrich v2IncidentEnrichment) string {
 	ip := html.EscapeString(view.IP)
 	note := "No operator note yet."
 	noteMeta := "local only"
@@ -36,6 +94,18 @@ func renderV2IncidentPage(view IncidentView) string {
 	if view.EvidenceCount > 0 || view.TimelineCount > 0 {
 		decision = "Review evidence"
 		decisionClass = "orange"
+	}
+
+	asnVal := `<span style="color:#4a5168;font-style:italic">enrichment not configured</span>`
+	if enrich.ASN != "" {
+		asnVal = html.EscapeString(enrich.ASN)
+	}
+	countryVal := `<span style="color:#4a5168;font-style:italic">enrichment not configured</span>`
+	if enrich.Country != "" {
+		countryVal = html.EscapeString(enrich.Country)
+		if enrich.ISP != "" {
+			countryVal += ` <span style="color:#6b7184;font:500 11px 'Hanken Grotesk',sans-serif">` + html.EscapeString(enrich.ISP) + `</span>`
+		}
 	}
 
 	var eventRows strings.Builder
@@ -66,8 +136,8 @@ func renderV2IncidentPage(view IncidentView) string {
 <div class="v2-incident-hero">
   <div class="v2-card"><div class="v2-card-header"><span class="v2-card-title">Incident summary</span><span style="flex:1"></span><span class="v2-pill %s">%s</span></div><div class="v2-card-body"><div class="v2-incident-matrix">
     <div class="v2-incident-cell"><div class="v2-incident-label">IP</div><div class="v2-incident-value">%s</div></div>
-    <div class="v2-incident-cell"><div class="v2-incident-label">ASN</div><div class="v2-incident-value">unavailable</div></div>
-    <div class="v2-incident-cell"><div class="v2-incident-label">Country</div><div class="v2-incident-value">unavailable</div></div>
+    <div class="v2-incident-cell"><div class="v2-incident-label">ASN / Network</div><div class="v2-incident-value" style="font-size:13px">%s</div></div>
+    <div class="v2-incident-cell"><div class="v2-incident-label">Country · ISP</div><div class="v2-incident-value" style="font-size:13px;white-space:normal">%s</div></div>
     <div class="v2-incident-cell"><div class="v2-incident-label">Provider score</div><div class="v2-incident-value">%d signals</div></div>
     <div class="v2-incident-cell"><div class="v2-incident-label">CrowdSec</div><div class="v2-incident-value">%d timeline</div></div>
     <div class="v2-incident-cell"><div class="v2-incident-label">Cloudflare</div><div class="v2-incident-value">%d evidence</div></div>
@@ -83,7 +153,9 @@ func renderV2IncidentPage(view IncidentView) string {
 <div class="v2-card"><div class="v2-card-header"><span class="v2-card-title">Evidence</span><span style="flex:1"></span><span class="v2-pill">%d records</span></div><div class="v2-card-body"><a class="v2-empty-action" href="/evidence?q=%s">Open Evidence <span>›</span></a></div></div>
 <div class="v2-card"><div class="v2-card-header"><span class="v2-card-title">Operator notes</span><span style="flex:1"></span><span class="v2-pill">%s</span></div><div class="v2-card-body"><p style="font:500 13px 'Hanken Grotesk',sans-serif;color:#c5cad8">%s</p><div style="margin-top:10px"><a class="v2-empty-action" href="/v2/notes">Open Notes <span>›</span></a></div></div></div>`,
 		ip, decisionClass, html.EscapeString(decision),
-		ip, view.TimelineCount+view.EvidenceCount, view.TimelineCount, view.EvidenceCount, html.EscapeString(decision),
+		ip, asnVal, countryVal,
+		view.TimelineCount+view.EvidenceCount, view.TimelineCount, view.EvidenceCount,
+		html.EscapeString(decision),
 		html.EscapeString(view.IP), html.EscapeString(view.IP), html.EscapeString(view.IP), html.EscapeString(view.AbuseIPDBURL), html.EscapeString(view.VirusTotalURL), html.EscapeString(view.IP),
 		html.EscapeString(view.IP), eventRows.String(),
 		view.EvidenceCount, html.EscapeString(view.IP),
