@@ -20,6 +20,28 @@ func (s *Server) handleV2LoginPage(w http.ResponseWriter, r *http.Request) {
 	_, _ = fmt.Fprint(w, v2LoginPage(""))
 }
 
+// handleV2Logout processes POST /v2/logout.
+// No CSRF required — logout CSRF risk is low (worst case: attacker logs you out).
+func (s *Server) handleV2Logout(w http.ResponseWriter, r *http.Request) {
+	if cookie, err := r.Cookie(sessionCookieName); err == nil {
+		s.mu.Lock()
+		delete(s.sessions, cookie.Value)
+		s.pruneSessionsLocked(time.Now().UTC())
+		s.mu.Unlock()
+	}
+	s.clearSessionCookie(w)
+	eventID := newUIEventID()
+	s.auditRecord("logout", map[string]string{
+		"actor":          "local",
+		"source":         "ui_v2",
+		"target":         "ui_session",
+		"result":         "success",
+		"correlation_id": eventID,
+		"event_id":       eventID,
+	})
+	http.Redirect(w, r, "/v2/login", http.StatusFound)
+}
+
 // handleV2Login processes POST /v2/login.
 func (s *Server) handleV2Login(w http.ResponseWriter, r *http.Request) {
 	if !s.limiter.Allow(clientKey(r)) {

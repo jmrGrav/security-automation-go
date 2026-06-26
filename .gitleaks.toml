@@ -50,3 +50,4 @@ paths = [
 [[allowlists]]
 description = "c496723 test fixture — abc123def456 is a synthetic placeholder key in ai_key_contract_test.go, not a real credential. File deleted in d34d1ad."
 commits = ["c49672358dea2050061e95c39ef0460d1a38dcd2"]
+

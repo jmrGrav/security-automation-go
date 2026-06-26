@@ -2,6 +2,7 @@ package ui
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -74,5 +75,24 @@ func TestCorrelatedTimelinePage_Renders(t *testing.T) {
 		if !strings.Contains(body, want) {
 			t.Errorf("correlated timeline page missing %q", want)
 		}
+	}
+}
+
+func TestCorrelatedTimelinePage_LimitsRenderedGroups(t *testing.T) {
+	groups := make([]CorrelatedGroup, correlatedTimelineRenderLimit+5)
+	for i := range groups {
+		groups[i] = CorrelatedGroup{Key: fmt.Sprintf("203.0.113.%d", i), EventCount: 1}
+	}
+
+	var buf strings.Builder
+	if err := CorrelatedTimelinePage(CorrelatedTimelineView{Groups: groups, Total: len(groups)}).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render correlated timeline page: %v", err)
+	}
+	body := buf.String()
+	if !strings.Contains(body, "Showing first 100 groups") {
+		t.Fatalf("expected render limit notice, got %s", body)
+	}
+	if strings.Contains(body, "203.0.113.104") {
+		t.Fatalf("expected groups beyond render limit to be omitted, got %s", body)
 	}
 }

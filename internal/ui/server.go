@@ -346,12 +346,18 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /v2/login", s.handleV2Login)
 	// loader.js is served without auth — needed on the login page before a session exists.
 	s.mux.HandleFunc("GET /v2/static/loader.js", s.handleV2LoaderScript)
+	s.mux.Handle("POST /v2/logout", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandlerV2(s.handleV2Logout)))))
 	s.mux.Handle("GET /v2/", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandlerV2(s.handleV2Dashboard)))))
 	s.mux.Handle("GET /v2/investigate", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandlerV2(s.handleV2Investigate)))))
 	s.mux.Handle("GET /v2/static/attack-map.js", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandlerV2(s.handleV2AttackMapScript)))))
 	s.mux.Handle("GET /v2/static/palette.js", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandlerV2(s.handleV2PaletteScript)))))
+	s.mux.Handle("GET /v2/static/providers-live.js", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandlerV2(s.handleProvidersLiveScript)))))
 	s.mux.Handle("GET /v2/health", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandlerV2(s.handleV2Health)))))
 	s.mux.Handle("GET /v2/timeline", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandlerV2(s.handleV2Timeline)))))
+	s.mux.Handle("GET /v2/providers", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandlerV2(s.handleV2Providers)))))
+	s.mux.Handle("GET /v2/incident", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandlerV2(s.handleV2IncidentPage)))))
+	s.mux.Handle("GET /v2/notes", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandlerV2(s.handleV2NotesPage)))))
+	s.mux.Handle("GET /v2/audit", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandlerV2(s.handleV2AuditTrailPage)))))
 }
 
 func (s *Server) handleLoginPage(w http.ResponseWriter, r *http.Request) {

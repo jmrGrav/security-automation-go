@@ -93,3 +93,29 @@ func TestFmtCount(t *testing.T) {
 		}
 	}
 }
+
+func TestV2ShellUsesWorkflowNavigationAndDarkOnly(t *testing.T) {
+	out := v2Page("Test", "/v2/timeline", `<h1>content</h1>`)
+
+	for _, want := range []string{
+		`data-theme="operations-dark"`,
+		"Investigate",
+		"Infrastructure",
+		"Operations",
+		"/v2/timeline",
+		"/v2/incident",
+		"/v2/notes",
+		"/v2/audit",
+		"Watchlist",
+		"Recent",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("v2 shell missing %q: %s", want, out)
+		}
+	}
+	for _, forbidden := range []string{"Comfort light", `data-theme-toggle="true"`} {
+		if strings.Contains(out, forbidden) {
+			t.Fatalf("v2 shell should be dark-only and omit %q: %s", forbidden, out)
+		}
+	}
+}

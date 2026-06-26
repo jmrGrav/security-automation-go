@@ -282,7 +282,7 @@ func renderV2Dashboard(view DashboardConsoleView) string {
 
 		href := html.EscapeString(item.Href)
 		if href == "" {
-			href = "/timeline"
+			href = "/v2/timeline"
 		}
 
 		tailHTML.WriteString(fmt.Sprintf(`
@@ -301,21 +301,39 @@ func renderV2Dashboard(view DashboardConsoleView) string {
 		))
 	}
 
-	// Sidebar nav links
-	nav := []struct{ href, label, icon string }{
-		{"/v2/", "Dashboard", "◈"},
-		{"/v2/investigate", "Investigate", "⊕"},
-		{"/v2/health", "Health", "♥"},
-		{"/v2/timeline", "Timeline", "⟳"},
-		{"/providers", "Providers", "⬡"},
-		{"/notes", "Notes", "✎"},
-		{"/", "Classic UI →", "↗"},
+	// Sidebar nav links mirror the shared v2 shell workflow groups.
+	nav := []struct{ href, label, icon, group string }{
+		{"/v2/", "Dashboard", "◈", "Observe"},
+		{"/v2/investigate", "Investigate", "⊕", "Investigate"},
+		{"/v2/timeline", "Timeline", "⟳", "Investigate"},
+		{"/v2/incident", "Focus Incident", "◎", "Investigate"},
+		{"/forensic", "Forensic", "⌕", "Investigate"},
+		{"/v2/providers", "Providers", "⬡", "Infrastructure"},
+		{"/v2/health", "Health", "♥", "Infrastructure"},
+		{"/cloudflare/diff", "Cloudflare", "☁", "Infrastructure"},
+		{"/v2/notes", "Notes", "✎", "Operations"},
+		{"/v2/audit", "Audit", "◷", "Operations"},
+		{"/trusted-networks", "Trusted Networks", "◇", "Operations"},
+		{"/", "Classic UI", "↗", "Operations"},
 	}
 	var navHTML strings.Builder
+	lastGroup := ""
 	for _, n := range nav {
+		if n.group != "" && n.group != lastGroup {
+			lastGroup = n.group
+			navHTML.WriteString(fmt.Sprintf(`<div style="font:700 9px 'JetBrains Mono',monospace;letter-spacing:.12em;text-transform:uppercase;color:#52596d;padding:12px 12px 5px">%s</div>`, html.EscapeString(n.group)))
+		}
+		active := ""
+		hoverBG := "rgba(124,108,242,.10)"
+		outBG := ""
+		if n.href == "/v2/" {
+			active = "background:rgba(124,108,242,.15);border-color:rgba(124,108,242,.24);color:#eef0f6;"
+			hoverBG = "rgba(124,108,242,.15)"
+			outBG = "rgba(124,108,242,.15)"
+		}
 		navHTML.WriteString(fmt.Sprintf(
-			`<a href="%s" style="display:flex;align-items:center;gap:10px;padding:8px 12px;border-radius:7px;text-decoration:none;color:#9aa0b2;font:500 13px 'Hanken Grotesk',sans-serif;transition:background .12s" onmouseover="this.style.background='rgba(124,108,242,.10)'" onmouseout="this.style.background=''"><span style="font-size:14px;width:18px;text-align:center">%s</span>%s</a>`,
-			html.EscapeString(n.href), n.icon, n.label,
+			`<a href="%s" style="display:flex;align-items:center;gap:10px;padding:8px 12px;border-radius:7px;text-decoration:none;color:#9aa0b2;font:500 13px 'Hanken Grotesk',sans-serif;transition:background .12s;border:1px solid transparent;%s" onmouseover="this.style.background='%s'" onmouseout="this.style.background='%s'"><span style="font-size:14px;width:18px;text-align:center;color:#7c6cf2">%s</span>%s</a>`,
+			html.EscapeString(n.href), active, hoverBG, outBG, n.icon, n.label,
 		))
 	}
 
@@ -336,6 +354,32 @@ func renderV2Dashboard(view DashboardConsoleView) string {
 	totalStatuses := len(view.Statuses)
 	if totalStatuses == 0 {
 		totalStatuses = 1
+	}
+	var componentsHTML strings.Builder
+	if len(view.Statuses) == 0 {
+		componentsHTML.WriteString(`<div style="font:500 12px 'JetBrains Mono',monospace;color:#6b7184">No component telemetry available yet.</div>`)
+	} else {
+		for _, status := range view.Statuses {
+			componentsHTML.WriteString(fmt.Sprintf(
+				`<a href="/v2/health" style="display:grid;grid-template-columns:150px 88px 1fr;gap:10px;align-items:center;padding:8px 0;border-bottom:1px solid #1a1e29;text-decoration:none;color:inherit"><span style="font:700 12px 'Hanken Grotesk',sans-serif;color:#e3e6ef">%s</span><span class="pill">%s</span><span style="font:500 12px 'Hanken Grotesk',sans-serif;color:#8c94a8;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">%s</span></a>`,
+				html.EscapeString(status.Label),
+				html.EscapeString(status.Level),
+				html.EscapeString(status.Detail),
+			))
+		}
+	}
+	var providersHTML strings.Builder
+	if len(view.AIProviders) == 0 {
+		providersHTML.WriteString(`<div style="font:500 12px 'JetBrains Mono',monospace;color:#6b7184">No AI provider telemetry available yet.</div>`)
+	} else {
+		for _, provider := range view.AIProviders {
+			providersHTML.WriteString(fmt.Sprintf(
+				`<a href="/v2/providers" style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #1a1e29;text-decoration:none;color:inherit"><span style="font:700 12px 'Hanken Grotesk',sans-serif;color:#e3e6ef;width:120px">%s</span><span class="pill">%s</span><span style="font:500 11px 'JetBrains Mono',monospace;color:#6b7184">%s</span></a>`,
+				html.EscapeString(provider.Name),
+				html.EscapeString(provider.Status),
+				html.EscapeString(provider.Model),
+			))
+		}
 	}
 
 	return `<!DOCTYPE html>
@@ -362,7 +406,8 @@ a{color:inherit}
 .live-badge{display:inline-flex;align-items:center;gap:6px;font:600 11px 'JetBrains Mono',monospace;color:#4cc79a}
 .live-dot{width:7px;height:7px;border-radius:50%;background:#4cc79a;animation:livepulse 1.8s infinite}
 .stats-row{display:flex;gap:1px;background:#1a1e29;border-radius:10px;overflow:hidden;margin-bottom:20px}
-.stat{flex:1;background:#10121a;padding:16px 18px}
+.stat{flex:1;background:#10121a;padding:16px 18px;text-decoration:none;color:inherit;transition:background .12s}
+.stat:hover{background:#141725}
 .stat-label{display:flex;align-items:center;gap:7px;font:600 12px 'Hanken Grotesk',sans-serif;color:#9aa0b2;margin-bottom:8px}
 .stat-dot{width:8px;height:8px;border-radius:50%}
 .stat-value{font:700 36px/1 'Hanken Grotesk',sans-serif}
@@ -373,9 +418,19 @@ a{color:inherit}
 .window-row{display:flex;gap:2px;margin-left:auto}
 .section-title{font:700 11px 'Hanken Grotesk',sans-serif;letter-spacing:.05em;color:#7b8196;text-transform:uppercase;margin-bottom:10px}
 .pill{display:inline-flex;align-items:center;gap:5px;padding:2px 7px;border-radius:5px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.06);font:500 11px 'JetBrains Mono',monospace;color:#cdd2e0}
+@media(max-width:760px){
+body{display:block}
+.sidebar{width:100%;height:auto;position:static;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));padding:12px;gap:6px;border-right:none;border-bottom:1px solid #1a1e29;overflow:visible}
+.sidebar-logo{grid-column:1/-1;padding:4px 8px 10px;margin-bottom:2px}
+.sidebar a{min-width:0;padding:8px 9px!important}
+.sidebar a span:last-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.main{padding:14px;overflow:visible}
+.topbar{margin-bottom:14px;flex-wrap:wrap}
+.stats-row{display:grid;grid-template-columns:1fr 1fr}
+}
 </style>
 </head>
-<body>
+<body data-theme="operations-dark">
 
 <nav class="sidebar">
   <div class="sidebar-logo">
@@ -384,7 +439,15 @@ a{color:inherit}
   </div>
   ` + navHTML.String() + `
   <div style="flex:1"></div>
-  <a href="/v2/login" data-v2-signout style="display:flex;align-items:center;gap:10px;padding:8px 12px;border-radius:7px;text-decoration:none;color:#5b6070;font:500 12px 'Hanken Grotesk',sans-serif;margin-top:8px"><span style="font-size:13px;width:18px;text-align:center">⏻</span>Sign out</a>
+  <div style="border-top:1px solid #1a1e29;margin-top:12px;padding:10px 10px 0" data-watchlist-widget="true" data-watchlist-key="security-automation:watchlist">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px;font:700 9px 'JetBrains Mono',monospace;letter-spacing:.12em;text-transform:uppercase;color:#666d82"><span>Watchlist</span><button type="button" data-watchlist-collapse-toggle="true" aria-expanded="false" style="background:rgba(255,255,255,.04);border:1px solid #252a3a;color:#9aa0b2;border-radius:6px;padding:2px 6px;font:600 10px 'Hanken Grotesk',sans-serif;cursor:pointer">Show</button></div>
+    <div data-watchlist-list data-watchlist-body style="display:none"><p class="muted" style="font:500 11px 'Hanken Grotesk',sans-serif;color:#555d73">No items watched.</p></div>
+  </div>
+  <div style="border-top:1px solid #1a1e29;margin-top:12px;padding:10px 10px 0" data-recents-widget="true" data-recents-key="security-automation:recents">
+    <div style="font:700 9px 'JetBrains Mono',monospace;letter-spacing:.12em;text-transform:uppercase;color:#666d82;margin-bottom:6px">Recent</div>
+    <div data-recents-list><p class="muted" style="font:500 11px 'Hanken Grotesk',sans-serif;color:#555d73">No recent pages.</p></div>
+  </div>
+  <form method="POST" action="/v2/logout" style="margin:0"><button type="submit" style="display:flex;width:100%;align-items:center;gap:10px;padding:8px 12px;border-radius:7px;color:#5b6070;font:500 12px 'Hanken Grotesk',sans-serif;background:none;border:none;cursor:pointer;margin-top:8px"><span style="font-size:13px;width:18px;text-align:center">⏻</span>Sign out</button></form>
 </nav>
 
 <main class="main">
@@ -398,25 +461,30 @@ a{color:inherit}
     <span class="live-badge"><span class="live-dot"></span>LIVE</span>
   </div>
 
+  <div class="section-title">Current posture</div>
   <!-- Stats row -->
   <div class="stats-row">
-    <div class="stat">
+    <a href="/v2/health" class="stat">
       <div class="stat-label"><span class="stat-dot" style="background:` + healthColor + `"></span>Platform health</div>
       <div class="stat-value" style="color:` + healthColor + `">` + healthPct + `<span style="font:600 16px 'Hanken Grotesk',sans-serif;color:#6b7184">%</span></div>
       <div class="stat-sub">` + fmt.Sprintf("%d/%d", view.HealthyCount, totalStatuses) + ` components</div>
-    </div>
-    <div class="stat">
+      <div class="stat-sub">Uptime · Last reload · Runtime version</div>
+    </a>
+    <a href="/v2/timeline" class="stat">
       <div class="stat-label"><span class="stat-dot" style="background:#f5921e"></span>Active threats</div>
       <div class="stat-value" style="color:#f5a443">` + fmt.Sprintf("%d", activeThreats) + `<span style="font:500 12px 'JetBrains Mono',monospace;color:#6b7184;margin-left:6px">origins</span></div>
       <div class="stat-sub">` + html.EscapeString(countryLine) + `</div>
-    </div>
-    <div class="stat">
+      <div class="stat-sub">Worker count · Current activity</div>
+    </a>
+    <a href="/v2/providers" class="stat">
       <div class="stat-label"><span class="stat-dot" style="background:#7c6cf2"></span>Blocked</div>
       <div class="stat-value" style="color:#eef0f6">` + fmt.Sprintf("%d", blocked24h) + `</div>
       <div class="stat-sub">` + fmt.Sprintf("%d reported", reported) + `</div>
-    </div>
+      <div class="stat-sub">SQLite schema · Provider mesh</div>
+    </a>
   </div>
 
+  <div class="section-title">Current threats</div>
   <!-- Attack map card -->
   <div class="card">
     <div class="card-header">
@@ -434,6 +502,7 @@ a{color:inherit}
     </div>
   </div>
 
+  <div class="section-title">Current activity</div>
   <!-- Two-column: campaigns + live tail -->
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
 
@@ -463,12 +532,40 @@ a{color:inherit}
       <div class="card-header">
         <span class="card-title">Live tail</span>
         <span style="flex:1"></span>
-        <a href="/timeline" style="font:500 11px 'JetBrains Mono',monospace;color:#7c6cf2;text-decoration:none">full timeline ↗</a>
+        <a href="/v2/timeline" style="font:500 11px 'JetBrains Mono',monospace;color:#7c6cf2;text-decoration:none">full timeline ↗</a>
       </div>
       <div style="padding:8px">
         ` + tailHTML.String() + `
       </div>
     </div>
+  </div>
+
+  <div class="section-title">Components</div>
+  <div class="card">
+    <div class="card-header">
+      <span class="card-title">Infrastructure</span>
+      <span style="flex:1"></span>
+      <a href="/v2/health" style="font:500 11px 'JetBrains Mono',monospace;color:#7c6cf2;text-decoration:none">open health ›</a>
+    </div>
+    <div style="padding:14px 18px">
+      <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:12px">
+        <span class="pill">Uptime tracked</span>
+        <span class="pill">Last reload just now</span>
+        <span class="pill">SQLite schema observed</span>
+        <span class="pill">Worker count projected</span>
+      </div>
+      ` + componentsHTML.String() + `
+    </div>
+  </div>
+
+  <div class="section-title">Providers</div>
+  <div class="card">
+    <div class="card-header">
+      <span class="card-title">Provider boundaries</span>
+      <span style="flex:1"></span>
+      <a href="/v2/providers" style="font:500 11px 'JetBrains Mono',monospace;color:#7c6cf2;text-decoration:none">open providers ›</a>
+    </div>
+    <div style="padding:14px 18px">` + providersHTML.String() + `</div>
   </div>
 
 </main>

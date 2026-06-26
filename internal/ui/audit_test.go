@@ -167,6 +167,25 @@ func TestAuditTrailPageEmptyState(t *testing.T) {
 	}
 }
 
+func TestRenderV2AuditTrailPageEmptyStateIsOperational(t *testing.T) {
+	out := renderV2AuditTrailPage(AuditTrailView{RefreshURL: "/v2/audit"}, "csrf-token")
+	for _, want := range []string{
+		"Audit",
+		"No audit events yet",
+		"Recent activity",
+		"Suggested actions",
+		"Recent searches",
+		"Quick links",
+		"/v2/timeline",
+		"/v2/providers",
+		"/v2/health",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("v2 audit empty state missing %q: %s", want, out)
+		}
+	}
+}
+
 func TestFileAuditSinkEntriesContextHonorsCancellation(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "ui-audit.log")

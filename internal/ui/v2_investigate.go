@@ -94,6 +94,8 @@ func renderV2InvestigateEmpty(recent []reporting.DecisionEvidence) string {
 </div>
 `)
 
+	b.WriteString(`<div class="v2-card"><div class="v2-card-body"><div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap"><div style="flex:1;min-width:220px"><div style="font:800 22px 'Hanken Grotesk',sans-serif;color:#eef0f6">No investigation started.</div><div style="font:500 13px 'Hanken Grotesk',sans-serif;color:#8c94a8;margin-top:3px">Start from an IP, the timeline, recent evidence, or an external provider pivot.</div></div><div class="v2-empty-actions" style="flex:1.2;min-width:260px;margin-top:0"><a class="v2-empty-action" href="/v2/timeline">Browse Timeline <span>›</span></a><a class="v2-empty-action" href="/v2/timeline?q=waf">Recent WAF Events <span>›</span></a><a class="v2-empty-action" href="/v2/timeline?q=abuseipdb">Recent AbuseIPDB Reports <span>›</span></a><a class="v2-empty-action" href="/v2/notes">Operator Notes <span>›</span></a></div></div></div></div>`)
+
 	b.WriteString(`<div class="v2-card">
   <div class="v2-card-header">
     <span class="v2-card-title">Recent evidence</span>
@@ -169,10 +171,10 @@ func renderV2InvestigateIP(view ForensicView, ipEvidence []reporting.DecisionEvi
 	// Quick links row
 	b.WriteString(fmt.Sprintf(`
 <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">
-  <a href="/timeline?q=%s" class="v2-pill purple">⟳ Timeline</a>
-  <a href="/incident?ip=%s" class="v2-pill purple">◎ Focus Incident</a>
-  <a href="https://www.abuseipdb.com/check/%s" target="_blank" rel="noopener" class="v2-pill">AbuseIPDB ↗</a>
-  <a href="https://www.virustotal.com/gui/ip-address/%s" target="_blank" rel="noopener" class="v2-pill">VirusTotal ↗</a>
+  <a href="/v2/timeline?q=%s" class="v2-pill purple">⟳ Timeline</a>
+  <a href="/v2/incident?ip=%s" class="v2-pill purple">◎ Focus Incident</a>
+  <a href="https://www.abuseipdb.com/check/%s" target="_blank" rel="noopener noreferrer" class="v2-pill">AbuseIPDB ↗</a>
+  <a href="https://www.virustotal.com/gui/ip-address/%s" target="_blank" rel="noopener noreferrer" class="v2-pill">VirusTotal ↗</a>
 </div>
 `, url.QueryEscape(view.IP), url.QueryEscape(view.IP), url.QueryEscape(view.IP), url.QueryEscape(view.IP)))
 
@@ -353,8 +355,8 @@ func renderV2NoteForm(ip, current, csrfToken string) string {
   <div class="v2-card-body">
     <form method="POST" action="/notes" style="display:flex;flex-direction:column;gap:10px">
       <input type="hidden" name="csrf_token" value="%s">
-      <input type="hidden" name="entity_type" value="ip">
-      <input type="hidden" name="entity_value" value="%s">
+      <input type="hidden" name="type" value="ip">
+      <input type="hidden" name="value" value="%s">
       <textarea name="content" rows="3" style="background:#0d0f14;border:1px solid #20242f;border-radius:8px;padding:10px 12px;color:#c5cad8;font:500 13px 'Hanken Grotesk',sans-serif;resize:vertical;outline:none" placeholder="Operator notes for this IP…">%s</textarea>
       <div style="display:flex;gap:8px">
         <button type="submit" style="padding:7px 16px;background:#7c6cf2;border:none;border-radius:7px;color:#fff;font:600 13px 'Hanken Grotesk',sans-serif;cursor:pointer">Save note</button>

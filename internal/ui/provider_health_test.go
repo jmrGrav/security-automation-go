@@ -97,6 +97,132 @@ func TestUnifiedProvidersPageRendersCompactActionRail(t *testing.T) {
 	}
 }
 
+func TestRenderV2ProvidersPageUsesV2ShellAndProviderStates(t *testing.T) {
+	view := UnifiedProvidersView{
+		AI: AIProviderManagementView{
+			Providers: []AIProviderManagementEntry{
+				{
+					Name:              "OpenAI",
+					Status:            providerStatusReady,
+					Model:             "gpt-4.1-mini",
+					ConfiguredState:   "configured",
+					EnabledState:      "enabled",
+					Enabled:           true,
+					SecretState:       "configured",
+					HealthyState:      "healthy",
+					SecretPathDisplay: "SQLite credential store",
+					LastTestAt:        "2026-06-12T10:00:00Z",
+					LastSuccessAt:     "2026-06-12T10:00:00Z",
+					LastFailureAt:     "never",
+					LastTestStatus:    providerTestReady,
+					LastTestLatencyMS: "120ms",
+					LastErrorCode:     "",
+					ValidationMessage: "credential present and configuration valid",
+				},
+				{
+					Name:              "Anthropic",
+					Status:            providerStatusMissingSecret,
+					Model:             "claude-3-5-sonnet-latest",
+					ConfiguredState:   "missing",
+					EnabledState:      "enabled",
+					Enabled:           true,
+					SecretState:       providerStatusMissingSecret,
+					HealthyState:      "error",
+					SecretPathDisplay: "SQLite credential store",
+					LastTestAt:        "never",
+					LastTestStatus:    providerStatusMissingSecret,
+					LastTestLatencyMS: "n/a",
+					LastErrorCode:     providerStatusMissingSecret,
+					ValidationMessage: "credential missing from SQLite",
+				},
+				{
+					Name:              "Gemini",
+					Status:            providerStatusDisabled,
+					Model:             "gemini-1.5-flash",
+					ConfiguredState:   "missing",
+					EnabledState:      "disabled",
+					SecretState:       "not configured",
+					HealthyState:      "disabled",
+					SecretPathDisplay: "SQLite credential store",
+					LastTestAt:        "never",
+					LastTestStatus:    providerTestDisabledByOperator,
+					LastTestLatencyMS: "n/a",
+					LastErrorCode:     "",
+					ValidationMessage: "provider disabled by operator",
+				},
+			},
+		},
+		NonAI: []NonAIProviderEntry{{
+			Name:             "AbuseIPDB",
+			Category:         "reporting",
+			Configured:       true,
+			Enabled:          true,
+			Healthy:          false,
+			MaskedKey:        "ab…redacted",
+			HasKeyManagement: true,
+			ConfiguredState:  "configured",
+			EnabledState:     "enabled",
+			HealthyState:     "warning",
+			LastTestAt:       "2026-06-12T10:00:00Z",
+			LastLatencyMS:    "240ms",
+			LastErrorCode:    providerTestRateLimited,
+			Status:           "rate limited",
+		}},
+	}
+
+	body := renderV2ProvidersPage(view, "csrf-token")
+
+	for _, want := range []string{
+		"Providers · Operator Console",
+		`href="/v2/providers"`,
+		`data-live-shell="providers"`,
+		`data-refresh-url="/v2/providers"`,
+		"Provider mesh",
+		"AI Providers",
+		"Reporting &amp; Enrichment",
+		"credential missing from SQLite",
+		"provider disabled by operator",
+		"rate limited",
+		"Updated just now",
+		"/v2/static/providers-live.js",
+		"Copy diagnostic JSON",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("v2 providers page missing %q: %s", want, body)
+		}
+	}
+	for _, secret := range []string{"sk-", "openai-secret", "anthropic-secret"} {
+		if strings.Contains(body, secret) {
+			t.Fatalf("v2 providers page leaked secret %q: %s", secret, body)
+		}
+	}
+}
+
+func TestServer_V2ProvidersRouteUsesV2Shell(t *testing.T) {
+	srv, _, _ := newTestServer(t, nil)
+	cookie := loginCookie(t, srv, "test-password-123!@#")
+
+	req := httptest.NewRequest(http.MethodGet, "/v2/providers", nil)
+	req.AddCookie(cookie)
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected /v2/providers 200, got %d", rr.Code)
+	}
+	body := rr.Body.String()
+	for _, want := range []string{
+		`href="/v2/providers"`,
+		`data-live-shell="providers"`,
+		`data-refresh-url="/v2/providers"`,
+		"/v2/static/providers-live.js",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("/v2/providers missing %q: %s", want, body)
+		}
+	}
+}
+
 func TestProvidersLiveScriptServed(t *testing.T) {
 	srv, _, _ := newTestServer(t, nil)
 	cookie := loginCookie(t, srv, "test-password-123!@#")
@@ -109,9 +235,111 @@ func TestProvidersLiveScriptServed(t *testing.T) {
 		t.Fatalf("expected providers live script, got %d", rr.Code)
 	}
 	body := rr.Body.String()
-	for _, want := range []string{"data-live-shell", "fetch('/providers'", "data-live-provider-form"} {
+	for _, want := range []string{"data-live-shell", "refreshUrl", "data-live-provider-form"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("providers live script missing %q: %s", want, body)
+		}
+	}
+}
+
+func TestV2ProvidersLiveScriptServed(t *testing.T) {
+	srv, _, _ := newTestServer(t, nil)
+	cookie := loginCookie(t, srv, "test-password-123!@#")
+
+	req := httptest.NewRequest(http.MethodGet, "/v2/static/providers-live.js", nil)
+	req.AddCookie(cookie)
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected v2 providers live script, got %d", rr.Code)
+	}
+	body := rr.Body.String()
+	for _, want := range []string{"refreshUrl", "refreshURL", "Copy diagnostic JSON", "Diagnostic JSON copied"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("v2 providers live script missing %q: %s", want, body)
+		}
+	}
+}
+
+func TestV2PaletteRoutesOperatorQueries(t *testing.T) {
+	script := paletteJS
+	for _, want := range []string{
+		"routeQuery",
+		"/v2/investigate?q=",
+		"/v2/timeline",
+		"/v2/providers",
+		"/v2/health",
+		"/v2/audit",
+		"AS",
+	} {
+		if !strings.Contains(script, want) {
+			t.Fatalf("v2 palette script missing routing artifact %q: %s", want, script)
+		}
+	}
+}
+
+func TestRenderV2DashboardTellsOperatorStory(t *testing.T) {
+	view := DashboardConsoleView{
+		HealthyCount: 2,
+		Statuses: []StatusItem{
+			{Label: "Runtime", Level: "healthy", Detail: "ui active"},
+			{Label: "SQLite", Level: "healthy", Detail: "schema ready"},
+			{Label: "Cloudflare", Level: "warning", Detail: "dry-run"},
+		},
+		AIProviders: []AIProviderDashboardView{{Name: "OpenAI", Status: "ready", Model: "gpt-4.1-mini"}},
+		CommandCenter: DashboardCommandCenterView{
+			Health: DashboardHealthScoreView{Score: 82, Level: "degraded", Summary: "82% platform health"},
+			Threat: DashboardThreatView{
+				TotalEvents: 3,
+				Countries:   []DashboardThreatCountryView{{Country: "United States", Count: 3, Level: "warning"}},
+				Campaigns:   []DashboardThreatCampaignView{{Scenario: "http-probe", Source: "cloudflare_waf", Country: "United States", Count: 3, Level: "warning"}},
+			},
+			Activity: DashboardActivityFeedView{Items: []DashboardActivityItemView{{
+				Timestamp: "2026-06-24T00:00:00Z",
+				Severity:  "warning",
+				Title:     "report_pending",
+				Detail:    "203.0.113.10 · cloudflare_waf · US",
+				Href:      "/evidence/ev1",
+			}}},
+			TimeWindow: DashboardTimeWindowView{Options: []DashboardTimeWindowOption{{Label: "24h", Value: "24h", Active: true}}},
+		},
+		ReportedTotal: 1,
+	}
+
+	out := renderV2Dashboard(view)
+	for _, want := range []string{
+		"Current posture",
+		"Current activity",
+		"Current threats",
+		"Infrastructure",
+		"Providers",
+		"Uptime",
+		"Last reload",
+		"SQLite schema",
+		"Worker count",
+		`href="/v2/health"`,
+		`href="/v2/providers"`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("v2 dashboard missing operator story fragment %q: %s", want, out)
+		}
+	}
+}
+
+func TestRenderV2TimelineEmptyStateOffersOperatorActions(t *testing.T) {
+	out := renderV2TimelinePage(nil, "")
+	for _, want := range []string{
+		"No investigation started",
+		"Quick actions",
+		"Search IP",
+		"Browse Timeline",
+		"Recent Evidence",
+		"Recent WAF Events",
+		"Recent AbuseIPDB Reports",
+		"/v2/investigate",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("v2 timeline empty state missing %q: %s", want, out)
 		}
 	}
 }
