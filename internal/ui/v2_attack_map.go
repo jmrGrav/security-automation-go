@@ -31,6 +31,42 @@ func (s *Server) handleV2LoaderScript(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write([]byte(loaderJS))
 }
 
+// handleV2NavProgressScript serves the thin progress bar that appears after 200ms
+// on nav-link clicks, providing visual feedback during server-rendered page loads.
+func (s *Server) handleV2NavProgressScript(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
+	w.Header().Set("Cache-Control", "max-age=3600")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(navProgressJS))
+}
+
+const navProgressJS = `(function(){
+  var bar=null,timer=null,active=false;
+  function show(){
+    if(active)return;active=true;
+    bar=document.createElement('div');
+    bar.style.cssText='position:fixed;top:0;left:0;height:2px;width:0;background:linear-gradient(90deg,#7c6cf2,#9b8cff);z-index:9999;transition:width .4s ease,opacity .3s ease;border-radius:0 2px 2px 0';
+    document.body.appendChild(bar);
+    requestAnimationFrame(function(){bar.style.width='70%'});
+  }
+  function hide(){
+    if(!active)return;active=false;
+    if(bar){bar.style.width='100%';bar.style.opacity='0';setTimeout(function(){bar&&bar.remove();bar=null},300)}
+    clearTimeout(timer);timer=null;
+  }
+  document.addEventListener('click',function(e){
+    var a=e.target.closest('a[href]');
+    if(!a||!a.href||a.target==="_blank"||e.ctrlKey||e.metaKey||e.shiftKey||e.altKey)return;
+    var url=new URL(a.href,location.href);
+    if(url.origin!==location.origin)return;
+    clearTimeout(timer);
+    timer=setTimeout(show,200);
+  });
+  window.addEventListener('pageshow',hide);
+  window.addEventListener('pagehide',function(){clearTimeout(timer)});
+})();
+`
+
 const paletteJS = `
 (function(){
   'use strict';
