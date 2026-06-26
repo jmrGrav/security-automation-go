@@ -271,8 +271,14 @@ func securityHeaders(next http.Handler) http.Handler {
 		h.Set("X-Content-Type-Options", "nosniff")
 		h.Set("X-Frame-Options", "DENY")
 		h.Set("Referrer-Policy", "no-referrer")
-		h.Set("Content-Security-Policy",
-			"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:")
+		// v2 routes load Google Fonts — extend CSP only for those paths.
+		if strings.HasPrefix(r.URL.Path, "/v2/") {
+			h.Set("Content-Security-Policy",
+				"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:")
+		} else {
+			h.Set("Content-Security-Policy",
+				"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:")
+		}
 		if r.URL.Path != "/login" {
 			h.Set("Cache-Control", "no-store")
 		}
@@ -334,6 +340,12 @@ func (s *Server) routes() {
 	s.mux.Handle("POST /settings/runtime", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleRuntimeSettingsPost)))))
 	s.mux.Handle("GET /status/runtime", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandler(s.handleRuntimeStatus)))))
 	s.registerCrowdSecAdminRoutes()
+
+	// v2 UI — coexists with v1; same session cookie, separate prefix.
+	s.mux.HandleFunc("GET /v2/login", s.handleV2LoginPage)
+	s.mux.HandleFunc("POST /v2/login", s.handleV2Login)
+	s.mux.Handle("GET /v2/", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandlerV2(s.handleV2Dashboard)))))
+	s.mux.Handle("GET /v2/static/attack-map.js", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandlerV2(s.handleV2AttackMapScript)))))
 }
 
 func (s *Server) handleLoginPage(w http.ResponseWriter, r *http.Request) {
@@ -791,6 +803,16 @@ func (s *Server) requireAuthHandler(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if !s.isAuthed(r) {
 			http.Redirect(w, r, "/login", http.StatusFound)
+			return
+		}
+		next(w, r)
+	}
+}
+
+func (s *Server) requireAuthHandlerV2(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !s.isAuthed(r) {
+			http.Redirect(w, r, "/v2/login", http.StatusFound)
 			return
 		}
 		next(w, r)
