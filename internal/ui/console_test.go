@@ -223,6 +223,29 @@ func TestOperatorLiveScriptSupportsKeyboardNav(t *testing.T) {
 	}
 }
 
+func TestOperatorLiveScriptV2Routes(t *testing.T) {
+	script := operatorLiveScript()
+	for _, want := range []string{
+		"/v2/timeline",
+		"/v2/cloudflare",
+	} {
+		if !strings.Contains(script, want) {
+			t.Fatalf("operator live script missing v2 route %q", want)
+		}
+	}
+}
+
+func TestOperatorLiveScriptJKNav(t *testing.T) {
+	script := operatorLiveScript()
+	for _, want := range []string{
+		"data-jk-focus",
+	} {
+		if !strings.Contains(script, want) {
+			t.Fatalf("operator live script missing j/k nav artifact %q", want)
+		}
+	}
+}
+
 func TestBuildInfoFromConfigUsesSharedBuildMetadata(t *testing.T) {
 	origVersion, origCommit, origBuildDate := buildmeta.Version, buildmeta.Commit, buildmeta.BuildDate
 	t.Cleanup(func() {

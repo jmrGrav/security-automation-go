@@ -320,7 +320,7 @@ function bindKeyboardNav(){
   state.keyboardNavBound = 'true';
   var pending = null;
   var pendingTimer = null;
-  var routes = { d: '/', t: '/timeline', f: '/forensic', e: '/evidence', h: '/health' };
+  var routes = { d: '/v2/', t: '/v2/timeline', f: '/v2/investigate', e: '/v2/investigate', h: '/v2/health', c: '/v2/cloudflare', n: '/v2/notes', a: '/v2/audit' };
   document.addEventListener('keydown', function(ev){
     if(ev.ctrlKey || ev.altKey || ev.metaKey){ return; }
     var activeTag = document.activeElement && document.activeElement.tagName ? document.activeElement.tagName.toLowerCase() : '';
@@ -362,6 +362,28 @@ function bindKeyboardNav(){
         pending = null;
         pendingTimer = null;
       }, 1000);
+      return;
+    }
+    if(window.location.pathname && window.location.pathname.indexOf('/v2/') === 0){
+      if(key === 'j' || key === 'k'){
+        var rows = Array.from(document.querySelectorAll('details'));
+        if(!rows.length){ return; }
+        var active = document.querySelector('details[data-jk-focus]');
+        var idx = active ? rows.indexOf(active) : -1;
+        if(active){ active.removeAttribute('data-jk-focus'); active.style.outline = ''; active.style.borderRadius = ''; }
+        idx = key==='j' ? Math.min(idx+1, rows.length-1) : Math.max(idx-1, 0);
+        rows[idx].setAttribute('data-jk-focus','');
+        rows[idx].style.outline = '2px solid rgba(124,108,242,.5)';
+        rows[idx].style.borderRadius = '4px';
+        rows[idx].scrollIntoView({behavior:'smooth', block:'nearest'});
+        ev.preventDefault();
+        return;
+      }
+      if(key === 'Enter'){
+        var focused = document.querySelector('details[data-jk-focus]');
+        if(focused){ focused.open = !focused.open; ev.preventDefault(); }
+        return;
+      }
     }
   });
 }

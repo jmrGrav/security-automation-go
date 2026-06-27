@@ -5,6 +5,7 @@ import (
 	"html"
 	"net/http"
 	"strings"
+	"time"
 )
 
 func (s *Server) handleV2Providers(w http.ResponseWriter, r *http.Request) {
@@ -99,10 +100,14 @@ func renderV2ProvidersPage(view UnifiedProvidersView, csrfToken string) string {
 	sb.WriteString(fmt.Sprintf(`<form data-live-provider-form="true" action="/admin/providers/test-all" method="post"><input type="hidden" name="csrf_token" value="%s"><button class="v2-action primary" type="submit">Test all</button></form>`, html.EscapeString(csrfToken)))
 	sb.WriteString(`</div>`)
 
-	sb.WriteString(fmt.Sprintf(`<div class="v2-provider-posture"><div class="v2-posture-line"><span class="v2-posture-dot %s"></span><div style="flex:1"><div class="v2-posture-title">%s</div><div class="v2-posture-meta">%d providers · server-rendered · Updated just now</div></div><div class="v2-chip-row"><span class="v2-chip ok">%d healthy</span><span class="v2-chip warn">%d attention</span><span class="v2-chip error">%d error</span><span class="v2-chip">%d disabled</span></div></div>`,
+	now := time.Now()
+	sb.WriteString(fmt.Sprintf(`<div class="v2-provider-posture"><div class="v2-posture-line"><span class="v2-posture-dot %s"></span><div style="flex:1"><div class="v2-posture-title">%s</div><div class="v2-posture-meta">%d providers · server-rendered · <span data-ts="%d" data-ts-full="%s" title="%s">just now</span></div></div><div class="v2-chip-row"><span class="v2-chip ok">%d healthy</span><span class="v2-chip warn">%d attention</span><span class="v2-chip error">%d error</span><span class="v2-chip">%d disabled</span></div></div>`,
 		html.EscapeString(postureClass),
 		html.EscapeString(postureTitle),
 		totalProviders,
+		now.Unix(),
+		html.EscapeString(now.UTC().Format(time.RFC3339)),
+		html.EscapeString(now.UTC().Format("2006-01-02 15:04:05 UTC")),
 		summary.Healthy,
 		summary.Warning,
 		summary.Error,

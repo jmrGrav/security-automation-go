@@ -27,6 +27,8 @@ func (s *Server) handleV2Investigate(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 
+	fromPage := strings.TrimSpace(r.URL.Query().Get("from"))
+
 	if q == "" {
 		var recentEntries []reporting.DecisionEvidence
 		if s.evidence != nil {
@@ -73,7 +75,7 @@ func (s *Server) handleV2Investigate(w http.ResponseWriter, r *http.Request) {
 	s.audit.Record("forensic_lookup", map[string]string{"ip": q, "source": "ui_v2"})
 
 	_, _ = fmt.Fprint(w, v2Page("Investigate · "+ip.String(), "/v2/investigate",
-		renderV2InvestigateIP(view, ipEvidence, noteContent, s.csrfTokenFromRequest(r))))
+		renderV2InvestigateIP(view, ipEvidence, noteContent, s.csrfTokenFromRequest(r), fromPage)))
 }
 
 // ipEvidenceGroup aggregates evidence records for a single IP.
@@ -244,10 +246,18 @@ func renderV2InvestigateInvalidIP(q string) string {
 }
 
 // renderV2InvestigateIP renders State B: incident header + signal tiles + two-column layout.
-func renderV2InvestigateIP(view ForensicView, ipEvidence []reporting.DecisionEvidence, noteContent, csrfToken string) string {
+func renderV2InvestigateIP(view ForensicView, ipEvidence []reporting.DecisionEvidence, noteContent, csrfToken, fromPage string) string {
 	var b strings.Builder
 	ip := html.EscapeString(view.IP)
 	ipQ := url.QueryEscape(view.IP)
+
+	// Back-navigation banner when arriving from another page (#168)
+	if fromPage == "timeline" {
+		b.WriteString(fmt.Sprintf(
+			`<a href="/v2/timeline?q=%s" style="display:inline-flex;align-items:center;gap:6px;padding:5px 12px;border-radius:6px;background:rgba(124,108,242,.1);border:1px solid rgba(124,108,242,.22);font:600 12px 'Hanken Grotesk',sans-serif;color:#9b8cff;text-decoration:none;margin-bottom:14px">← Timeline · results for %s</a>`,
+			ipQ, ip,
+		))
+	}
 
 	// Build subtitle from geo / ASN
 	var subtitleParts []string
@@ -332,6 +342,11 @@ func renderV2InvestigateIP(view ForensicView, ipEvidence []reporting.DecisionEvi
 	b.WriteString(renderV2SignalTile("Local score", localScore, -1, "pts"))
 	b.WriteString(renderV2SignalTileCount("Events", len(ipEvidence)))
 	b.WriteString(`</div>`)
+
+	// Pivot links — direct navigation card (#173)
+	b.WriteString(fmt.Sprintf(`<div class="v2-card" style="margin-bottom:16px"><div class="v2-card-header"><span class="v2-card-title">Pivot to</span></div><div class="v2-card-body" style="display:flex;flex-wrap:wrap;gap:8px"><a href="/v2/timeline?q=%s" style="display:inline-flex;align-items:center;gap:5px;padding:4px 10px;border-radius:6px;border:1px solid #20242f;background:#10121a;font:600 11px 'JetBrains Mono',monospace;color:#9b8cff;text-decoration:none">⟳ Timeline</a><a href="/v2/cloudflare" style="display:inline-flex;align-items:center;gap:5px;padding:4px 10px;border-radius:6px;border:1px solid #20242f;background:#10121a;font:600 11px 'JetBrains Mono',monospace;color:#9b8cff;text-decoration:none">☁ Cloudflare</a><a href="/v2/notes" style="display:inline-flex;align-items:center;gap:5px;padding:4px 10px;border-radius:6px;border:1px solid #20242f;background:#10121a;font:600 11px 'JetBrains Mono',monospace;color:#9b8cff;text-decoration:none">✎ Notes</a><a href="/notes?type=ip&amp;value=%s" style="display:inline-flex;align-items:center;gap:5px;padding:4px 10px;border-radius:6px;border:1px solid rgba(124,108,242,.3);background:rgba(124,108,242,.08);font:600 11px 'JetBrains Mono',monospace;color:#9b8cff;text-decoration:none">+ Note this IP</a></div></div>`,
+		ipQ, ipQ,
+	))
 
 	// Two-column layout
 	b.WriteString(`<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start">`)

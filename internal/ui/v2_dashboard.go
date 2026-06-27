@@ -285,15 +285,21 @@ func renderV2Dashboard(view DashboardConsoleView) string {
 			href = "/v2/timeline"
 		}
 
+		// data-ts for freshness.js relative timestamps (#167)
+		tsAttr := ""
+		if t, err2 := time.Parse(time.RFC3339, item.Timestamp); err2 == nil {
+			tsAttr = fmt.Sprintf(` data-ts="%d" data-ts-full="%s"`, t.Unix(), html.EscapeString(item.Timestamp))
+		}
 		tailHTML.WriteString(fmt.Sprintf(`
 		<a href="%s" style="display:flex;align-items:center;gap:8px;padding:7px 9px;border-radius:7px;%s%stext-decoration:none;color:inherit">
-		  <span style="font:500 11px 'JetBrains Mono',monospace;color:#7b8196;flex-shrink:0">%s</span>
+		  <span style="font:500 11px 'JetBrains Mono',monospace;color:#7b8196;flex-shrink:0"%s>%s</span>
 		  <span style="display:inline-flex;gap:5px;padding:2px 7px;border-radius:5px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.06);font:500 11px 'JetBrains Mono',monospace;color:#cdd2e0"><span style="color:#787f93">ip:</span>%s</span>
 		  <span style="display:inline-flex;gap:5px;padding:2px 7px;border-radius:5px;background:%s;border:1px solid %s;font:500 11px 'JetBrains Mono',monospace;color:%s">%s</span>
 		  <span style="flex:1"></span>
 		</a>`,
 			href,
 			rowBg, rowBorder,
+			tsAttr,
 			html.EscapeString(ts),
 			html.EscapeString(ip),
 			actBg, actBorder, actColor,

@@ -156,6 +156,11 @@ a{color:inherit}
 .v2-empty-action{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 11px;border-radius:9px;border:1px solid #20242f;background:#10121a;color:#c5cad8;text-decoration:none;font:600 12px 'Hanken Grotesk',sans-serif}
 .v2-empty-action:hover{border-color:rgba(124,108,242,.4);background:#141725}
 
+/* Skeleton loading states */
+.v2-card{position:relative}
+body.v2-loading .v2-card{animation:skel 1.2s ease-in-out infinite}
+body.v2-loading .v2-card::after{content:'';position:absolute;inset:0;background:linear-gradient(90deg,transparent 25%,rgba(255,255,255,.03) 50%,transparent 75%);animation:shimmer 1.5s infinite;pointer-events:none}
+
 @media(max-width:760px){
 body{display:block}
 .v2-sidebar{width:100%;height:auto;position:static;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));padding:10px;gap:4px;border-right:none;border-bottom:1px solid #181b25;overflow:visible}
@@ -225,7 +230,7 @@ body{display:block}
     <div class="v2-palette-hint">
       <span><kbd>↵</kbd> Investigate</span>
       <span><kbd>Esc</kbd> Close</span>
-      <span>IP · timeline · cloudflare · audit</span>
+      <span>IP · g+t timeline · g+i investigate · g+h health · g+c cloudflare</span>
     </div>
     <div class="v2-palette-examples">
       <a href="/v2/investigate"><strong>Search IP</strong><span>investigate</span></a>
@@ -236,7 +241,10 @@ body{display:block}
   </div>
 </div>
 
+<script src="/v2/static/freshness.js"></script>
+<script src="/v2/static/nav-progress.js"></script>
 <script src="/v2/static/palette.js"></script>
+<script src="/static/ai-explain.js"></script>
 </body>
 </html>`
 }
