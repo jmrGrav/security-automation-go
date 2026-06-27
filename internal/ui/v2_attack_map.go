@@ -75,14 +75,15 @@ function applyState(collapsed){
   }
 }
 
-// Restore persisted state immediately (before first paint if possible)
 applyState(localStorage.getItem(STORAGE_KEY) === '1');
 
-window.v2SidebarToggle = function(){
-  var collapsed = !sidebar.classList.contains('v2-sb-collapsed');
-  applyState(collapsed);
-  try{ localStorage.setItem(STORAGE_KEY, collapsed ? '1' : '0'); } catch(e){}
-};
+if(toggle){
+  toggle.addEventListener('click', function(){
+    var collapsed = !sidebar.classList.contains('v2-sb-collapsed');
+    applyState(collapsed);
+    try{ localStorage.setItem(STORAGE_KEY, collapsed ? '1' : '0'); }catch(e){}
+  });
+}
 })();`
 
 const navProgressJS = `(function(){

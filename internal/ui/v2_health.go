@@ -40,7 +40,7 @@ func renderV2HealthPage(checks []health.Check, detectors []detect.Result, pipeli
 
 	// Posture
 	var sb strings.Builder
-	sb.WriteString(`<div style="background:#13151c;border:1px solid #242838;border-radius:12px;overflow:hidden;color:#e8eaf1;max-width:760px">`)
+	sb.WriteString(`<div style="background:#13151c;border:1px solid #242838;border-radius:12px;overflow:hidden;color:#e8eaf1">`)
 
 	// Topbar
 	sb.WriteString(`<div style="display:flex;align-items:center;gap:10px;padding:14px 18px;border-bottom:1px solid #20242f">`)

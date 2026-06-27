@@ -363,7 +363,7 @@ func v2TimelineRowDetails(ev audit.TimelineEvent) string {
 			summary = ev.Summary
 		}
 		aiTrigger = fmt.Sprintf(
-			`<button type="button" data-ai-explain-trigger data-ai-subject-type="event" data-ai-subject-id="%s" data-ai-summary="%s" title="Ask AI" style="background:none;border:none;cursor:pointer;font-size:13px;color:#9b8cff;padding:2px 5px;border-radius:4px;line-height:1;opacity:.7;margin-left:auto;flex-shrink:0" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=.7">✦</button>`,
+			`<button type="button" data-ai-explain-trigger data-ai-subject-type="timeline_event" data-ai-subject-id="%s" data-ai-summary="%s" title="Ask AI" style="background:none;border:none;cursor:pointer;font-size:13px;color:#9b8cff;padding:2px 5px;border-radius:4px;line-height:1;opacity:.7;margin-left:auto;flex-shrink:0" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=.7">✦</button>`,
 			html.EscapeString(ev.Target),
 			html.EscapeString(summary),
 		)
