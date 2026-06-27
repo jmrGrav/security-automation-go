@@ -30,7 +30,7 @@ func renderV2ProvidersPage(view UnifiedProvidersView, csrfToken string) string {
 	}
 
 	sb.WriteString(`<style>
-.v2-providers-wrap{max-width:980px}
+.v2-providers-wrap{width:100%}
 .v2-integrations{background:#13151c;border:1px solid #242838;border-radius:12px;box-shadow:0 12px 34px rgba(0,0,0,.18);overflow:hidden;color:#e8eaf1}
 .v2-integrations-top{display:flex;align-items:center;gap:10px;padding:14px 18px;border-bottom:1px solid #20242f}
 .v2-integrations-title{font:700 14px 'Hanken Grotesk',sans-serif;color:#eef0f6}
