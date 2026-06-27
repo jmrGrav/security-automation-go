@@ -586,6 +586,12 @@ func applyEnvOverrides(cfg *Config) {
 			}
 		}
 	}
+	// TRUSTED_NETWORKS_MODE allows overriding shadow→enforce via environment.
+	// Only the exact literal "enforce" is accepted; anything else stays shadow,
+	// preserving the invariant documented on TrustedNetworksConfig.
+	if v := os.Getenv("TRUSTED_NETWORKS_MODE"); v == "enforce" {
+		cfg.TrustedNetworks.Mode = "enforce"
+	}
 }
 
 func validate(cfg *Config) error {
