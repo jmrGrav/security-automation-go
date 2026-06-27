@@ -25,7 +25,9 @@ func (s *Server) handleTrustedNetworksPage(w http.ResponseWriter, r *http.Reques
 		"correlation_id": eventID,
 		"event_id":       eventID,
 	})
-	_ = TrustedNetworksPage(s.trustedNetworksView(r.Context())).Render(r.Context(), w)
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	view := s.trustedNetworksView(r.Context())
+	_, _ = fmt.Fprint(w, v2Page("Trusted Networks", "/trusted-networks", renderV2TrustedNetworksContent(view)))
 }
 
 func (s *Server) handleTrustedNetworksExport(w http.ResponseWriter, r *http.Request) {
@@ -69,6 +71,89 @@ func (s *Server) handleTrustedNetworksExport(w http.ResponseWriter, r *http.Requ
 			}
 		}
 	}
+}
+
+// renderV2TrustedNetworksContent renders the page body wrapped by v2Page().
+func renderV2TrustedNetworksContent(view TrustedNetworksView) string {
+	var sb strings.Builder
+	sb.WriteString(`<style>
+.tn-table{width:100%;border-collapse:collapse;font:500 12px 'Hanken Grotesk',sans-serif}
+.tn-table th{padding:8px 12px;text-align:left;font:600 10px 'Hanken Grotesk',sans-serif;letter-spacing:.06em;color:#6b7184;text-transform:uppercase;border-bottom:1px solid #1a1e29;white-space:nowrap;background:#0d0f16}
+.tn-table td{padding:8px 12px;border-bottom:1px solid #0f1118;color:#c5cad8;vertical-align:top}
+.tn-table tr:last-child td{border-bottom:none}
+.tn-table tr:hover td{background:rgba(255,255,255,.02)}
+.tn-badge{display:inline-flex;align-items:center;padding:2px 7px;border-radius:5px;font:600 10px 'Hanken Grotesk',sans-serif;letter-spacing:.04em;text-transform:uppercase}
+.tn-badge-ok{background:rgba(76,199,154,.1);border:1px solid rgba(76,199,154,.22);color:#4cc79a}
+.tn-badge-warn{background:rgba(245,146,30,.1);border:1px solid rgba(245,146,30,.22);color:#f5a443}
+.tn-badge-err{background:rgba(239,95,107,.1);border:1px solid rgba(239,95,107,.22);color:#f08591}
+.tn-badge-neu{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);color:#9aa0b2}
+.tn-muted{color:#6b7184;font-size:.85em}
+code{font:500 11px 'JetBrains Mono',monospace;color:#9b8cff}
+</style>
+
+<div class="v2-topbar">
+  <div>
+    <div class="v2-topbar-title">Trusted Networks</div>
+    <div class="v2-topbar-sub">Registry-backed read-only inventory of protected networks and crawler ranges</div>
+  </div>
+  <span style="flex:1"></span>
+  <a href="/trusted-networks/export" style="display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border-radius:8px;border:1px solid #20242f;background:#10121a;font:600 12px 'Hanken Grotesk',sans-serif;color:#c5cad8;text-decoration:none">Export registry</a>
+</div>
+`)
+
+	// Sync banners
+	switch view.SyncMode {
+	case "enforce":
+		sb.WriteString(`<div class="v2-banner" style="border-color:rgba(76,199,154,.22);background:rgba(76,199,154,.06);margin-bottom:16px"><span class="tn-badge tn-badge-ok">sync: enforce</span><span class="tn-muted">CrowdSec/Cloudflare allowlist sync is actively pushing missing entries.</span></div>`)
+	case "shadow":
+		sb.WriteString(`<div class="v2-banner" style="border-color:rgba(245,146,30,.22);background:rgba(245,146,30,.06);margin-bottom:16px"><span class="tn-badge tn-badge-warn">sync: shadow</span><span class="tn-muted">CrowdSec/Cloudflare allowlist sync is detect-only — no remote mutations are made.</span></div>`)
+	default:
+		sb.WriteString(`<div class="v2-banner" style="border-color:rgba(155,140,255,.18);background:rgba(155,140,255,.05);margin-bottom:16px"><span class="tn-badge tn-badge-neu">sync: not running</span><span class="tn-muted">The trusted-networks sync registry has not completed a pass yet.</span></div>`)
+	}
+
+	// CrowdSec helper banner
+	h := view.CrowdSecHelper
+	if h.Available {
+		badgeClass, badgeText := "tn-badge-ok", "crowdsec helper: ok"
+		if !h.AuthOK || h.LastError != "" {
+			badgeClass, badgeText = "tn-badge-err", "crowdsec helper: error"
+		} else if h.DriftCount > 0 {
+			badgeClass, badgeText = "tn-badge-warn", "crowdsec helper: drift"
+		} else if !h.Configured {
+			badgeClass, badgeText = "tn-badge-neu", "crowdsec helper: not configured"
+		}
+		lastSync := valueOrFallback(h.LastSyncAt, "never")
+		errPart := ""
+		if h.LastError != "" {
+			errPart = fmt.Sprintf(` · <span style="color:#f08591">%s</span>`, html.EscapeString(h.LastError))
+		}
+		sb.WriteString(fmt.Sprintf(
+			`<div class="v2-banner" style="border-color:rgba(124,108,242,.18);background:rgba(124,108,242,.05);margin-bottom:16px"><span class="tn-badge %s">%s</span><span class="tn-muted">mode: %s · last sync: %s · desired: %d · current: %d · drift: %d%s</span></div>`,
+			html.EscapeString(badgeClass), html.EscapeString(badgeText),
+			html.EscapeString(valueOrFallback(h.Mode, "unknown")),
+			html.EscapeString(lastSync),
+			h.DesiredCount, h.CurrentCount, h.DriftCount, errPart,
+		))
+	}
+
+	if view.Error != "" {
+		sb.WriteString(fmt.Sprintf(`<div class="v2-card" style="padding:14px 18px;border-color:rgba(239,95,107,.25)"><span style="color:#f08591">%s</span></div>`, html.EscapeString(view.Error)))
+	}
+
+	if len(view.Entries) == 0 {
+		sb.WriteString(`<div class="v2-card"><div class="v2-empty">No trusted-network registry entries available.</div></div>`)
+	} else {
+		sb.WriteString(`<div class="v2-card"><div style="overflow-x:auto"><table class="tn-table"><thead><tr><th>Name</th><th>Kind</th><th>CIDRs</th><th>Protection</th><th>Allowlist</th><th>Status</th></tr></thead><tbody>`)
+		for _, entry := range view.Entries {
+			var row strings.Builder
+			if err := renderTrustedNetworkRow(&row, entry); err == nil {
+				sb.WriteString(row.String())
+			}
+		}
+		sb.WriteString(`</tbody></table></div></div>`)
+	}
+
+	return sb.String()
 }
 
 func TrustedNetworksPage(view TrustedNetworksView) templ.Component {
