@@ -6,6 +6,7 @@ import (
 	"math"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -18,10 +19,10 @@ func (s *Server) handleV2Timeline(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	query := strings.TrimSpace(r.URL.Query().Get("q"))
+	from := strings.TrimSpace(r.URL.Query().Get("from"))
+	to := strings.TrimSpace(r.URL.Query().Get("to"))
 	events := s.allTimelineEvents(ctx)
-	if query != "" {
-		events = filterTimelineEvents(events, query, "", "")
-	}
+	events = v2FilterTimelineEvents(events, query, from, to)
 
 	_, _ = fmt.Fprint(w, v2Page("Timeline", "/v2/timeline", renderV2TimelinePage(events, query)))
 }
@@ -160,9 +161,14 @@ func renderV2TimelineHistogram(events []audit.TimelineEvent) string {
 			color = "rgba(100,130,180,.45)"
 		}
 
+		// Bucket i covers: [now - (buckets-i)*bucketDur, now - (buckets-i-1)*bucketDur)
+		fromTs := now.Add(-time.Duration(buckets-i) * bucketDur).Unix()
+		toTs := now.Add(-time.Duration(buckets-i-1) * bucketDur).Unix()
+		href := fmt.Sprintf("/v2/timeline?from=%d&to=%d", fromTs, toTs)
+
 		sb.WriteString(fmt.Sprintf(
-			`<div class="tl-bar" style="height:%dpx;background:%s" title="%d events in bucket"></div>`,
-			height, color, count,
+			`<a href="%s" class="tl-bar" style="height:%dpx;background:%s;display:block;text-decoration:none" title="%d events — click to filter"></a>`,
+			html.EscapeString(href), height, color, count,
 		))
 	}
 	return sb.String()
@@ -328,12 +334,11 @@ func v2TimelineRowDetails(ev audit.TimelineEvent) string {
 	if hasTarget {
 		q := url.QueryEscape(ev.Target)
 		actions = append(actions,
-			fmt.Sprintf(`<a href="/v2/incident?ip=%s">Open Focus Incident</a>`, q),
-			fmt.Sprintf(`<a href="/v2/investigate?q=%s">Open Evidence</a>`, q),
-			fmt.Sprintf(`<a href="/v2/timeline?q=%s">Open Timeline filtered</a>`, q),
-			fmt.Sprintf(`<a href="/forensic?ip=%s">Open Forensic</a>`, q),
-			fmt.Sprintf(`<a href="https://www.abuseipdb.com/check/%s" target="_blank" rel="noopener noreferrer">Open AbuseIPDB</a>`, q),
-			fmt.Sprintf(`<a href="https://www.virustotal.com/gui/ip-address/%s" target="_blank" rel="noopener noreferrer">Open VirusTotal</a>`, q),
+			fmt.Sprintf(`<a href="/v2/incident?ip=%s">Focus Incident</a>`, q),
+			fmt.Sprintf(`<a href="/v2/investigate?q=%s">Investigate</a>`, q),
+			fmt.Sprintf(`<a href="/v2/timeline?q=%s">Timeline filtered</a>`, q),
+			fmt.Sprintf(`<a href="https://www.abuseipdb.com/check/%s" target="_blank" rel="noopener noreferrer">AbuseIPDB ↗</a>`, q),
+			fmt.Sprintf(`<a href="https://www.virustotal.com/gui/ip-address/%s" target="_blank" rel="noopener noreferrer">VirusTotal ↗</a>`, q),
 		)
 	}
 
@@ -345,8 +350,23 @@ func v2TimelineRowDetails(ev audit.TimelineEvent) string {
 	if len(actions) > 0 {
 		actionsSection = fmt.Sprintf(`<div class="tl-row-actions">%s</div>`, strings.Join(actions, ""))
 	}
+	whySection := v2TimelineWhyItMatters(ev.Action)
 
-	return fmt.Sprintf(`<details><summary>row details</summary>%s%s</details>`, secondarySection, actionsSection)
+	// ✦ AI explain trigger for this event
+	aiTrigger := ""
+	if ev.Target != "" {
+		summary := ev.Action
+		if ev.Summary != "" {
+			summary = ev.Summary
+		}
+		aiTrigger = fmt.Sprintf(
+			`<button type="button" data-ai-explain-trigger data-ai-subject-type="event" data-ai-subject-id="%s" data-ai-summary="%s" title="Ask AI" style="background:none;border:none;cursor:pointer;font-size:13px;color:#9b8cff;padding:2px 5px;border-radius:4px;line-height:1;opacity:.7;margin-left:auto;flex-shrink:0" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=.7">✦</button>`,
+			html.EscapeString(ev.Target),
+			html.EscapeString(summary),
+		)
+	}
+
+	return fmt.Sprintf(`<details><summary>row details%s</summary>%s%s%s</details>`, aiTrigger, secondarySection, actionsSection, whySection)
 }
 
 func v2TimelineKVPill(key, value, sev string) string {
@@ -361,4 +381,61 @@ func v2TimelineKVPill(key, value, sev string) string {
 		`<span class="%s"><span class="tl-pill-key">%s:</span>%s</span>`,
 		cls, html.EscapeString(key), html.EscapeString(value),
 	)
+}
+
+// v2TimelineWhyItMatters returns a contextual guidance line based on the event action.
+func v2TimelineWhyItMatters(action string) string {
+	a := strings.ToLower(action)
+	switch {
+	case strings.Contains(a, "malicious") || strings.Contains(a, "ban") || strings.Contains(a, "block"):
+		return `<div style="font:500 12px 'Hanken Grotesk',sans-serif;color:#9aa0b2;margin-top:8px;padding:6px 8px;border-radius:6px;border-left:2px solid #ef5f6b">High confidence threat. Consider reviewing correlated events if multiple IPs share the same ASN.</div>`
+	case strings.Contains(a, "suspicious") || strings.Contains(a, "flag") || strings.Contains(a, "suppress"):
+		return `<div style="font:500 12px 'Hanken Grotesk',sans-serif;color:#9aa0b2;margin-top:8px;padding:6px 8px;border-radius:6px;border-left:2px solid #f5a443">Borderline signal — monitor this source. Review AbuseIPDB score if persistent.</div>`
+	case strings.Contains(a, "whitelist") || strings.Contains(a, "trust") || strings.Contains(a, "allow"):
+		return `<div style="font:500 12px 'Hanken Grotesk',sans-serif;color:#9aa0b2;margin-top:8px;padding:6px 8px;border-radius:6px;border-left:2px solid #9b8cff">Operator-trusted source. This event will not trigger enforcement.</div>`
+	}
+	return ""
+}
+
+// v2FilterTimelineEvents filters events by query text and optional unix-timestamp from/to range.
+func v2FilterTimelineEvents(events []audit.TimelineEvent, query, from, to string) []audit.TimelineEvent {
+	var fromT, toT time.Time
+	if fromUnix, err := strconv.ParseInt(from, 10, 64); err == nil && fromUnix > 0 {
+		fromT = time.Unix(fromUnix, 0)
+	}
+	if toUnix, err := strconv.ParseInt(to, 10, 64); err == nil && toUnix > 0 {
+		toT = time.Unix(toUnix, 0)
+	}
+
+	q := strings.ToLower(strings.TrimSpace(query))
+	hasTimeFilter := !fromT.IsZero() || !toT.IsZero()
+	if q == "" && !hasTimeFilter {
+		return events
+	}
+
+	out := make([]audit.TimelineEvent, 0, len(events))
+	for _, ev := range events {
+		if q != "" && !timelineMatchesQuery(ev, q) {
+			continue
+		}
+		if hasTimeFilter {
+			var t time.Time
+			var err error
+			t, err = time.Parse(time.RFC3339, ev.Timestamp)
+			if err != nil {
+				t, err = time.Parse("2006-01-02T15:04:05", ev.Timestamp)
+			}
+			if err != nil {
+				continue
+			}
+			if !fromT.IsZero() && t.Before(fromT) {
+				continue
+			}
+			if !toT.IsZero() && t.After(toT) {
+				continue
+			}
+		}
+		out = append(out, ev)
+	}
+	return out
 }

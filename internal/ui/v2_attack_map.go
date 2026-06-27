@@ -31,6 +31,80 @@ func (s *Server) handleV2LoaderScript(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write([]byte(loaderJS))
 }
 
+// handleV2NavProgressScript serves the thin progress bar that appears after 200ms
+// on nav-link clicks, providing visual feedback during server-rendered page loads.
+func (s *Server) handleV2NavProgressScript(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
+	w.Header().Set("Cache-Control", "max-age=3600")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(navProgressJS))
+}
+
+// handleV2FreshnessScript serves the relative-timestamp updater that reads [data-ts]
+// attributes and converts ISO/epoch timestamps to human-readable "2m ago" labels.
+func (s *Server) handleV2FreshnessScript(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
+	w.Header().Set("Cache-Control", "max-age=3600")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(freshnessJS))
+}
+
+const navProgressJS = `(function(){
+  var bar=null,timer=null,active=false;
+  function show(){
+    if(active)return;active=true;
+    bar=document.createElement('div');
+    bar.style.cssText='position:fixed;top:0;left:0;height:2px;width:0;background:linear-gradient(90deg,#7c6cf2,#9b8cff);z-index:9999;transition:width .4s ease,opacity .3s ease;border-radius:0 2px 2px 0';
+    document.body.appendChild(bar);
+    document.body.classList.add('v2-loading');
+    requestAnimationFrame(function(){bar.style.width='70%'});
+  }
+  function hide(){
+    if(!active)return;active=false;
+    if(bar){bar.style.width='100%';bar.style.opacity='0';setTimeout(function(){bar&&bar.remove();bar=null},300)}
+    clearTimeout(timer);timer=null;
+    document.body.classList.remove('v2-loading');
+  }
+  document.addEventListener('click',function(e){
+    var a=e.target.closest('a[href]');
+    if(!a||!a.href||a.target==="_blank"||e.ctrlKey||e.metaKey||e.shiftKey||e.altKey)return;
+    var url=new URL(a.href,location.href);
+    if(url.origin!==location.origin)return;
+    clearTimeout(timer);
+    timer=setTimeout(show,200);
+  });
+  window.addEventListener('pageshow',hide);
+  window.addEventListener('pagehide',function(){clearTimeout(timer)});
+})();
+`
+
+const freshnessJS = `(function(){
+  'use strict';
+  function ago(isoOrEpoch){
+    var d = typeof isoOrEpoch === 'number' ? new Date(isoOrEpoch*1000) : new Date(isoOrEpoch);
+    if(isNaN(d)) return '';
+    var s = Math.floor((Date.now()-d.getTime())/1000);
+    if(s < 5) return 'just now';
+    if(s < 60) return s+'s ago';
+    if(s < 3600) return Math.floor(s/60)+'m ago';
+    if(s < 86400) return Math.floor(s/3600)+'h ago';
+    return Math.floor(s/86400)+'d ago';
+  }
+  function update(){
+    document.querySelectorAll('[data-ts]').forEach(function(el){
+      var ts = el.getAttribute('data-ts');
+      var rel = ago(isNaN(ts) ? ts : parseInt(ts,10));
+      if(rel && el.textContent !== rel){
+        el.title = el.getAttribute('data-ts-full') || ts;
+        el.textContent = rel;
+      }
+    });
+  }
+  update();
+  setInterval(update, 30000);
+})();
+`
+
 const paletteJS = `
 (function(){
   'use strict';
@@ -40,12 +114,20 @@ const paletteJS = `
   function storageGet(key){ try { return window.localStorage ? window.localStorage.getItem(key) : ''; } catch(e){ return ''; } }
   function storageSet(key, value){ try { if(window.localStorage){ window.localStorage.setItem(key, value); } } catch(e){} }
   function isIP(value){ return /^(\d{1,3}\.){3}\d{1,3}$/.test(value) || /^[0-9a-f:]+:[0-9a-f:]+/i.test(value); }
+  var recentIPsKey='security-automation:recent-ips';
+  function loadList(key){ try{ var raw=storageGet(key); var parsed=raw?JSON.parse(raw):[]; return Array.isArray(parsed)?parsed:[]; }catch(e){ return []; } }
+  function saveList(key, items){ storageSet(key, JSON.stringify(items)); }
   // Routes IP, AS13335, providers, pages, and event terms without turning the UI into a SPA.
   function routeQuery(value){
     var q=(value||'').trim();
     var lower=q.toLowerCase();
     if(!q){ return '/v2/investigate'; }
-    if(isIP(q)){ return '/v2/investigate?q='+encodeURIComponent(q); }
+    if(isIP(q)){
+      var recentIPs=loadList(recentIPsKey).filter(function(it){ return it.ip!==q; });
+      recentIPs.unshift({ip:q,ts:new Date().toISOString()});
+      saveList(recentIPsKey, recentIPs.slice(0,20));
+      return '/v2/investigate?q='+encodeURIComponent(q);
+    }
     if(/^as\d+$/i.test(q)){ return '/v2/timeline?q='+encodeURIComponent(q); }
     // Explicit page-name navigation (exact or prefix match on trimmed lower input)
     if(lower==='dashboard'){ return '/v2/'; }
@@ -70,6 +152,25 @@ const paletteJS = `
     var el=palette(), inp=paletteInput();
     if(!el||!inp) return;
     el.style.display='flex';
+    // Populate recent IPs in examples grid
+    var examples=el.querySelector('.v2-palette-examples');
+    if(examples){
+      var recentIPs=loadList(recentIPsKey).slice(0,4);
+      if(recentIPs.length>0){
+        examples.innerHTML='';
+        recentIPs.forEach(function(item){
+          var a=document.createElement('a');
+          a.href='/v2/investigate?q='+encodeURIComponent(item.ip||'');
+          var strong=document.createElement('strong');
+          strong.textContent=item.ip||'';
+          var span=document.createElement('span');
+          span.textContent='recent';
+          a.appendChild(strong);
+          a.appendChild(span);
+          examples.appendChild(a);
+        });
+      }
+    }
     setTimeout(function(){ inp.focus(); inp.select(); }, 0);
   }
   function closePalette(){
@@ -97,6 +198,9 @@ const paletteJS = `
       if(k==='i'){ window.location='/v2/investigate'; }
       if(k==='p'){ window.location='/v2/providers'; }
       if(k==='h'){ window.location='/v2/health'; }
+      if(k==='c'){ window.location='/v2/cloudflare'; }
+      if(k==='n'){ window.location='/v2/notes'; }
+      if(k==='a'){ window.location='/v2/audit'; }
       state.navPrefixAt = 0;
     }
   });
@@ -135,8 +239,6 @@ const paletteJS = `
   });
 
   var watchlistKey='security-automation:watchlist';
-  function loadList(key){ try{ var raw=storageGet(key); var parsed=raw?JSON.parse(raw):[]; return Array.isArray(parsed)?parsed:[]; }catch(e){ return []; } }
-  function saveList(key, items){ storageSet(key, JSON.stringify(items)); }
   function renderWatchlist(){
     var widget=document.querySelector('[data-watchlist-widget="true"]');
     if(!widget){ return; }

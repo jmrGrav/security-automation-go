@@ -210,7 +210,7 @@ func TestV2TimelineRow_ActionLinksInDetails(t *testing.T) {
 	for _, want := range []string{
 		"/v2/incident?ip=5.6.7.8",
 		"/v2/investigate?q=5.6.7.8",
-		"/forensic?ip=5.6.7.8",
+		"/v2/timeline?q=5.6.7.8",
 	} {
 		if !strings.Contains(secondaryPart, want) {
 			t.Errorf("expected action link %q inside <details>; secondary part: %s", want, secondaryPart)

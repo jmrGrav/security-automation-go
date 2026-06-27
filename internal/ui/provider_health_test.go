@@ -183,7 +183,7 @@ func TestRenderV2ProvidersPageUsesV2ShellAndProviderStates(t *testing.T) {
 		"credential missing from SQLite",
 		"provider disabled by operator",
 		"rate limited",
-		"Updated just now",
+		`data-ts="`,
 		"/v2/static/providers-live.js",
 		"Copy diagnostic JSON",
 	} {
