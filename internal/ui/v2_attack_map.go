@@ -49,6 +49,42 @@ func (s *Server) handleV2FreshnessScript(w http.ResponseWriter, r *http.Request)
 	_, _ = w.Write([]byte(freshnessJS))
 }
 
+// handleV2SidebarScript serves the collapsible sidebar toggle logic.
+// Reads/writes localStorage key 'v2SidebarCollapsed' and toggles the
+// '.v2-sb-collapsed' class on the #v2-sidebar nav element.
+func (s *Server) handleV2SidebarScript(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
+	w.Header().Set("Cache-Control", "max-age=3600")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(sidebarJS))
+}
+
+const sidebarJS = `(function(){'use strict';
+var STORAGE_KEY = 'v2SidebarCollapsed';
+var sidebar = document.getElementById('v2-sidebar');
+var toggle  = document.getElementById('v2-sb-toggle');
+
+function applyState(collapsed){
+  if(!sidebar){ return; }
+  if(collapsed){
+    sidebar.classList.add('v2-sb-collapsed');
+    if(toggle){ toggle.textContent = '›'; toggle.title = 'Expand sidebar'; }
+  } else {
+    sidebar.classList.remove('v2-sb-collapsed');
+    if(toggle){ toggle.textContent = '‹'; toggle.title = 'Collapse sidebar'; }
+  }
+}
+
+// Restore persisted state immediately (before first paint if possible)
+applyState(localStorage.getItem(STORAGE_KEY) === '1');
+
+window.v2SidebarToggle = function(){
+  var collapsed = !sidebar.classList.contains('v2-sb-collapsed');
+  applyState(collapsed);
+  try{ localStorage.setItem(STORAGE_KEY, collapsed ? '1' : '0'); } catch(e){}
+};
+})();`
+
 const navProgressJS = `(function(){
   var bar=null,timer=null,active=false;
   function show(){

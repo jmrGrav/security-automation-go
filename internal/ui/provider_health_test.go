@@ -327,7 +327,7 @@ func TestRenderV2DashboardTellsOperatorStory(t *testing.T) {
 }
 
 func TestRenderV2TimelineEmptyStateOffersOperatorActions(t *testing.T) {
-	out := renderV2TimelinePage(nil, "")
+	out := renderV2TimelinePage(nil, "", "")
 	for _, want := range []string{
 		"No investigation started",
 		"Quick actions",

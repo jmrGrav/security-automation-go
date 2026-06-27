@@ -24,12 +24,14 @@ func (s *Server) handleV2Timeline(w http.ResponseWriter, r *http.Request) {
 	events := s.allTimelineEvents(ctx)
 	events = v2FilterTimelineEvents(events, query, from, to)
 
-	_, _ = fmt.Fprint(w, v2Page("Timeline", "/v2/timeline", renderV2TimelinePage(events, query)))
+	csrf := s.csrfTokenFromRequest(r)
+	_, _ = fmt.Fprint(w, v2Page("Timeline", "/v2/timeline", renderV2TimelinePage(events, query, csrf)))
 }
 
-func renderV2TimelinePage(events []audit.TimelineEvent, query string) string {
+func renderV2TimelinePage(events []audit.TimelineEvent, query, csrfToken string) string {
 	histogram := renderV2TimelineHistogram(events)
 	stream := renderV2TimelineStream(events, query)
+	csrfEl := fmt.Sprintf(`<span id="v2-csrf-token" data-token="%s" style="display:none" aria-hidden="true"></span>`, html.EscapeString(csrfToken))
 
 	activeFilter := ""
 	if query != "" {
@@ -93,7 +95,8 @@ func renderV2TimelinePage(events []audit.TimelineEvent, query string) string {
     <span>Event</span>
   </div>
   ` + stream + `
-</div>`
+</div>
+` + csrfEl
 }
 
 func renderV2TimelineHistogram(events []audit.TimelineEvent) string {
