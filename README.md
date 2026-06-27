@@ -9,7 +9,7 @@ Go control-plane that synchronises [CrowdSec](https://crowdsec.net/) decisions t
 [Cloudflare](https://www.cloudflare.com/), reports abusive IPs to
 [AbuseIPDB](https://www.abuseipdb.com/), and drives WAF follow-up actions.
 
-**Status: v1.7.6** — Complete UI v2 operator console (PR1–PR6 + SOC sprint + v1.7.6 polish): performance baseline, SOC command center, threat visualization, visual identity, operator productivity (watchlist, keyboard nav, recently viewed), and advanced investigation (correlated timeline, operator notes, focus incident). Full v2 dark shell at `/v2/` with animated login loader, sidebar workflow navigation (Observe / Investigate / Infrastructure / Operations), Timeline Live Tail, Providers integrations page, Focus Incident, Notes, Audit trail. Ctrl+K command palette with IP/ASN/provider routing + recent-IPs. Timeline histogram clickable time-range filters, contextual "why it matters" hints, ✦ AI explain trigger, live relative timestamps (freshness.js), skeleton loading states, cross-page back-navigation. Reputation-gated Cloudflare ban lifecycle, hub-and-spoke Trusted Networks registry. Production-ready.
+**Status: v1.7.7** — Unified v2 shell with collapsible sidebar (BetterStack-style 218px/66px, localStorage persist, smooth CSS transition), SVG nav icons replacing colored dots, full design system token set (`.v2-card`, `.v2-kpi`, `.v2-pill`, `.v2-banner`, `.v2-table`). Dashboard and Trusted Networks migrated to the single `v2Page()` shell — no more split identity between pages. Fixed ✦ Ask AI button in Timeline row details (JS click handler, inline result panel, CSRF threading). Built on v1.7.7: complete UI v2 operator console (PR1–PR6 + SOC sprint): SOC command center, threat visualization, Timeline Live Tail, Providers, Focus Incident, Notes, Audit trail, Ctrl+K command palette, Timeline histogram filters, contextual hints, live relative timestamps, skeleton loading, cross-page back-navigation. Reputation-gated Cloudflare ban lifecycle, hub-and-spoke Trusted Networks registry. Production-ready.
 
 ## Architecture
 
@@ -32,7 +32,7 @@ go vet ./...
 gofmt -l .
 go test ./...
 go test -race ./...
-make package         # dist/security-automation-go_1.7.6_amd64.deb
+make package         # dist/security-automation-go_1.7.7_amd64.deb
 ```
 
 ## Quick install
@@ -40,8 +40,8 @@ make package         # dist/security-automation-go_1.7.6_amd64.deb
 Download the latest `.deb` from [Releases](https://github.com/jmrGrav/security-automation-go/releases):
 
 ```bash
-curl -LO https://github.com/jmrGrav/security-automation-go/releases/download/v1.7.6/security-automation-go_1.7.6_amd64.deb
-curl -LO https://github.com/jmrGrav/security-automation-go/releases/download/v1.7.6/SHA256SUMS
+curl -LO https://github.com/jmrGrav/security-automation-go/releases/download/v1.7.7/security-automation-go_1.7.6_amd64.deb
+curl -LO https://github.com/jmrGrav/security-automation-go/releases/download/v1.7.7/SHA256SUMS
 sha256sum -c SHA256SUMS
 sudo dpkg -i security-automation-go_1.7.6_amd64.deb
 sudo systemctl start cf-sync
