@@ -256,14 +256,41 @@ func v2TimelineSourcePill(source string) string {
 	)
 }
 
-// v2TimelinePrimaryPills renders the always-visible pills: action + ip.
+// v2TimelineEventTypeBadge returns a small colored badge showing the event type
+// so operators can instantly distinguish ban/suppress/report/replay/warn events.
+func v2TimelineEventTypeBadge(action string) string {
+	a := strings.ToLower(action)
+	switch {
+	case strings.Contains(a, "ban") || strings.Contains(a, "block") || strings.Contains(a, "deny"):
+		return `<span style="display:inline-flex;align-items:center;gap:4px;font:700 9px 'JetBrains Mono',monospace;letter-spacing:.06em;text-transform:uppercase;color:#ef5f6b;background:rgba(239,95,107,.1);border:1px solid rgba(239,95,107,.25);border-radius:5px;padding:2px 6px;flex-shrink:0">ban</span>`
+	case strings.Contains(a, "malicious"):
+		return `<span style="display:inline-flex;align-items:center;gap:4px;font:700 9px 'JetBrains Mono',monospace;letter-spacing:.06em;text-transform:uppercase;color:#ef5f6b;background:rgba(239,95,107,.08);border:1px solid rgba(239,95,107,.22);border-radius:5px;padding:2px 6px;flex-shrink:0">threat</span>`
+	case strings.Contains(a, "report"):
+		return `<span style="display:inline-flex;align-items:center;gap:4px;font:700 9px 'JetBrains Mono',monospace;letter-spacing:.06em;text-transform:uppercase;color:#4cc79a;background:rgba(76,199,154,.1);border:1px solid rgba(76,199,154,.22);border-radius:5px;padding:2px 6px;flex-shrink:0">report</span>`
+	case strings.Contains(a, "replay"):
+		return `<span style="display:inline-flex;align-items:center;gap:4px;font:700 9px 'JetBrains Mono',monospace;letter-spacing:.06em;text-transform:uppercase;color:#9b8cff;background:rgba(124,108,242,.1);border:1px solid rgba(124,108,242,.22);border-radius:5px;padding:2px 6px;flex-shrink:0">replay</span>`
+	case strings.Contains(a, "suppress") || strings.Contains(a, "suppress"):
+		return `<span style="display:inline-flex;align-items:center;gap:4px;font:700 9px 'JetBrains Mono',monospace;letter-spacing:.06em;text-transform:uppercase;color:#f5b563;background:rgba(245,181,99,.08);border:1px solid rgba(245,181,99,.2);border-radius:5px;padding:2px 6px;flex-shrink:0">suppress</span>`
+	case strings.Contains(a, "warn"):
+		return `<span style="display:inline-flex;align-items:center;gap:4px;font:700 9px 'JetBrains Mono',monospace;letter-spacing:.06em;text-transform:uppercase;color:#f5921e;background:rgba(245,146,30,.08);border:1px solid rgba(245,146,30,.2);border-radius:5px;padding:2px 6px;flex-shrink:0">warn</span>`
+	case strings.Contains(a, "trust") || strings.Contains(a, "allow") || strings.Contains(a, "whitelist"):
+		return `<span style="display:inline-flex;align-items:center;gap:4px;font:700 9px 'JetBrains Mono',monospace;letter-spacing:.06em;text-transform:uppercase;color:#6b7184;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);border-radius:5px;padding:2px 6px;flex-shrink:0">allow</span>`
+	case strings.Contains(a, "recov"):
+		return `<span style="display:inline-flex;align-items:center;gap:4px;font:700 9px 'JetBrains Mono',monospace;letter-spacing:.06em;text-transform:uppercase;color:#4cc79a;background:rgba(76,199,154,.06);border:1px solid rgba(76,199,154,.18);border-radius:5px;padding:2px 6px;flex-shrink:0">recovery</span>`
+	default:
+		return `<span style="display:inline-flex;align-items:center;gap:4px;font:700 9px 'JetBrains Mono',monospace;letter-spacing:.06em;text-transform:uppercase;color:#6b7184;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);border-radius:5px;padding:2px 6px;flex-shrink:0">info</span>`
+	}
+}
+
+// v2TimelinePrimaryPills renders the always-visible pills: event type badge + action + ip.
 // Secondary detail (result, summary, correlation, evidence) is moved into the
 // expandable details element by v2TimelineRowDetails so the feed stays compact.
 func v2TimelinePrimaryPills(ev audit.TimelineEvent) string {
 	var parts []string
 
 	if ev.Action != "" {
-		parts = append(parts, v2TimelineKVPill("action", ev.Action, ""))
+		parts = append(parts, v2TimelineEventTypeBadge(ev.Action))
+		parts = append(parts, fmt.Sprintf(`<span style="font:500 12px 'Hanken Grotesk',sans-serif;color:#c5cad8">%s</span>`, html.EscapeString(ev.Action)))
 	}
 
 	if ev.Target != "" {
@@ -273,7 +300,7 @@ func v2TimelinePrimaryPills(ev audit.TimelineEvent) string {
 		))
 	}
 
-	return strings.Join(parts, "")
+	return strings.Join(parts, " ")
 }
 
 // v2TimelineSecondaryPills renders result, summary, correlation and evidence

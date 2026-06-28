@@ -87,31 +87,50 @@ if(toggle){
 })();`
 
 const navProgressJS = `(function(){
-  var bar=null,timer=null,active=false;
-  function show(){
-    if(active)return;active=true;
+  var bar=null,overlay=null,barTimer=null,overlayTimer=null,active=false;
+  function showBar(){
+    if(bar)return;
     bar=document.createElement('div');
     bar.style.cssText='position:fixed;top:0;left:0;height:2px;width:0;background:linear-gradient(90deg,#7c6cf2,#9b8cff);z-index:9999;transition:width .4s ease,opacity .3s ease;border-radius:0 2px 2px 0';
     document.body.appendChild(bar);
     document.body.classList.add('v2-loading');
     requestAnimationFrame(function(){bar.style.width='70%'});
   }
+  function showOverlay(){
+    if(overlay)return;
+    overlay=document.createElement('div');
+    overlay.style.cssText='position:fixed;inset:0;z-index:9998;background:rgba(10,11,16,.6);backdrop-filter:blur(2px);display:flex;align-items:center;justify-content:center';
+    var box=document.createElement('div');
+    box.style.cssText='display:flex;flex-direction:column;align-items:center;gap:14px;padding:26px 32px;border-radius:16px;background:#11131b;border:1px solid #242838;box-shadow:0 18px 50px rgba(0,0,0,.5)';
+    box.innerHTML='<div style="position:relative;width:38px;height:38px"><div style="position:absolute;inset:0;border-radius:50%;border:2px solid #1c2030"></div><div style="position:absolute;inset:0;border-radius:50%;border:2px solid transparent;border-top-color:#7c6cf2;animation:v2spin .8s linear infinite"></div><div style="position:absolute;left:50%;top:50%;width:7px;height:7px;margin:-3.5px 0 0 -3.5px;background:#9b8cff;border-radius:2px;transform:rotate(45deg);box-shadow:0 0 8px rgba(124,108,242,.7)"></div></div><div style="font:600 11px \'JetBrains Mono\',monospace;color:#aab0c2">loading…</div><div style="position:relative;width:140px;height:3px;border-radius:3px;background:rgba(255,255,255,.07);overflow:hidden"><div style="position:absolute;top:0;left:0;height:100%;width:42%;border-radius:3px;background:linear-gradient(90deg,transparent,#7c6cf2,#a99cff,transparent);animation:v2shimmer 1.2s ease-in-out infinite"></div></div>';
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+  }
+  function show(){
+    if(active)return;active=true;
+    showBar();
+  }
   function hide(){
     if(!active)return;active=false;
     if(bar){bar.style.width='100%';bar.style.opacity='0';setTimeout(function(){bar&&bar.remove();bar=null},300)}
-    clearTimeout(timer);timer=null;
+    if(overlay){overlay.remove();overlay=null}
+    clearTimeout(barTimer);clearTimeout(overlayTimer);barTimer=null;overlayTimer=null;
     document.body.classList.remove('v2-loading');
   }
+  var style=document.createElement('style');
+  style.textContent='@keyframes v2spin{to{transform:rotate(360deg)}}@keyframes v2shimmer{0%{transform:translateX(-130%)}100%{transform:translateX(430%)}}';
+  document.head.appendChild(style);
   document.addEventListener('click',function(e){
     var a=e.target.closest('a[href]');
     if(!a||!a.href||a.target==="_blank"||e.ctrlKey||e.metaKey||e.shiftKey||e.altKey)return;
     var url=new URL(a.href,location.href);
     if(url.origin!==location.origin)return;
-    clearTimeout(timer);
-    timer=setTimeout(show,200);
+    clearTimeout(barTimer);clearTimeout(overlayTimer);
+    barTimer=setTimeout(show,200);
+    overlayTimer=setTimeout(showOverlay,400);
   });
   window.addEventListener('pageshow',hide);
-  window.addEventListener('pagehide',function(){clearTimeout(timer)});
+  window.addEventListener('pagehide',function(){clearTimeout(barTimer);clearTimeout(overlayTimer)});
 })();
 `
 

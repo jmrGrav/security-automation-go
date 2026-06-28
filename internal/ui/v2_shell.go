@@ -159,9 +159,9 @@ a{color:inherit}
 .v2-palette-input::placeholder{color:#4a5168}
 .v2-palette-hint{padding:10px 16px 12px;font:500 11px 'JetBrains Mono',monospace;color:#5b6070;display:flex;gap:12px;flex-wrap:wrap}
 .v2-palette-hint kbd{background:#1a1e29;border:1px solid #2a2f42;border-radius:4px;padding:1px 6px;color:#9aa0b2}
-.v2-palette-examples{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;padding:0 16px 14px}
-.v2-palette-examples a{display:flex;align-items:center;justify-content:space-between;gap:8px;text-decoration:none;border:1px solid #20242f;background:#10121a;border-radius:8px;padding:7px 9px;font:600 11px 'JetBrains Mono',monospace;color:#aab0c2}
-.v2-palette-examples span{color:#6b7184;font:500 10px 'Hanken Grotesk',sans-serif}
+.v2-palette-examples{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;padding:0 16px 14px}
+.v2-palette-examples a{display:flex;align-items:center;justify-content:space-between;gap:8px;text-decoration:none;border:1px solid #20242f;background:#10121a;border-radius:8px;padding:7px 9px;font:600 11px 'JetBrains Mono',monospace;color:#aab0c2;flex-direction:column;align-items:flex-start}
+.v2-palette-examples span{color:#6b7184;font:500 10px 'Hanken Grotesk',sans-serif;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
 
 /* ── Design System tokens ── */
 .v2-card{background:#13151c;border:1px solid #20242f;border-radius:14px;overflow:hidden;margin-bottom:20px;position:relative}
@@ -217,7 +217,8 @@ a{color:inherit}
 
 /* KPI row */
 .v2-kpi-row{display:flex;gap:16px;margin-bottom:20px}
-.v2-kpi{flex:1;border:1px solid #20242f;border-radius:14px;background:#13151c;padding:16px 18px;min-width:0}
+.v2-kpi{flex:1;border:1px solid #20242f;border-radius:14px;background:#13151c;padding:16px 18px;min-width:0;transition:transform .18s ease,border-color .18s ease,box-shadow .18s ease}
+.v2-kpi:hover{transform:translateY(-2px);border-color:#2f3550;box-shadow:0 10px 26px rgba(0,0,0,.28)}
 .v2-kpi-label{font:600 11px 'Hanken Grotesk',sans-serif;color:#9aa0b2;margin-bottom:9px}
 .v2-kpi-value{font:700 32px 'Hanken Grotesk',sans-serif;color:#eef0f6;line-height:1}
 .v2-kpi-sub{font:500 11px 'JetBrains Mono',monospace;color:#6b7184;margin-top:5px}
@@ -312,17 +313,21 @@ body{display:block}
   <div class="v2-palette-box">
     <form id="v2-palette-form" class="v2-palette-input-row">
       <span class="v2-palette-icon">⊕</span>
-      <input class="v2-palette-input" id="v2-palette-input" type="text" placeholder="IP address or evidence ID…" autocomplete="off" autocorrect="off" spellcheck="false">
+      <input class="v2-palette-input" id="v2-palette-input" type="text" placeholder="Jump to a page, or type an IP to investigate…" autocomplete="off" autocorrect="off" spellcheck="false">
     </form>
     <div class="v2-palette-hint">
-      <span><kbd>↵</kbd> Investigate</span>
+      <span><kbd>↵</kbd> Go</span>
       <span><kbd>Esc</kbd> Close</span>
-      <span>IP · g+t timeline · g+i investigate · g+h health · g+c cloudflare</span>
+      <span>type page name · type IP to investigate · type scenario to filter</span>
     </div>
     <div class="v2-palette-examples">
-      <a href="/v2/investigate"><strong>Search IP</strong><span>investigate</span></a>
-      <a href="/v2/timeline"><strong>Timeline</strong><span>events</span></a>
-      <a href="/v2/cloudflare"><strong>Cloudflare</strong><span>boundary</span></a>
+      <a href="/v2/"><strong>Dashboard</strong><span>mission control</span></a>
+      <a href="/v2/investigate"><strong>Investigate</strong><span>IP / ASN / scenario</span></a>
+      <a href="/v2/timeline"><strong>Timeline</strong><span>live tail · events</span></a>
+      <a href="/v2/health"><strong>Health</strong><span>pipeline · subsystems</span></a>
+      <a href="/v2/providers"><strong>Providers</strong><span>AI · enrichment · boundary</span></a>
+      <a href="/v2/cloudflare"><strong>Cloudflare</strong><span>diff · posture</span></a>
+      <a href="/v2/notes"><strong>Notes</strong><span>operator annotations</span></a>
       <a href="/v2/audit"><strong>Audit</strong><span>operator trail</span></a>
     </div>
   </div>

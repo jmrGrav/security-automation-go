@@ -234,6 +234,26 @@ func renderV2CFPosture(v v2CloudflareView) string {
 		cleaned = 0
 	}
 
+	// Quick-status checklist (5-second operator read)
+	check := func(ok bool, label string) string {
+		if ok {
+			return fmt.Sprintf(`<span style="display:inline-flex;align-items:center;gap:5px;font:600 11px 'Hanken Grotesk',sans-serif;color:#4cc79a">✓ %s</span>`, html.EscapeString(label))
+		}
+		return fmt.Sprintf(`<span style="display:inline-flex;align-items:center;gap:5px;font:600 11px 'Hanken Grotesk',sans-serif;color:#f08591">✗ %s</span>`, html.EscapeString(label))
+	}
+	nextAction := "No action required"
+	nextColor := "#4cc79a"
+	if !v.APITokenPresent {
+		nextAction = "Add CF_API_TOKEN"
+		nextColor = "#f08591"
+	} else if !v.ZoneIDPresent {
+		nextAction = "Add CF_ZONE_ID"
+		nextColor = "#f08591"
+	} else if drift > 0 {
+		nextAction = fmt.Sprintf("Review %d drift entries", drift)
+		nextColor = "#f5a443"
+	}
+
 	return fmt.Sprintf(`<div style="border:1px solid #20242f;border-radius:12px;background:#13151c;padding:18px;margin-bottom:18px">
 <div style="display:flex;align-items:center;gap:14px">
   <span style="width:13px;height:13px;border-radius:50%%;background:%s;box-shadow:0 0 0 4px rgba(76,199,154,.15);flex:none"></span>
@@ -247,11 +267,18 @@ func renderV2CFPosture(v v2CloudflareView) string {
     <div><div style="font:700 22px 'Hanken Grotesk',sans-serif;color:#54c79a">%d</div><div style="font:600 9px 'Hanken Grotesk',sans-serif;letter-spacing:.06em;color:#7b8196;text-transform:uppercase">Drift</div></div>
   </div>
 </div>
+<div style="display:flex;align-items:center;gap:16px;margin-top:14px;padding-top:12px;border-top:1px solid #1a1e29;flex-wrap:wrap">
+  %s%s%s%s
+  <span style="flex:1"></span>
+  <span style="font:700 11px 'Hanken Grotesk',sans-serif;color:%s">→ %s</span>
+</div>
 </div>`,
 		dotColor, html.EscapeString(headline),
 		html.EscapeString(lastStr), html.EscapeString(agoStr),
 		cleaned, drift,
 		countColor, activeCount, drift,
+		check(v.APITokenPresent, "Token"), check(v.ZoneIDPresent, "Zone"), check(drift == 0, "No drift"), check(activeCount == 0, "No active bans"),
+		nextColor, nextAction,
 	)
 }
 
