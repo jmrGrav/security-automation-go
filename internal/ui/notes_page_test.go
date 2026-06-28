@@ -36,7 +36,7 @@ func TestNotesPageRendersNotes(t *testing.T) {
 }
 
 func TestV2NotesPageEmptyStateIsOperational(t *testing.T) {
-	out := renderV2NotesPage(nil)
+	out := renderV2NotesPage(nil, "test-token")
 	for _, want := range []string{
 		"Operator Notes",
 		"Recent notes",
@@ -62,7 +62,7 @@ func TestV2NotesPageRendersNotesAsInvestigationLinks(t *testing.T) {
 		{EntityType: "ip", EntityValue: "1.2.3.4", Content: "scanner", UpdatedAt: time.Date(2026, 6, 25, 10, 0, 0, 0, time.UTC)},
 	}
 
-	out := renderV2NotesPage(notes)
+	out := renderV2NotesPage(notes, "test-token")
 	for _, want := range []string{
 		"scanner",
 		"1.2.3.4",
