@@ -345,7 +345,7 @@ func renderV2Dashboard(view DashboardConsoleView) string {
 	} else {
 		for _, status := range view.Statuses {
 			componentsHTML.WriteString(fmt.Sprintf(
-				`<a href="/v2/health" style="display:grid;grid-template-columns:150px 88px 1fr;gap:10px;align-items:center;padding:8px 0;border-bottom:1px solid #1a1e29;text-decoration:none;color:inherit"><span style="font:700 12px 'Hanken Grotesk',sans-serif;color:#e3e6ef">%s</span><span class="pill">%s</span><span style="font:500 12px 'Hanken Grotesk',sans-serif;color:#8c94a8;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">%s</span></a>`,
+				`<a href="/v2/health" style="display:grid;grid-template-columns:150px 88px 1fr;gap:10px;align-items:center;padding:8px 0;border-bottom:1px solid #1a1e29;text-decoration:none;color:inherit"><span style="font:700 12px 'Hanken Grotesk',sans-serif;color:#e3e6ef">%s</span><span class="v2-pill">%s</span><span style="font:500 12px 'Hanken Grotesk',sans-serif;color:#8c94a8;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">%s</span></a>`,
 				html.EscapeString(status.Label),
 				html.EscapeString(status.Level),
 				html.EscapeString(status.Detail),
@@ -358,7 +358,7 @@ func renderV2Dashboard(view DashboardConsoleView) string {
 	} else {
 		for _, provider := range view.AIProviders {
 			providersHTML.WriteString(fmt.Sprintf(
-				`<a href="/v2/providers" style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #1a1e29;text-decoration:none;color:inherit"><span style="font:700 12px 'Hanken Grotesk',sans-serif;color:#e3e6ef;width:120px">%s</span><span class="pill">%s</span><span style="font:500 11px 'JetBrains Mono',monospace;color:#6b7184">%s</span></a>`,
+				`<a href="/v2/providers" style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #1a1e29;text-decoration:none;color:inherit"><span style="font:700 12px 'Hanken Grotesk',sans-serif;color:#e3e6ef;width:120px">%s</span><span class="v2-pill">%s</span><span style="font:500 11px 'JetBrains Mono',monospace;color:#6b7184">%s</span></a>`,
 				html.EscapeString(provider.Name),
 				html.EscapeString(provider.Status),
 				html.EscapeString(provider.Model),
@@ -376,10 +376,6 @@ func renderV2Dashboard(view DashboardConsoleView) string {
 .ds-stat-sub{font:500 12px 'JetBrains Mono',monospace;color:#6b7184;margin-top:5px}
 .ds-section{font:700 11px 'Hanken Grotesk',sans-serif;letter-spacing:.05em;color:#7b8196;text-transform:uppercase;margin:16px 0 10px}
 .ds-window-row{display:flex;gap:2px}
-.pill{display:inline-flex;align-items:center;gap:5px;padding:2px 7px;border-radius:5px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.06);font:500 11px 'JetBrains Mono',monospace;color:#cdd2e0}
-.card{background:#13151c;border:1px solid #20242f;border-radius:14px;overflow:hidden;margin-bottom:16px}
-.card-header{display:flex;align-items:center;gap:8px;padding:13px 18px;border-bottom:1px solid #20242f}
-.card-title{font:700 11px 'Hanken Grotesk',sans-serif;letter-spacing:.06em;color:#7b8196;text-transform:uppercase}
 @media(max-width:760px){
 .ds-stats-row{display:grid;grid-template-columns:1fr 1fr}
 }
@@ -387,7 +383,7 @@ func renderV2Dashboard(view DashboardConsoleView) string {
 
 <div class="v2-topbar">
   <span class="v2-topbar-title">Dashboard</span>
-  <span style="font:500 12px 'JetBrains Mono',monospace;color:#6b7184">crowdsec-decisions</span>
+  <span class="v2-topbar-sub">crowdsec-decisions</span>
   <span style="flex:1"></span>
   <button data-palette-trigger class="v2-kbd-trigger">⊕ <kbd>Ctrl+K</kbd></button>
   <div class="ds-window-row">` + windowLinks + `</div>
@@ -415,9 +411,9 @@ func renderV2Dashboard(view DashboardConsoleView) string {
 </div>
 
 <div class="ds-section">Current threats</div>
-<div class="card">
-  <div class="card-header">
-    <span class="card-title">Live attack map</span>
+<div class="v2-card">
+  <div class="v2-card-header">
+    <span class="v2-card-title">Live attack map</span>
     <span style="flex:1"></span>
     <span style="font:500 11px 'JetBrains Mono',monospace;color:#6b7184">read-only · ` + fmt.Sprintf("%d", threat.TotalEvents) + ` events</span>
   </div>
@@ -433,8 +429,8 @@ func renderV2Dashboard(view DashboardConsoleView) string {
 
 <div class="ds-section">Current activity</div>
 <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
-  <div class="card">
-    <div class="card-header"><span class="card-title">Top campaigns</span></div>
+  <div class="v2-card">
+    <div class="v2-card-header"><span class="v2-card-title">Top campaigns</span></div>
     <div style="padding:14px 18px">
       <div style="display:flex;padding:14px 0 16px;border-bottom:1px solid #1a1e29;margin-bottom:14px">
         <div style="flex:1;text-align:center"><div style="font:700 20px 'Hanken Grotesk',sans-serif;color:#f5a443">` + fmt.Sprintf("%d", blocked24h) + `</div><div style="font:600 10px 'Hanken Grotesk',sans-serif;letter-spacing:.06em;color:#7b8196;text-transform:uppercase">Events</div></div>
@@ -448,9 +444,9 @@ func renderV2Dashboard(view DashboardConsoleView) string {
       <div style="display:flex;flex-direction:column;gap:10px">` + campaignsHTML.String() + `</div>
     </div>
   </div>
-  <div class="card">
-    <div class="card-header">
-      <span class="card-title">Live tail</span>
+  <div class="v2-card">
+    <div class="v2-card-header">
+      <span class="v2-card-title">Live tail</span>
       <span style="flex:1"></span>
       <a href="/v2/timeline" style="font:500 11px 'JetBrains Mono',monospace;color:#7c6cf2;text-decoration:none">full timeline ↗</a>
     </div>
@@ -459,27 +455,27 @@ func renderV2Dashboard(view DashboardConsoleView) string {
 </div>
 
 <div class="ds-section">Components</div>
-<div class="card">
-  <div class="card-header">
-    <span class="card-title">Infrastructure</span>
+<div class="v2-card">
+  <div class="v2-card-header">
+    <span class="v2-card-title">Infrastructure</span>
     <span style="flex:1"></span>
     <a href="/v2/health" style="font:500 11px 'JetBrains Mono',monospace;color:#7c6cf2;text-decoration:none">open health ›</a>
   </div>
   <div style="padding:14px 18px">
     <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:12px">
-      <span class="pill">Uptime tracked</span>
-      <span class="pill">Last reload just now</span>
-      <span class="pill">SQLite schema observed</span>
-      <span class="pill">Worker count projected</span>
+      <span class="v2-pill">Uptime tracked</span>
+      <span class="v2-pill">Last reload just now</span>
+      <span class="v2-pill">SQLite schema observed</span>
+      <span class="v2-pill">Worker count projected</span>
     </div>
     ` + componentsHTML.String() + `
   </div>
 </div>
 
 <div class="ds-section">Providers</div>
-<div class="card">
-  <div class="card-header">
-    <span class="card-title">Provider boundaries</span>
+<div class="v2-card">
+  <div class="v2-card-header">
+    <span class="v2-card-title">Provider boundaries</span>
     <span style="flex:1"></span>
     <a href="/v2/providers" style="font:500 11px 'JetBrains Mono',monospace;color:#7c6cf2;text-decoration:none">open providers ›</a>
   </div>

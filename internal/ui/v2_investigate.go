@@ -151,7 +151,7 @@ func groupEvidenceByIP(entries []reporting.DecisionEvidence) []ipEvidenceGroup {
 	return result
 }
 
-// renderV2InvestigateEmpty renders State A: search hero + grouped evidence feed.
+// renderV2InvestigateEmpty renders State A: search hero + grouped evidence feed + secondary panels.
 func renderV2InvestigateEmpty(recent []reporting.DecisionEvidence) string {
 	var b strings.Builder
 
@@ -163,26 +163,28 @@ func renderV2InvestigateEmpty(recent []reporting.DecisionEvidence) string {
 </div>
 `)
 
+	groups := groupEvidenceByIP(recent)
+
+	// Two-column layout: main (search + evidence) | sidebar (top attackers + quick nav)
+	b.WriteString(`<div style="display:grid;grid-template-columns:1fr 300px;gap:16px;align-items:start">`)
+
+	// ── Left column ────────────────────────────────────────────────────────
+	b.WriteString(`<div>`)
+
 	// Search hero
-	b.WriteString(`<div class="v2-card" style="margin-bottom:20px">
-  <div class="v2-card-body" style="padding:28px 24px">
-    <div style="font:800 22px 'Hanken Grotesk',sans-serif;color:#eef0f6;margin-bottom:4px">Investigate an IP</div>
-    <div style="font:500 13px 'Hanken Grotesk',sans-serif;color:#8c94a8;margin-bottom:18px">Enrichment, evidence, and decision history in one view.</div>
+	b.WriteString(`<div class="v2-card" style="margin-bottom:16px">
+  <div class="v2-card-body" style="padding:24px">
+    <div style="font:800 20px 'Hanken Grotesk',sans-serif;color:#eef0f6;margin-bottom:3px">Investigate an IP</div>
+    <div style="font:500 12px 'JetBrains Mono',monospace;color:#6b7184;margin-bottom:16px">Enrichment, evidence, and decision history in one view.</div>
     <form method="GET" action="/v2/investigate" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
       <input type="text" name="ip" placeholder="e.g. 1.2.3.4"
-        style="flex:1;min-width:200px;background:#0d0f14;border:1px solid #2a2f42;border-radius:8px;padding:9px 14px;color:#eef0f6;font:500 14px 'JetBrains Mono',monospace;outline:none"
+        style="flex:1;min-width:180px;background:#0d0f14;border:1px solid #2a2f42;border-radius:8px;padding:8px 13px;color:#eef0f6;font:500 13px 'JetBrains Mono',monospace;outline:none"
         autocomplete="off" autocorrect="off" spellcheck="false">
       <button type="submit"
-        style="padding:9px 18px;background:#7c6cf2;border:none;border-radius:8px;color:#fff;font:700 13px 'Hanken Grotesk',sans-serif;cursor:pointer;white-space:nowrap">
+        style="padding:8px 16px;background:#7c6cf2;border:none;border-radius:8px;color:#fff;font:700 12px 'Hanken Grotesk',sans-serif;cursor:pointer;white-space:nowrap">
         Open incident →
       </button>
     </form>
-    <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap">
-      <a href="/v2/timeline" class="v2-empty-action" style="padding:7px 12px;font-size:12px">Browse timeline <span>›</span></a>
-      <a href="/v2/timeline?q=waf" class="v2-empty-action" style="padding:7px 12px;font-size:12px">Recent WAF events <span>›</span></a>
-      <a href="/v2/timeline?q=abuseipdb" class="v2-empty-action" style="padding:7px 12px;font-size:12px">AbuseIPDB reports <span>›</span></a>
-      <a href="/v2/notes" class="v2-empty-action" style="padding:7px 12px;font-size:12px">Operator notes <span>›</span></a>
-    </div>
   </div>
 </div>`)
 
@@ -195,7 +197,6 @@ func renderV2InvestigateEmpty(recent []reporting.DecisionEvidence) string {
   </div>
 `)
 
-	groups := groupEvidenceByIP(recent)
 	if len(groups) == 0 {
 		b.WriteString(`<div class="v2-empty">No evidence recorded yet.</div>`)
 	} else {
@@ -238,6 +239,62 @@ func renderV2InvestigateEmpty(recent []reporting.DecisionEvidence) string {
 		b.WriteString(`</tbody></table></div>`)
 	}
 	b.WriteString(`</div>`)
+	b.WriteString(`</div>`) // end left column
+
+	// ── Right column: secondary panels ─────────────────────────────────────
+	b.WriteString(`<div>`)
+
+	// Top attackers KV panel
+	b.WriteString(`<div class="v2-card" style="margin-bottom:16px">
+  <div class="v2-card-header"><span class="v2-card-title">Top attackers</span></div>
+  <div class="v2-card-body" style="padding:10px 18px">`)
+	if len(groups) == 0 {
+		b.WriteString(`<div style="font:500 11px 'JetBrains Mono',monospace;color:#6b7184;padding:8px 0">No data yet.</div>`)
+	} else {
+		// Sort by event count descending for top attackers panel
+		sorted := make([]ipEvidenceGroup, len(groups))
+		copy(sorted, groups)
+		sort.Slice(sorted, func(i, j int) bool { return sorted[i].Events > sorted[j].Events })
+		limit := 8
+		if len(sorted) < limit {
+			limit = len(sorted)
+		}
+		b.WriteString(`<div class="v2-kv">`)
+		for _, g := range sorted[:limit] {
+			scoreClass := ""
+			if g.Score >= 80 {
+				scoreClass = "error"
+			} else if g.Score >= 50 {
+				scoreClass = "warn"
+			}
+			b.WriteString(fmt.Sprintf(
+				`<div class="v2-kv-row"><span class="v2-kv-key"><a href="/v2/investigate?ip=%s" style="color:#7c6cf2;text-decoration:none;font:inherit">%s</a></span>`+
+					`<span class="v2-kv-val" style="flex:none"><span class="v2-chip %s">%d evt</span></span></div>`,
+				url.QueryEscape(g.IP), html.EscapeString(g.IP),
+				scoreClass, g.Events,
+			))
+		}
+		b.WriteString(`</div>`)
+	}
+	b.WriteString(`</div></div>`) // end top-attackers card
+
+	// Quick nav panel
+	b.WriteString(`<div class="v2-card">
+  <div class="v2-card-header"><span class="v2-card-title">Quick nav</span></div>
+  <div class="v2-card-body" style="padding:10px 18px">
+    <div class="v2-kv">
+      <div class="v2-kv-row"><a href="/v2/timeline" style="color:#7c6cf2;text-decoration:none;font:500 12px 'Hanken Grotesk',sans-serif">Browse timeline →</a></div>
+      <div class="v2-kv-row"><a href="/v2/timeline?q=waf" style="color:#9aa0b2;text-decoration:none;font:500 12px 'Hanken Grotesk',sans-serif">WAF events →</a></div>
+      <div class="v2-kv-row"><a href="/v2/timeline?q=abuseipdb" style="color:#9aa0b2;text-decoration:none;font:500 12px 'Hanken Grotesk',sans-serif">AbuseIPDB reports →</a></div>
+      <div class="v2-kv-row"><a href="/v2/notes" style="color:#9aa0b2;text-decoration:none;font:500 12px 'Hanken Grotesk',sans-serif">Operator notes →</a></div>
+      <div class="v2-kv-row"><a href="/v2/cloudflare" style="color:#9aa0b2;text-decoration:none;font:500 12px 'Hanken Grotesk',sans-serif">Cloudflare boundary →</a></div>
+    </div>
+  </div>
+</div>`)
+
+	b.WriteString(`</div>`) // end right column
+	b.WriteString(`</div>`) // end grid
+
 	return b.String()
 }
 

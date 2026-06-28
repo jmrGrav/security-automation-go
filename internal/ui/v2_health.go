@@ -214,7 +214,7 @@ func renderV2HealthFunnel(pipeline PipelineHealthView) string {
 	sb.WriteString(`<span style="font:700 11px 'Hanken Grotesk',sans-serif;letter-spacing:.06em;color:#7b8196;text-transform:uppercase">Event pipeline</span>`)
 	sb.WriteString(`<span style="font:500 11px 'JetBrains Mono',monospace;color:#6b7184;margin-left:8px">last 24h</span>`)
 	sb.WriteString(`<span style="flex:1"></span>`)
-	sb.WriteString(`<span style="display:inline-flex;align-items:center;gap:6px;font:600 11px 'JetBrains Mono',monospace;color:#4cc79a"><span style="width:7px;height:7px;border-radius:50%;background:#4cc79a;animation:livepulse 1.8s infinite"></span>LIVE</span>`)
+	sb.WriteString(`<span class="v2-live-badge"><span class="v2-live-dot"></span>LIVE</span>`)
 	sb.WriteString(`</div>`)
 
 	// Classified total + outcome tiles

@@ -150,7 +150,7 @@ func renderV2Cloudflare(v v2CloudflareView) string {
 	// ── Topbar ──────────────────────────────────────────────────────────────
 	b.WriteString(`<div class="v2-topbar">`)
 	b.WriteString(`<span style="width:30px;height:30px;border-radius:8px;background:rgba(245,146,30,.12);border:1px solid rgba(245,146,30,.25);display:grid;place-items:center;font:800 12px 'Hanken Grotesk',sans-serif;color:#f5921e">CF</span>`)
-	b.WriteString(`<div><div class="v2-topbar-title">Cloudflare</div><div style="font:500 11px 'JetBrains Mono',monospace;color:#6b7184;margin-top:2px">boundary · ban sync · lifecycle · diff — unifié</div></div>`)
+	b.WriteString(`<div><div class="v2-topbar-title">Cloudflare</div><div class="v2-topbar-sub" style="margin-top:2px">boundary · ban sync · lifecycle · diff — unifié</div></div>`)
 	b.WriteString(`<span style="flex:1"></span>`)
 	// Last sync freshness (#171)
 	if !v.Sync.LastActivityAt.IsZero() {

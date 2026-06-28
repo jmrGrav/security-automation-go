@@ -43,7 +43,7 @@ func TestV2NotesPageEmptyStateIsOperational(t *testing.T) {
 		"Search",
 		"Filters",
 		"Quick create",
-		"Entities recently annotated",
+		"Pinned entities",
 		"No notes",
 		"Open Focus Incident",
 		"Browse Timeline",

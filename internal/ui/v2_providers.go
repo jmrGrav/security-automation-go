@@ -35,10 +35,6 @@ func renderV2ProvidersPage(view UnifiedProvidersView, csrfToken string) string {
 .v2-integrations-top{display:flex;align-items:center;gap:10px;padding:14px 18px;border-bottom:1px solid #20242f}
 .v2-integrations-title{font:700 14px 'Hanken Grotesk',sans-serif;color:#eef0f6}
 .v2-integrations-sub{font:500 12px 'JetBrains Mono',monospace;color:#6b7184}
-.v2-action{display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:5px 11px;border-radius:7px;background:#1c2030;border:1px solid #2a2f42;font:600 11px 'Hanken Grotesk',sans-serif;color:#c5cad8;text-decoration:none;cursor:pointer;min-height:28px}
-.v2-action.primary{background:rgba(124,108,242,.14);border-color:rgba(124,108,242,.3);color:#a99cff}
-.v2-action.warn{background:rgba(245,146,30,.1);border-color:rgba(245,146,30,.22);color:#f5b563}
-.v2-action:disabled{opacity:.6;cursor:wait}
 .v2-provider-posture{padding:18px;border-bottom:1px solid #20242f}
 .v2-posture-line{display:flex;align-items:center;gap:14px}
 .v2-posture-dot{width:14px;height:14px;border-radius:50%;background:#4cc79a;box-shadow:0 0 0 4px rgba(76,199,154,.15);flex:none}
@@ -46,11 +42,6 @@ func renderV2ProvidersPage(view UnifiedProvidersView, csrfToken string) string {
 .v2-posture-dot.error{background:#ef5f6b;box-shadow:0 0 0 4px rgba(239,95,107,.15)}
 .v2-posture-title{font:700 20px 'Hanken Grotesk',sans-serif;color:#eef0f6}
 .v2-posture-meta{font:500 12px 'JetBrains Mono',monospace;color:#6b7184;margin-top:2px}
-.v2-chip-row{display:flex;gap:7px;flex-wrap:wrap}
-.v2-chip{display:inline-flex;align-items:center;gap:5px;font:600 11px 'JetBrains Mono',monospace;border-radius:6px;padding:3px 9px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.07);color:#9aa0b2}
-.v2-chip.ok{color:#54c79a;background:rgba(76,199,154,.12);border-color:rgba(76,199,154,.22)}
-.v2-chip.warn{color:#f5b563;background:rgba(245,146,30,.1);border-color:rgba(245,146,30,.22)}
-.v2-chip.error{color:#f08591;background:rgba(239,95,107,.1);border-color:rgba(239,95,107,.22)}
 .v2-advisory{display:flex;align-items:center;gap:10px;margin-top:14px;padding:10px 12px;border-radius:9px;background:rgba(245,146,30,.07);border:1px solid rgba(245,146,30,.2)}
 .v2-advisory.error{background:rgba(239,95,107,.07);border-color:rgba(239,95,107,.2)}
 .v2-section{padding:16px 18px;border-bottom:1px solid #20242f}
@@ -59,7 +50,7 @@ func renderV2ProvidersPage(view UnifiedProvidersView, csrfToken string) string {
 .v2-section-title{font:700 11px 'Hanken Grotesk',sans-serif;letter-spacing:.06em;color:#7b8196;text-transform:uppercase}
 .v2-section-note{font:500 10px 'JetBrains Mono',monospace;color:#6b7184;margin-left:auto}
 .v2-provider-list{display:flex;flex-direction:column;gap:8px}
-.v2-provider-row{display:grid;grid-template-columns:9px minmax(92px,1.1fr) minmax(100px,1.3fr) minmax(60px,.7fr) minmax(86px,.8fr) auto;align-items:center;gap:11px;padding:9px 11px;border:1px solid #20242f;border-radius:9px;background:#10121a;transition:border-color .14s ease,background .14s ease,transform .14s ease}
+.v2-provider-row{display:grid;grid-template-columns:9px minmax(130px,1.8fr) minmax(100px,1.3fr) minmax(86px,.8fr) auto;align-items:center;gap:11px;padding:9px 11px;border:1px solid #20242f;border-radius:9px;background:#10121a;transition:border-color .14s ease,background .14s ease,transform .14s ease}
 .v2-provider-row:hover{border-color:#2f3548;background:#12151f;transform:translateY(-1px)}
 .v2-provider-row.warn{border-color:rgba(245,146,30,.2);background:rgba(245,146,30,.045)}
 .v2-provider-row.error{border-color:rgba(239,95,107,.22);background:rgba(239,95,107,.045)}
@@ -207,14 +198,18 @@ func renderV2AIProviderRow(p AIProviderManagementEntry, csrfToken string) string
 	statusText := providerCompactStatus(p.Status, p.EnabledState, p.SecretState, p.LastTestStatus)
 	latency := valueOrFallback(p.LastTestLatencyMS, "n/a")
 	model := valueOrFallback(p.Model, "model unset")
+	narration := providerAliveNarration(tone, latency, p.LastTestAt, p.LastErrorCode)
 	nameSlug := strings.ToLower(p.Name)
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf(`<div class="v2-provider-row %s"><span class="v2-status-dot %s"></span><span class="v2-provider-name">%s</span><span class="v2-model-tag">%s</span><span class="v2-muted">%s</span><span class="v2-state %s">%s</span><span class="v2-row-actions">`,
+	sb.WriteString(fmt.Sprintf(`<div class="v2-provider-row %s"><span class="v2-status-dot %s"></span>`+
+		`<div style="min-width:0"><span class="v2-provider-name">%s</span>`+
+		`<div class="v2-muted" style="margin-top:2px;white-space:normal">%s</div></div>`+
+		`<span class="v2-model-tag">%s</span><span class="v2-state %s">%s</span><span class="v2-row-actions">`,
 		html.EscapeString(tone),
 		html.EscapeString(tone),
 		html.EscapeString(p.Name),
+		html.EscapeString(narration),
 		html.EscapeString(model),
-		html.EscapeString(latency),
 		html.EscapeString(tone),
 		html.EscapeString(statusText),
 	))
@@ -252,18 +247,22 @@ func renderV2NonAIProviderRow(p NonAIProviderEntry, csrfToken string) string {
 	tone := providerTone(p.Status, p.EnabledState, p.ConfiguredState, p.HealthyState)
 	latency := valueOrFallback(p.LastLatencyMS, "n/a")
 	statusText := providerCompactStatus(p.Status, p.EnabledState, p.ConfiguredState, p.LastErrorCode)
+	narration := providerAliveNarration(tone, latency, p.LastTestAt, p.LastErrorCode)
 	slug := strings.ToLower(p.Name)
 	keyDisplay := "key not rendered"
 	if strings.TrimSpace(p.MaskedKey) != "" {
 		keyDisplay = "key " + p.MaskedKey
 	}
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf(`<div class="v2-provider-row %s"><span class="v2-status-dot %s"></span><span class="v2-provider-name">%s</span><span class="v2-model-tag">%s</span><span class="v2-muted">%s</span><span class="v2-state %s">%s</span><span class="v2-row-actions">`,
+	sb.WriteString(fmt.Sprintf(`<div class="v2-provider-row %s"><span class="v2-status-dot %s"></span>`+
+		`<div style="min-width:0"><span class="v2-provider-name">%s</span>`+
+		`<div class="v2-muted" style="margin-top:2px;white-space:normal">%s</div></div>`+
+		`<span class="v2-model-tag">%s</span><span class="v2-state %s">%s</span><span class="v2-row-actions">`,
 		html.EscapeString(tone),
 		html.EscapeString(tone),
 		html.EscapeString(p.Name),
+		html.EscapeString(narration),
 		html.EscapeString(p.Category),
-		html.EscapeString(latency),
 		html.EscapeString(tone),
 		html.EscapeString(statusText),
 	))
@@ -394,6 +393,56 @@ func providerDiagnosticJSON(name, status, enabled, secretOrConfigured, healthy, 
 func jsonEscape(s string) string {
 	replacer := strings.NewReplacer(`\`, `\\`, `"`, `\"`, "\n", `\n`, "\r", `\r`, "\t", `\t`)
 	return replacer.Replace(s)
+}
+
+// providerAliveNarration returns a compact alive-state sentence for a provider
+// row: "online · 127ms · tested 5m ago", "offline · auth-failed", etc.
+// lastTest is the LastTestAt string from the provider entry (RFC3339 or human).
+// latency is ms string e.g. "127ms". errorCode is the last error code or "".
+func providerAliveNarration(tone, latency, lastTest, errorCode string) string {
+	parts := []string{}
+	switch tone {
+	case "ok":
+		parts = append(parts, "online")
+	case "warn":
+		parts = append(parts, "degraded")
+	case "error":
+		parts = append(parts, "offline")
+	case "disabled":
+		parts = append(parts, "suspended")
+	default:
+		parts = append(parts, "unknown")
+	}
+	if latency != "" && latency != "n/a" {
+		parts = append(parts, latency)
+	}
+	if errorCode != "" && errorCode != "n/a" && tone != "ok" {
+		parts = append(parts, displayProviderErrorCode(errorCode))
+	}
+	if lastTest != "" {
+		parts = append(parts, "tested "+shortAge(lastTest))
+	}
+	return strings.Join(parts, " · ")
+}
+
+// shortAge converts a time string to a human-readable "N ago" label.
+// Accepts RFC3339 or falls back to the raw string.
+func shortAge(ts string) string {
+	t, err := time.Parse(time.RFC3339, ts)
+	if err != nil {
+		return ts
+	}
+	d := time.Since(t)
+	switch {
+	case d < 90*time.Second:
+		return "just now"
+	case d < 90*time.Minute:
+		return fmt.Sprintf("%dm ago", int(d.Minutes()))
+	case d < 36*time.Hour:
+		return fmt.Sprintf("%dh ago", int(d.Hours()))
+	default:
+		return t.UTC().Format("Jan 2")
+	}
 }
 
 func infraProviderHref(name string) string {
