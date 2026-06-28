@@ -91,10 +91,11 @@ document.addEventListener('submit', function(ev){
     }
     return refreshProviders();
   }).then(function(){
+    var msg = (form.action || '').indexOf('/test') !== -1 ? 'Updated just now' : 'Provider action saved';
     if(window.__securityAutomationLive && window.__securityAutomationLive.toast){
-      window.__securityAutomationLive.toast('Provider action saved', 'success');
+      window.__securityAutomationLive.toast(msg, 'success');
     } else {
-      toast('Provider action saved', 'success');
+      toast(msg, 'success');
     }
   }).catch(function(){
     if(window.__securityAutomationLive && window.__securityAutomationLive.toast){

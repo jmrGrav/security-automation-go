@@ -50,7 +50,7 @@ func renderV2ProvidersPage(view UnifiedProvidersView, csrfToken string) string {
 .v2-section-title{font:700 11px 'Hanken Grotesk',sans-serif;letter-spacing:.06em;color:#7b8196;text-transform:uppercase}
 .v2-section-note{font:500 10px 'JetBrains Mono',monospace;color:#6b7184;margin-left:auto}
 .v2-provider-list{display:flex;flex-direction:column;gap:8px}
-.v2-provider-row{display:grid;grid-template-columns:9px minmax(92px,1.1fr) minmax(100px,1.3fr) minmax(60px,.7fr) minmax(86px,.8fr) auto;align-items:center;gap:11px;padding:9px 11px;border:1px solid #20242f;border-radius:9px;background:#10121a;transition:border-color .14s ease,background .14s ease,transform .14s ease}
+.v2-provider-row{display:grid;grid-template-columns:9px minmax(130px,1.8fr) minmax(100px,1.3fr) minmax(86px,.8fr) auto;align-items:center;gap:11px;padding:9px 11px;border:1px solid #20242f;border-radius:9px;background:#10121a;transition:border-color .14s ease,background .14s ease,transform .14s ease}
 .v2-provider-row:hover{border-color:#2f3548;background:#12151f;transform:translateY(-1px)}
 .v2-provider-row.warn{border-color:rgba(245,146,30,.2);background:rgba(245,146,30,.045)}
 .v2-provider-row.error{border-color:rgba(239,95,107,.22);background:rgba(239,95,107,.045)}
@@ -198,14 +198,18 @@ func renderV2AIProviderRow(p AIProviderManagementEntry, csrfToken string) string
 	statusText := providerCompactStatus(p.Status, p.EnabledState, p.SecretState, p.LastTestStatus)
 	latency := valueOrFallback(p.LastTestLatencyMS, "n/a")
 	model := valueOrFallback(p.Model, "model unset")
+	narration := providerAliveNarration(tone, latency, p.LastTestAt, p.LastErrorCode)
 	nameSlug := strings.ToLower(p.Name)
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf(`<div class="v2-provider-row %s"><span class="v2-status-dot %s"></span><span class="v2-provider-name">%s</span><span class="v2-model-tag">%s</span><span class="v2-muted">%s</span><span class="v2-state %s">%s</span><span class="v2-row-actions">`,
+	sb.WriteString(fmt.Sprintf(`<div class="v2-provider-row %s"><span class="v2-status-dot %s"></span>`+
+		`<div style="min-width:0"><span class="v2-provider-name">%s</span>`+
+		`<div class="v2-muted" style="margin-top:2px;white-space:normal">%s</div></div>`+
+		`<span class="v2-model-tag">%s</span><span class="v2-state %s">%s</span><span class="v2-row-actions">`,
 		html.EscapeString(tone),
 		html.EscapeString(tone),
 		html.EscapeString(p.Name),
+		html.EscapeString(narration),
 		html.EscapeString(model),
-		html.EscapeString(latency),
 		html.EscapeString(tone),
 		html.EscapeString(statusText),
 	))
@@ -243,18 +247,22 @@ func renderV2NonAIProviderRow(p NonAIProviderEntry, csrfToken string) string {
 	tone := providerTone(p.Status, p.EnabledState, p.ConfiguredState, p.HealthyState)
 	latency := valueOrFallback(p.LastLatencyMS, "n/a")
 	statusText := providerCompactStatus(p.Status, p.EnabledState, p.ConfiguredState, p.LastErrorCode)
+	narration := providerAliveNarration(tone, latency, p.LastTestAt, p.LastErrorCode)
 	slug := strings.ToLower(p.Name)
 	keyDisplay := "key not rendered"
 	if strings.TrimSpace(p.MaskedKey) != "" {
 		keyDisplay = "key " + p.MaskedKey
 	}
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf(`<div class="v2-provider-row %s"><span class="v2-status-dot %s"></span><span class="v2-provider-name">%s</span><span class="v2-model-tag">%s</span><span class="v2-muted">%s</span><span class="v2-state %s">%s</span><span class="v2-row-actions">`,
+	sb.WriteString(fmt.Sprintf(`<div class="v2-provider-row %s"><span class="v2-status-dot %s"></span>`+
+		`<div style="min-width:0"><span class="v2-provider-name">%s</span>`+
+		`<div class="v2-muted" style="margin-top:2px;white-space:normal">%s</div></div>`+
+		`<span class="v2-model-tag">%s</span><span class="v2-state %s">%s</span><span class="v2-row-actions">`,
 		html.EscapeString(tone),
 		html.EscapeString(tone),
 		html.EscapeString(p.Name),
+		html.EscapeString(narration),
 		html.EscapeString(p.Category),
-		html.EscapeString(latency),
 		html.EscapeString(tone),
 		html.EscapeString(statusText),
 	))
@@ -385,6 +393,56 @@ func providerDiagnosticJSON(name, status, enabled, secretOrConfigured, healthy, 
 func jsonEscape(s string) string {
 	replacer := strings.NewReplacer(`\`, `\\`, `"`, `\"`, "\n", `\n`, "\r", `\r`, "\t", `\t`)
 	return replacer.Replace(s)
+}
+
+// providerAliveNarration returns a compact alive-state sentence for a provider
+// row: "online · 127ms · tested 5m ago", "offline · auth-failed", etc.
+// lastTest is the LastTestAt string from the provider entry (RFC3339 or human).
+// latency is ms string e.g. "127ms". errorCode is the last error code or "".
+func providerAliveNarration(tone, latency, lastTest, errorCode string) string {
+	parts := []string{}
+	switch tone {
+	case "ok":
+		parts = append(parts, "online")
+	case "warn":
+		parts = append(parts, "degraded")
+	case "error":
+		parts = append(parts, "offline")
+	case "disabled":
+		parts = append(parts, "suspended")
+	default:
+		parts = append(parts, "unknown")
+	}
+	if latency != "" && latency != "n/a" {
+		parts = append(parts, latency)
+	}
+	if errorCode != "" && errorCode != "n/a" && tone != "ok" {
+		parts = append(parts, displayProviderErrorCode(errorCode))
+	}
+	if lastTest != "" {
+		parts = append(parts, "tested "+shortAge(lastTest))
+	}
+	return strings.Join(parts, " · ")
+}
+
+// shortAge converts a time string to a human-readable "N ago" label.
+// Accepts RFC3339 or falls back to the raw string.
+func shortAge(ts string) string {
+	t, err := time.Parse(time.RFC3339, ts)
+	if err != nil {
+		return ts
+	}
+	d := time.Since(t)
+	switch {
+	case d < 90*time.Second:
+		return "just now"
+	case d < 90*time.Minute:
+		return fmt.Sprintf("%dm ago", int(d.Minutes()))
+	case d < 36*time.Hour:
+		return fmt.Sprintf("%dh ago", int(d.Hours()))
+	default:
+		return t.UTC().Format("Jan 2")
+	}
 }
 
 func infraProviderHref(name string) string {
