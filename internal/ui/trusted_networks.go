@@ -143,16 +143,89 @@ code{font:500 11px 'JetBrains Mono',monospace;color:#9b8cff}
 	if len(view.Entries) == 0 {
 		sb.WriteString(`<div class="v2-card"><div class="v2-empty">No trusted-network registry entries available.</div></div>`)
 	} else {
-		sb.WriteString(`<div class="v2-card"><div style="overflow-x:auto"><table class="tn-table"><thead><tr><th>Name</th><th>Kind</th><th>CIDRs</th><th>Protection</th><th>Allowlist</th><th>Status</th></tr></thead><tbody>`)
-		for _, entry := range view.Entries {
-			var row strings.Builder
-			if err := renderTrustedNetworkRow(&row, entry); err == nil {
-				sb.WriteString(row.String())
-			}
-		}
-		sb.WriteString(`</tbody></table></div></div>`)
+		sb.WriteString(renderV2TrustedNetworkCards(view.Entries))
 	}
 
+	return sb.String()
+}
+
+// renderV2TrustedNetworkCards renders each provider as a summary card with
+// a collapsed CIDR list so the page doesn't flood with raw ranges.
+func renderV2TrustedNetworkCards(entries []TrustedNetworkEntryView) string {
+	var sb strings.Builder
+	for _, entry := range entries {
+		name := trustedNetworkDisplayName(entry.Organization)
+
+		// Kind badge
+		kindColor := "#6b7184"
+		if entry.Kind == "crawler" {
+			kindColor = "#7c6cf2"
+		} else if entry.Kind == "monitoring" {
+			kindColor = "#4cc79a"
+		}
+
+		// Protection
+		protText := "no hard ban"
+		protColor := "#4cc79a"
+		if entry.HardBanAllowed {
+			protText = "hard ban allowed"
+			protColor = "#f5921e"
+		}
+
+		// Sync status
+		cfLabel := valueOrFallback(entry.CloudflareWhitelist, "not synced")
+		csLabel := valueOrFallback(entry.CrowdSecAllowlist, "not synced")
+
+		// Status dot
+		statusColor := "#6b7184"
+		switch entry.Status {
+		case "synced", "ok":
+			statusColor = "#4cc79a"
+		case "pending", "partial":
+			statusColor = "#f5921e"
+		case "error":
+			statusColor = "#ef5f6b"
+		}
+
+		// Build CIDR list inside <details>
+		var cidrHTML strings.Builder
+		for _, cidr := range entry.CIDRs {
+			cidrHTML.WriteString(fmt.Sprintf(
+				`<span style="display:inline-block;font:500 11px 'JetBrains Mono',monospace;color:#9aa0b2;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.07);border-radius:5px;padding:2px 7px;margin:2px">%s</span>`,
+				html.EscapeString(cidr),
+			))
+		}
+
+		sb.WriteString(fmt.Sprintf(`<div class="v2-card" style="margin-bottom:10px">`+
+			`<div style="display:flex;align-items:center;gap:12px;padding:14px 18px">`+
+			`<span style="width:10px;height:10px;border-radius:50%%;flex:none;background:%s"></span>`+
+			`<span style="font:700 13px 'Hanken Grotesk',sans-serif;color:#eef0f6;flex:1">%s</span>`+
+			`<span style="font:600 10px 'JetBrains Mono',monospace;color:%s;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);border-radius:5px;padding:2px 7px">%s</span>`+
+			`</div>`+
+			`<div style="display:flex;gap:24px;padding:0 18px 14px;border-bottom:1px solid #1a1e29;flex-wrap:wrap">`+
+			`<div><div style="font:600 9px 'Hanken Grotesk',sans-serif;letter-spacing:.07em;color:#5a6072;text-transform:uppercase;margin-bottom:4px">CIDRs</div><div style="font:700 16px 'Hanken Grotesk',sans-serif;color:#c5cad8">%d</div></div>`+
+			`<div><div style="font:600 9px 'Hanken Grotesk',sans-serif;letter-spacing:.07em;color:#5a6072;text-transform:uppercase;margin-bottom:4px">Protection</div><div style="font:700 12px 'Hanken Grotesk',sans-serif;color:%s">%s</div></div>`+
+			`<div><div style="font:600 9px 'Hanken Grotesk',sans-serif;letter-spacing:.07em;color:#5a6072;text-transform:uppercase;margin-bottom:4px">Allowlist</div><div style="font:500 11px 'JetBrains Mono',monospace;color:#9aa0b2">CF: %s</div><div style="font:500 11px 'JetBrains Mono',monospace;color:#9aa0b2;margin-top:2px">CS: %s</div></div>`+
+			`<div><div style="font:600 9px 'Hanken Grotesk',sans-serif;letter-spacing:.07em;color:#5a6072;text-transform:uppercase;margin-bottom:4px">Status</div><div style="font:500 11px 'JetBrains Mono',monospace;color:#9aa0b2">%s</div></div>`+
+			`</div>`,
+			statusColor,
+			html.EscapeString(name),
+			kindColor, html.EscapeString(entry.Kind),
+			entry.CIDRCount,
+			protColor, html.EscapeString(protText),
+			html.EscapeString(cfLabel),
+			html.EscapeString(csLabel),
+			html.EscapeString(trustedNetworkStatusLabel(entry.Status)),
+		))
+
+		if len(entry.CIDRs) > 0 {
+			sb.WriteString(fmt.Sprintf(
+				`<details style="padding:10px 18px"><summary style="cursor:pointer;font:600 11px 'Hanken Grotesk',sans-serif;color:#7c6cf2;list-style:none;display:flex;align-items:center;gap:6px"><span>▶</span> Show %d CIDRs</summary><div style="padding-top:10px;display:flex;flex-wrap:wrap;gap:4px">%s</div></details>`,
+				len(entry.CIDRs), cidrHTML.String(),
+			))
+		}
+		sb.WriteString(`</div>`)
+	}
 	return sb.String()
 }
 

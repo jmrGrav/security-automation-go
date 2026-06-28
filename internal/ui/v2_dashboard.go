@@ -321,17 +321,44 @@ func renderV2Dashboard(view DashboardConsoleView) string {
 	}
 
 	// Situation banner — posture derived from health score and active threat count.
+	// Shows inline stats: health %, threat count, blocked 24h.
+	statsFrag := fmt.Sprintf(
+		`<div style="display:flex;gap:20px;margin-left:auto">`+
+			`<div style="text-align:right"><div style="font:700 18px 'Hanken Grotesk',sans-serif;color:%s">%s<span style="font:600 11px 'Hanken Grotesk',sans-serif;color:#6b7184">%%</span></div><div style="font:600 9px 'Hanken Grotesk',sans-serif;letter-spacing:.06em;color:#7b8196;text-transform:uppercase">health</div></div>`+
+			`<div style="text-align:right"><div style="font:700 18px 'Hanken Grotesk',sans-serif;color:#f5a443">%d</div><div style="font:600 9px 'Hanken Grotesk',sans-serif;letter-spacing:.06em;color:#7b8196;text-transform:uppercase">threats</div></div>`+
+			`<div style="text-align:right"><div style="font:700 18px 'Hanken Grotesk',sans-serif;color:#eef0f6">%d</div><div style="font:600 9px 'Hanken Grotesk',sans-serif;letter-spacing:.06em;color:#7b8196;text-transform:uppercase">blocked 24h</div></div>`+
+			`</div>`,
+		healthColor, healthPct, activeThreats, blocked24h,
+	)
 	var bannerHTML string
 	switch {
 	case view.CommandCenter.Health.Score >= 95 && activeThreats == 0:
-		bannerHTML = `<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;border-radius:8px;background:rgba(76,199,154,.08);border:1px solid rgba(76,199,154,.18);margin-bottom:16px;font:600 13px 'Hanken Grotesk',sans-serif;color:#4cc79a">● HEALTHY · no active threats</div>`
+		bannerHTML = `<div style="display:flex;align-items:center;gap:10px;padding:12px 16px;border-radius:12px;background:rgba(76,199,154,.06);border:1px solid rgba(76,199,154,.18);margin-bottom:16px">` +
+			`<span style="width:12px;height:12px;border-radius:50%;flex:none;background:#4cc79a;box-shadow:0 0 0 4px rgba(76,199,154,.15)"></span>` +
+			`<div><div style="font:700 13px 'Hanken Grotesk',sans-serif;color:#4cc79a">HEALTHY</div><div style="font:500 11px 'JetBrains Mono',monospace;color:#6b7184;margin-top:1px">no active threats · systems nominal</div></div>` +
+			statsFrag + `</div>`
 	case activeThreats > 0:
-		bannerHTML = fmt.Sprintf(`<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;border-radius:8px;background:rgba(245,164,67,.08);border:1px solid rgba(245,164,67,.18);margin-bottom:16px;font:600 13px 'Hanken Grotesk',sans-serif;color:#f5a443">● ACTIVE · %d origins detected</div>`, activeThreats)
+		subLine := countryLine
+		if subLine == "" {
+			subLine = "automated suppression holding"
+		} else {
+			subLine = subLine + " — automated suppression holding"
+		}
+		bannerHTML = fmt.Sprintf(`<div style="display:flex;align-items:center;gap:10px;padding:12px 16px;border-radius:12px;background:rgba(245,164,67,.06);border:1px solid rgba(245,164,67,.22);margin-bottom:16px">`) +
+			`<span style="width:12px;height:12px;border-radius:50%;flex:none;background:#f5a443;box-shadow:0 0 0 4px rgba(245,164,67,.18)"></span>` +
+			fmt.Sprintf(`<div><div style="font:700 13px 'Hanken Grotesk',sans-serif;color:#f5a443">ACTIVE · %d origins detected</div><div style="font:500 11px 'JetBrains Mono',monospace;color:#6b7184;margin-top:1px">%s</div></div>`, activeThreats, html.EscapeString(subLine)) +
+			statsFrag + `</div>`
 	case view.CommandCenter.Health.Score < 70:
 		failingComponents := len(view.Statuses) - view.HealthyCount
-		bannerHTML = fmt.Sprintf(`<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;border-radius:8px;background:rgba(239,95,107,.08);border:1px solid rgba(239,95,107,.18);margin-bottom:16px;font:600 13px 'Hanken Grotesk',sans-serif;color:#ef5f6b">● DEGRADED · %d components failing</div>`, failingComponents)
+		bannerHTML = fmt.Sprintf(`<div style="display:flex;align-items:center;gap:10px;padding:12px 16px;border-radius:12px;background:rgba(239,95,107,.06);border:1px solid rgba(239,95,107,.2);margin-bottom:16px">`) +
+			`<span style="width:12px;height:12px;border-radius:50%;flex:none;background:#ef5f6b;box-shadow:0 0 0 4px rgba(239,95,107,.18)"></span>` +
+			fmt.Sprintf(`<div><div style="font:700 13px 'Hanken Grotesk',sans-serif;color:#ef5f6b">DEGRADED · %d components failing</div><div style="font:500 11px 'JetBrains Mono',monospace;color:#6b7184;margin-top:1px">check health page for details</div></div>`, failingComponents) +
+			statsFrag + `</div>`
 	default:
-		bannerHTML = `<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;border-radius:8px;background:rgba(155,140,255,.08);border:1px solid rgba(155,140,255,.18);margin-bottom:16px;font:600 13px 'Hanken Grotesk',sans-serif;color:#9b8cff">● MONITORING · systems nominal</div>`
+		bannerHTML = `<div style="display:flex;align-items:center;gap:10px;padding:12px 16px;border-radius:12px;background:rgba(155,140,255,.06);border:1px solid rgba(155,140,255,.18);margin-bottom:16px">` +
+			`<span style="width:12px;height:12px;border-radius:50%;flex:none;background:#9b8cff;box-shadow:0 0 0 4px rgba(155,140,255,.15)"></span>` +
+			`<div><div style="font:700 13px 'Hanken Grotesk',sans-serif;color:#9b8cff">MONITORING</div><div style="font:500 11px 'JetBrains Mono',monospace;color:#6b7184;margin-top:1px">systems nominal</div></div>` +
+			statsFrag + `</div>`
 	}
 
 	// Total components for health display
@@ -366,6 +393,31 @@ func renderV2Dashboard(view DashboardConsoleView) string {
 		}
 	}
 
+	// Current Incident panel — visible only when activeThreats > 0
+	var incidentHTML string
+	if activeThreats > 0 {
+		topCountry := "unknown"
+		if len(threat.Countries) > 0 {
+			code := countryToCode(threat.Countries[0].Country)
+			if code != "" {
+				topCountry = code
+			} else {
+				topCountry = html.EscapeString(threat.Countries[0].Country)
+			}
+		}
+		incidentHTML = `<div class="v2-card" style="border-left:3px solid #f5a443">` +
+			`<div class="v2-card-header">` +
+			`<span class="v2-card-title" style="color:#f5a443">Current Incident</span>` +
+			`</div>` +
+			`<div class="v2-card-body" style="font:500 12px 'JetBrains Mono',monospace;color:#9aa0b2;display:flex;flex-direction:column;gap:6px">` +
+			fmt.Sprintf(`<div><span style="color:#6b7184">top origin · </span><span style="color:#f5a443;font-weight:700">%s</span></div>`, topCountry) +
+			fmt.Sprintf(`<div><span style="color:#6b7184">active origins · </span><span style="color:#eef0f6">%d</span></div>`, activeThreats) +
+			`<div><span style="color:#6b7184">duration · </span><span style="color:#eef0f6">ongoing</span></div>` +
+			`<div style="margin-top:4px;color:#c5cad8">Recommended action: <a href="/v2/timeline" style="color:#f5a443;text-decoration:none">Review timeline</a> → suppress or ban</div>` +
+			`</div>` +
+			`</div>`
+	}
+
 	content := `<style>
 .ds-stats-row{display:flex;gap:1px;background:#1a1e29;border-radius:10px;overflow:hidden;margin-bottom:20px}
 .ds-stat{flex:1;background:#10121a;padding:16px 18px;text-decoration:none;color:inherit;transition:background .12s}
@@ -390,7 +442,7 @@ func renderV2Dashboard(view DashboardConsoleView) string {
   <span class="v2-live-badge"><span class="v2-live-dot"></span>LIVE</span>
 </div>
 
-` + bannerHTML + `
+` + bannerHTML + incidentHTML + `
 <div class="ds-section">Current posture</div>
 <div class="ds-stats-row">
   <a href="/v2/health" class="ds-stat">

@@ -134,8 +134,9 @@ func TestV2TimelineRow_PrimaryPillsVisible(t *testing.T) {
 	}
 	primaryPart := row[:detailsIdx]
 
-	if !strings.Contains(primaryPart, "action:") {
-		t.Errorf("action pill should be visible before <details>; primary part: %s", primaryPart)
+	// New format: event type badge + action text (no "action:" key prefix)
+	if !strings.Contains(primaryPart, ev.Action) {
+		t.Errorf("action text should be visible before <details>; primary part: %s", primaryPart)
 	}
 	if !strings.Contains(primaryPart, "ip:") {
 		t.Errorf("ip pill should be visible before <details>; primary part: %s", primaryPart)

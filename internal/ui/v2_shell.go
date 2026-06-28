@@ -145,7 +145,7 @@ a{color:inherit}
 .v2-sidebar.v2-sb-collapsed .v2-sb-signout-icon{display:flex}
 
 /* ── Main area ── */
-.v2-main{flex:1;min-width:0;overflow-y:auto;padding:22px 32px 32px;scrollbar-width:thin;scrollbar-color:#242838 transparent;position:relative}
+.v2-main{flex:1;min-width:0;overflow-y:auto;padding:18px 28px 28px;scrollbar-width:thin;scrollbar-color:#242838 transparent;position:relative}
 .v2-main::-webkit-scrollbar{width:6px}
 .v2-main::-webkit-scrollbar-thumb{background:#242838;border-radius:99px}
 
@@ -159,12 +159,12 @@ a{color:inherit}
 .v2-palette-input::placeholder{color:#4a5168}
 .v2-palette-hint{padding:10px 16px 12px;font:500 11px 'JetBrains Mono',monospace;color:#5b6070;display:flex;gap:12px;flex-wrap:wrap}
 .v2-palette-hint kbd{background:#1a1e29;border:1px solid #2a2f42;border-radius:4px;padding:1px 6px;color:#9aa0b2}
-.v2-palette-examples{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;padding:0 16px 14px}
-.v2-palette-examples a{display:flex;align-items:center;justify-content:space-between;gap:8px;text-decoration:none;border:1px solid #20242f;background:#10121a;border-radius:8px;padding:7px 9px;font:600 11px 'JetBrains Mono',monospace;color:#aab0c2}
-.v2-palette-examples span{color:#6b7184;font:500 10px 'Hanken Grotesk',sans-serif}
+.v2-palette-examples{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;padding:0 16px 14px}
+.v2-palette-examples a{display:flex;align-items:center;justify-content:space-between;gap:8px;text-decoration:none;border:1px solid #20242f;background:#10121a;border-radius:8px;padding:7px 9px;font:600 11px 'JetBrains Mono',monospace;color:#aab0c2;flex-direction:column;align-items:flex-start}
+.v2-palette-examples span{color:#6b7184;font:500 10px 'Hanken Grotesk',sans-serif;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
 
 /* ── Design System tokens ── */
-.v2-card{background:#13151c;border:1px solid #20242f;border-radius:14px;overflow:hidden;margin-bottom:20px;position:relative}
+.v2-card{background:#13151c;border:1px solid #20242f;border-radius:14px;overflow:hidden;margin-bottom:14px;position:relative}
 .v2-card-header{display:flex;align-items:center;gap:10px;padding:13px 18px;border-bottom:1px solid #20242f}
 .v2-card-title{font:700 11px 'Hanken Grotesk',sans-serif;letter-spacing:.06em;color:#7b8196;text-transform:uppercase}
 .v2-card-body{padding:16px 18px}
@@ -217,7 +217,8 @@ a{color:inherit}
 
 /* KPI row */
 .v2-kpi-row{display:flex;gap:16px;margin-bottom:20px}
-.v2-kpi{flex:1;border:1px solid #20242f;border-radius:14px;background:#13151c;padding:16px 18px;min-width:0}
+.v2-kpi{flex:1;border:1px solid #20242f;border-radius:14px;background:#13151c;padding:16px 18px;min-width:0;transition:transform .18s ease,border-color .18s ease,box-shadow .18s ease}
+.v2-kpi:hover{transform:translateY(-2px);border-color:#2f3550;box-shadow:0 10px 26px rgba(0,0,0,.28)}
 .v2-kpi-label{font:600 11px 'Hanken Grotesk',sans-serif;color:#9aa0b2;margin-bottom:9px}
 .v2-kpi-value{font:700 32px 'Hanken Grotesk',sans-serif;color:#eef0f6;line-height:1}
 .v2-kpi-sub{font:500 11px 'JetBrains Mono',monospace;color:#6b7184;margin-top:5px}
@@ -312,17 +313,21 @@ body{display:block}
   <div class="v2-palette-box">
     <form id="v2-palette-form" class="v2-palette-input-row">
       <span class="v2-palette-icon">⊕</span>
-      <input class="v2-palette-input" id="v2-palette-input" type="text" placeholder="IP address or evidence ID…" autocomplete="off" autocorrect="off" spellcheck="false">
+      <input class="v2-palette-input" id="v2-palette-input" type="text" placeholder="Jump to a page, or type an IP to investigate…" autocomplete="off" autocorrect="off" spellcheck="false">
     </form>
     <div class="v2-palette-hint">
-      <span><kbd>↵</kbd> Investigate</span>
+      <span><kbd>↵</kbd> Go</span>
       <span><kbd>Esc</kbd> Close</span>
-      <span>IP · g+t timeline · g+i investigate · g+h health · g+c cloudflare</span>
+      <span>type page name · type IP to investigate · type scenario to filter</span>
     </div>
     <div class="v2-palette-examples">
-      <a href="/v2/investigate"><strong>Search IP</strong><span>investigate</span></a>
-      <a href="/v2/timeline"><strong>Timeline</strong><span>events</span></a>
-      <a href="/v2/cloudflare"><strong>Cloudflare</strong><span>boundary</span></a>
+      <a href="/v2/"><strong>Dashboard</strong><span>mission control</span></a>
+      <a href="/v2/investigate"><strong>Investigate</strong><span>IP / ASN / scenario</span></a>
+      <a href="/v2/timeline"><strong>Timeline</strong><span>live tail · events</span></a>
+      <a href="/v2/health"><strong>Health</strong><span>pipeline · subsystems</span></a>
+      <a href="/v2/providers"><strong>Providers</strong><span>AI · enrichment · boundary</span></a>
+      <a href="/v2/cloudflare"><strong>Cloudflare</strong><span>diff · posture</span></a>
+      <a href="/v2/notes"><strong>Notes</strong><span>operator annotations</span></a>
       <a href="/v2/audit"><strong>Audit</strong><span>operator trail</span></a>
     </div>
   </div>
@@ -335,4 +340,79 @@ body{display:block}
 <script src="/static/ai-explain.js"></script>
 </body>
 </html>`
+}
+
+// renderV2ActionSummary returns a full-width action-context bar that pages can
+// embed at the top of their content area.
+// level is one of: "ok", "surveillance", "action", "urgent".
+func renderV2ActionSummary(level, title, summary string) string {
+	color := "#4cc79a"
+	bg := "rgba(76,199,154,.06)"
+	border := "rgba(76,199,154,.15)"
+	label := "OK"
+	switch level {
+	case "surveillance":
+		color = "#9b8cff"
+		bg = "rgba(155,140,255,.06)"
+		border = "rgba(155,140,255,.15)"
+		label = "SURVEILLANCE"
+	case "action":
+		color = "#f5a443"
+		bg = "rgba(245,164,67,.06)"
+		border = "rgba(245,164,67,.15)"
+		label = "ACTION NEEDED"
+	case "urgent":
+		color = "#ef5f6b"
+		bg = "rgba(239,95,107,.06)"
+		border = "rgba(239,95,107,.15)"
+		label = "URGENT"
+	}
+	return fmt.Sprintf(
+		`<div style="display:flex;align-items:center;gap:10px;padding:8px 20px;margin-bottom:16px;background:%s;border-bottom:1px solid %s">`+
+			`<span style="width:7px;height:7px;border-radius:50%%;background:%s;flex:none"></span>`+
+			`<span style="font:600 11px 'JetBrains Mono',monospace;color:%s;letter-spacing:.06em">%s</span>`+
+			`<span style="font:600 11px 'JetBrains Mono',monospace;color:#eef0f6">%s</span>`+
+			`<span style="font:500 11px 'JetBrains Mono',monospace;color:#6b7184">— %s</span>`+
+			`</div>`,
+		bg, border, color, color,
+		strings.ToUpper(label),
+		html.EscapeString(title),
+		html.EscapeString(summary),
+	)
+}
+
+// renderV2PriorityBadge returns a small inline priority badge.
+// level is one of: "no-action", "surveillance", "action-needed", "urgent".
+func renderV2PriorityBadge(level string) string {
+	color := "#6b7184"
+	bg := "rgba(255,255,255,.04)"
+	border := "rgba(255,255,255,.07)"
+	label := "NO ACTION"
+	anim := ""
+	switch level {
+	case "surveillance":
+		color = "#9b8cff"
+		bg = "rgba(155,140,255,.12)"
+		border = "rgba(155,140,255,.22)"
+		label = "SURVEILLANCE"
+	case "action-needed":
+		color = "#f5a443"
+		bg = "rgba(245,164,67,.12)"
+		border = "rgba(245,164,67,.22)"
+		label = "ACTION NEEDED"
+	case "urgent":
+		color = "#ef5f6b"
+		bg = "rgba(239,95,107,.12)"
+		border = "rgba(239,95,107,.22)"
+		label = "URGENT"
+		anim = `<style>@keyframes v2urgentPulse{0%%,100%%{opacity:1}50%%{opacity:.6}}</style>`
+	}
+	style := fmt.Sprintf(
+		"font:700 9px 'JetBrains Mono',monospace;letter-spacing:.07em;text-transform:uppercase;border-radius:5px;padding:2px 7px;color:%s;background:%s;border:1px solid %s",
+		color, bg, border,
+	)
+	if level == "urgent" {
+		style += ";animation:v2urgentPulse 1.2s ease-in-out infinite"
+	}
+	return fmt.Sprintf(`%s<span style="%s">%s</span>`, anim, style, label)
 }

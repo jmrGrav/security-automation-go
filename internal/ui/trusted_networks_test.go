@@ -52,8 +52,8 @@ func TestTrustedNetworks_RenderRegistryEntries(t *testing.T) {
 		"CF: awaiting first sync",
 		"CS: awaiting helper status",
 		"manual review required / too volatile",
-		// Table headers
-		"Name", "Kind", "CIDRs", "Protection", "Allowlist", "Status",
+		// Card section headers (replaces old table headers)
+		"CIDRs", "Protection", "Allowlist", "Status",
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("trusted networks page missing %q: %s", want, body)
