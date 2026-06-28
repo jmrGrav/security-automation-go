@@ -174,7 +174,7 @@ func TestRenderV2AuditTrailPageEmptyStateIsOperational(t *testing.T) {
 		"No audit events yet",
 		"Recent activity",
 		"Suggested actions",
-		"Recent searches",
+		"Investigate a threat",
 		"Quick links",
 		"/v2/timeline",
 		"/v2/providers",
