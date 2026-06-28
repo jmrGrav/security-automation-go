@@ -169,6 +169,17 @@ a{color:inherit}
 .v2-card-title{font:700 11px 'Hanken Grotesk',sans-serif;letter-spacing:.06em;color:#7b8196;text-transform:uppercase}
 .v2-card-body{padding:16px 18px}
 
+.v2-chip-row{display:flex;gap:7px;flex-wrap:wrap}
+.v2-chip{display:inline-flex;align-items:center;gap:5px;font:600 11px 'JetBrains Mono',monospace;border-radius:6px;padding:3px 9px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.07);color:#9aa0b2}
+.v2-chip.ok{color:#54c79a;background:rgba(76,199,154,.12);border-color:rgba(76,199,154,.22)}
+.v2-chip.warn{color:#f5b563;background:rgba(245,146,30,.1);border-color:rgba(245,146,30,.22)}
+.v2-chip.error{color:#f08591;background:rgba(239,95,107,.1);border-color:rgba(239,95,107,.22)}
+
+.v2-action{display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:5px 11px;border-radius:7px;background:#1c2030;border:1px solid #2a2f42;font:600 11px 'Hanken Grotesk',sans-serif;color:#c5cad8;text-decoration:none;cursor:pointer;min-height:28px}
+.v2-action.primary{background:rgba(124,108,242,.14);border-color:rgba(124,108,242,.3);color:#a99cff}
+.v2-action.warn{background:rgba(245,146,30,.1);border-color:rgba(245,146,30,.22);color:#f5b563}
+.v2-action:disabled{opacity:.6;cursor:wait}
+
 .v2-kv{display:flex;flex-direction:column}
 .v2-kv-row{display:flex;align-items:center;padding:9px 0;border-bottom:1px solid #181b25;gap:12px}
 .v2-kv-row:last-child{border-bottom:none}

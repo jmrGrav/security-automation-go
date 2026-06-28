@@ -35,10 +35,6 @@ func renderV2ProvidersPage(view UnifiedProvidersView, csrfToken string) string {
 .v2-integrations-top{display:flex;align-items:center;gap:10px;padding:14px 18px;border-bottom:1px solid #20242f}
 .v2-integrations-title{font:700 14px 'Hanken Grotesk',sans-serif;color:#eef0f6}
 .v2-integrations-sub{font:500 12px 'JetBrains Mono',monospace;color:#6b7184}
-.v2-action{display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:5px 11px;border-radius:7px;background:#1c2030;border:1px solid #2a2f42;font:600 11px 'Hanken Grotesk',sans-serif;color:#c5cad8;text-decoration:none;cursor:pointer;min-height:28px}
-.v2-action.primary{background:rgba(124,108,242,.14);border-color:rgba(124,108,242,.3);color:#a99cff}
-.v2-action.warn{background:rgba(245,146,30,.1);border-color:rgba(245,146,30,.22);color:#f5b563}
-.v2-action:disabled{opacity:.6;cursor:wait}
 .v2-provider-posture{padding:18px;border-bottom:1px solid #20242f}
 .v2-posture-line{display:flex;align-items:center;gap:14px}
 .v2-posture-dot{width:14px;height:14px;border-radius:50%;background:#4cc79a;box-shadow:0 0 0 4px rgba(76,199,154,.15);flex:none}
@@ -46,11 +42,6 @@ func renderV2ProvidersPage(view UnifiedProvidersView, csrfToken string) string {
 .v2-posture-dot.error{background:#ef5f6b;box-shadow:0 0 0 4px rgba(239,95,107,.15)}
 .v2-posture-title{font:700 20px 'Hanken Grotesk',sans-serif;color:#eef0f6}
 .v2-posture-meta{font:500 12px 'JetBrains Mono',monospace;color:#6b7184;margin-top:2px}
-.v2-chip-row{display:flex;gap:7px;flex-wrap:wrap}
-.v2-chip{display:inline-flex;align-items:center;gap:5px;font:600 11px 'JetBrains Mono',monospace;border-radius:6px;padding:3px 9px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.07);color:#9aa0b2}
-.v2-chip.ok{color:#54c79a;background:rgba(76,199,154,.12);border-color:rgba(76,199,154,.22)}
-.v2-chip.warn{color:#f5b563;background:rgba(245,146,30,.1);border-color:rgba(245,146,30,.22)}
-.v2-chip.error{color:#f08591;background:rgba(239,95,107,.1);border-color:rgba(239,95,107,.22)}
 .v2-advisory{display:flex;align-items:center;gap:10px;margin-top:14px;padding:10px 12px;border-radius:9px;background:rgba(245,146,30,.07);border:1px solid rgba(245,146,30,.2)}
 .v2-advisory.error{background:rgba(239,95,107,.07);border-color:rgba(239,95,107,.2)}
 .v2-section{padding:16px 18px;border-bottom:1px solid #20242f}
