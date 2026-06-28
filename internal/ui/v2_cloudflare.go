@@ -567,7 +567,7 @@ func renderV2CFLifecycle(v v2CloudflareView) string {
       <span style="font:700 11px 'Hanken Grotesk',sans-serif;letter-spacing:.06em;color:#7b8196;text-transform:uppercase">Recent entries</span>
       <span style="font:500 11px 'JetBrains Mono',monospace;color:#6b7184;margin-left:8px">latest %d of %d</span>
       <span style="flex:1"></span>
-      <a href="/ban-lifecycle" style="font:600 11px 'JetBrains Mono',monospace;color:#7c6cf2;text-decoration:none">Full history ↗</a>
+      <a href="/v2/cloudflare" style="font:600 11px 'JetBrains Mono',monospace;color:#7c6cf2;text-decoration:none">CF overview ↗</a>
     </div>
     <div style="display:flex;align-items:center;padding:9px 16px;font:700 9px 'Hanken Grotesk',sans-serif;letter-spacing:.07em;color:#5a6072;text-transform:uppercase;border-bottom:1px solid #181b25">
       <span style="width:180px">IP</span><span style="flex:1">Reason</span><span style="width:60px;text-align:center">Recidive</span><span style="width:90px;text-align:right">Created</span><span style="width:90px;text-align:right">Status</span>
@@ -584,7 +584,7 @@ func renderV2CFLifecycle(v v2CloudflareView) string {
 		entryRows.String(),
 		func() string {
 			if showAllCount > 6 {
-				return fmt.Sprintf(`<div style="padding:12px 16px;border-top:1px solid #181b25;text-align:center"><a href="/ban-lifecycle" style="font:600 11px 'Hanken Grotesk',sans-serif;color:#7c6cf2;text-decoration:none">Show all %d entries →</a></div>`, showAllCount)
+				return fmt.Sprintf(`<div style="padding:12px 16px;border-top:1px solid #181b25;text-align:center"><a href="/v2/cloudflare" style="font:600 11px 'Hanken Grotesk',sans-serif;color:#7c6cf2;text-decoration:none">Show all %d entries →</a></div>`, showAllCount)
 			}
 			return ""
 		}(),

@@ -16,12 +16,12 @@ test.describe('Providers', () => {
   });
 
   test('GET /providers returns 200', async ({ page }) => {
-    const response = await page.goto('/providers');
+    const response = await page.goto('/v2/providers');
     expect(response?.status()).toBe(200);
   });
 
   test('providers page does not leak any API key', async ({ page }) => {
-    await page.goto('/providers');
+    await page.goto('/v2/providers');
     const body = await page.content();
     assertNoSecretLeakage(body, '/providers');
     // Keys must be masked — the word "masked" or "•" indicates redaction.
@@ -33,7 +33,7 @@ test.describe('Providers', () => {
   });
 
   test('provider status values are meaningful (not blank)', async ({ page }) => {
-    await page.goto('/providers');
+    await page.goto('/v2/providers');
     const body = await page.content();
     // At minimum, the page should tell us something about provider state.
     const meaningfulStrings = ['configured', 'missing', 'enabled', 'disabled', 'not configured'];
@@ -42,7 +42,7 @@ test.describe('Providers', () => {
   });
 
   test('provider action rail stays readable and buttons stay large', async ({ page }) => {
-    await page.goto('/providers');
+    await page.goto('/v2/providers');
     const actionRail = page.locator('.provider-actions').first();
     await expect(actionRail).toBeVisible();
 
@@ -60,7 +60,7 @@ test.describe('Providers', () => {
   });
 
   test('Replace Key forms have CSRF token and no pre-filled key value', async ({ page }) => {
-    await page.goto('/providers');
+    await page.goto('/v2/providers');
     // Every Replace Key form must include a csrf_token hidden field.
     const csrfInputs = await page.locator('form input[name="csrf_token"]').all();
     expect(csrfInputs.length, 'at least one CSRF-protected form must be present').toBeGreaterThan(0);
@@ -98,7 +98,7 @@ test.describe('Providers', () => {
       return;
     }
     // Get CSRF token from the providers page
-    await page.goto('/providers');
+    await page.goto('/v2/providers');
     const csrfInput = page.locator('form input[name="csrf_token"]').first();
     const csrfToken = await csrfInput.getAttribute('value');
     expect(csrfToken, 'CSRF token must be present').toBeTruthy();

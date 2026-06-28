@@ -1107,10 +1107,10 @@ func (s *Server) dashboardConsoleViewForWindow(ctx context.Context, rawWindow st
 		Activity: activity,
 		Threat:   threats,
 		KPIs: []DashboardKPIView{
-			{Label: "Health", Value: fmt.Sprintf("%d%%", healthScore.Score), Detail: "derived platform score", Href: "/health", Level: healthScore.Level},
-			{Label: "AbuseIPDB reports", Value: strconv.Itoa(reportedWindowTotal), Detail: "windowed evidence-backed", Href: "/evidence?filter=reported", Level: "live"},
-			{Label: "Providers", Value: strconv.Itoa(len(providers) + len(nonAIProviders)), Detail: "configured provider boundaries", Href: "/providers", Level: "healthy"},
-			{Label: "Recent activity", Value: strconv.Itoa(len(activity.Items)), Detail: "bounded live feed", Href: "/timeline", Level: "live"},
+			{Label: "Health", Value: fmt.Sprintf("%d%%", healthScore.Score), Detail: "derived platform score", Href: "/v2/health", Level: healthScore.Level},
+			{Label: "AbuseIPDB reports", Value: strconv.Itoa(reportedWindowTotal), Detail: "windowed evidence-backed", Href: "/v2/timeline?q=reported", Level: "live"},
+			{Label: "Providers", Value: strconv.Itoa(len(providers) + len(nonAIProviders)), Detail: "configured provider boundaries", Href: "/v2/providers", Level: "healthy"},
+			{Label: "Recent activity", Value: strconv.Itoa(len(activity.Items)), Detail: "bounded live feed", Href: "/v2/timeline", Level: "live"},
 		},
 		Freshness: freshness,
 	}

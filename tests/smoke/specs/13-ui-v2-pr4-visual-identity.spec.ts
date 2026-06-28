@@ -45,7 +45,7 @@ test.describe('UI v2 PR4 Visual Identity and Design System', () => {
     await expect(page.getByRole('region', { name: 'Threat Visualization' })).toBeVisible();
     await referenceCapture(page, 'ui-v2-pr4-attack-map-dark-operations.png');
 
-    await page.goto('/timeline');
+    await page.goto('/v2/timeline');
     await expect(page.locator('body')).toHaveAttribute('data-theme', 'operations-dark');
     await expect(page.getByRole('heading', { name: /Timeline/i })).toBeVisible();
     await referenceCapture(page, 'ui-v2-pr4-timeline-dark-operations.png');
@@ -56,7 +56,7 @@ test.describe('UI v2 PR4 Visual Identity and Design System', () => {
   });
 
   test('Empty and degraded states remain explicit in the visual system', async ({ page }) => {
-    await page.goto('/timeline?q=__ui_v2_pr4_empty_state_fixture__');
+    await page.goto('/v2/timeline?q=__ui_v2_pr4_empty_state_fixture__');
     await expect(page.getByText(/No matching timeline events/i)).toBeVisible();
     await referenceCapture(page, 'ui-v2-pr4-empty-degraded-state.png');
   });

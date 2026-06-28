@@ -14,7 +14,7 @@ test.describe('Cross-page coherence', () => {
   });
 
   test('health JSON and dashboard CrowdSec status are consistent', async ({ page }) => {
-    await page.goto('/health/json');
+    await page.goto('/v2/health/json');
     const rawHealthText = await page.evaluate(() => document.body.innerText);
     let health: Record<string, unknown> = {};
     try {
@@ -40,7 +40,7 @@ test.describe('Cross-page coherence', () => {
   });
 
   test('Cloudflare configured in health → Cloudflare Diff shows Token YES', async ({ page }) => {
-    await page.goto('/health/json');
+    await page.goto('/v2/health/json');
     const rawText = await page.evaluate(() => document.body.innerText);
     let health: Record<string, unknown> = {};
     try {
@@ -57,7 +57,7 @@ test.describe('Cross-page coherence', () => {
       !healthJson.includes('missing');
 
     if (cfConfiguredInHealth) {
-      await page.goto('/cloudflare/diff');
+      await page.goto('/v2/cloudflare');
       const body = await page.content();
       // Diff page must not say token is missing when health reports configured.
       expect(body, 'Cloudflare Diff must not say token missing when health reports configured')
@@ -66,7 +66,7 @@ test.describe('Cross-page coherence', () => {
   });
 
   test('provider page keys are masked — not equal to what health JSON shows', async ({ page }) => {
-    await page.goto('/providers');
+    await page.goto('/v2/providers');
     const body = await page.content();
     // If keys are present, they must be masked (shown as "****" or similar).
     // We verify the body contains no raw token pattern.
@@ -75,7 +75,7 @@ test.describe('Cross-page coherence', () => {
   });
 
   test('OpenResty installed but no events file is NOT shown as critical error', async ({ page }) => {
-    await page.goto('/health');
+    await page.goto('/v2/health');
     const body = await page.content();
     // OpenResty binary presence without events.jsonl must not be shown as "failed" or "critical".
     // The health model reports binary+service only (not events file).
@@ -94,7 +94,7 @@ test.describe('Cross-page coherence', () => {
       expect(body).toContain('/evidence/');
     }
 
-    await page.goto('/timeline');
+    await page.goto('/v2/timeline');
     body = await page.content();
     if (body.includes('<table')) {
       expect(body).toContain('/evidence/');

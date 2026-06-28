@@ -34,7 +34,7 @@ State file: `/var/lib/security-automation-go/runtime/ai-providers.env` — enabl
 
 ## UI workflow
 
-Open `/providers` in the local operator UI:
+Open `/v2/providers` in the local operator UI:
 
 - `Replace Key` updates the encrypted SQLite credential
 - `Test Provider` performs a short provider check — records only redacted status metadata
@@ -46,7 +46,7 @@ The UI never echoes a stored credential after save and never pre-fills a secret 
 
 To migrate an old installation that still has files under `/etc/security-automation-go/secrets/`:
 
-1. Open `/providers` in the UI.
+1. Open `/v2/providers` in the UI.
 2. Click `Import Legacy` once.
 3. The runtime does not read legacy files during normal operation.
 

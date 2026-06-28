@@ -20,7 +20,7 @@ test.describe('UI v2 PR1 performance and ergonomics baseline', () => {
   });
 
   test('Timeline supports compact mode and persistent collapsible panels', async ({ page }) => {
-    await page.goto('/timeline');
+    await page.goto('/v2/timeline');
 
     const firstRow = page.locator('tbody tr').first();
     const hasRows = await firstRow.count() > 0;
@@ -42,8 +42,8 @@ test.describe('UI v2 PR1 performance and ergonomics baseline', () => {
     await expect(panel).toHaveAttribute('data-collapsed', 'true');
     await referenceCapture(page, 'ui-v2-pr1-timeline-collapsed.png');
 
-    await page.goto('/health');
-    await page.goto('/timeline');
+    await page.goto('/v2/health');
+    await page.goto('/v2/timeline');
     await expect(page.locator('[data-collapsible-key="timeline-read-model"]').first()).toHaveAttribute('data-collapsed', 'true');
   });
 });

@@ -28,7 +28,7 @@ test.describe('UI v2 PR5 Operator Productivity', () => {
 
   test('Watchlist: add item, persist across navigation, then remove', async ({ page }) => {
     // Navigate to timeline where watchlist-add buttons exist.
-    await page.goto('/timeline');
+    await page.goto('/v2/timeline');
     await expect(page.getByRole('heading', { name: /Timeline/i })).toBeVisible();
 
     // Locate the first watchlist-add button and click it.
@@ -58,7 +58,7 @@ test.describe('UI v2 PR5 Operator Productivity', () => {
 
     // Navigate away and back to verify persistence.
     await page.goto('/');
-    await page.goto('/timeline');
+    await page.goto('/v2/timeline');
 
     // Re-expand after navigation.
     const showToggleAfter = page.locator('[data-watchlist-collapse-toggle="true"]');
@@ -81,8 +81,8 @@ test.describe('UI v2 PR5 Operator Productivity', () => {
   test('Recently viewed: navigation creates entries in recents widget', async ({ page }) => {
     // Navigate through a few pages to generate recents.
     await page.goto('/');
-    await page.goto('/timeline');
-    await page.goto('/health');
+    await page.goto('/v2/timeline');
+    await page.goto('/v2/health');
     // Return to dashboard where the sidebar recents widget is rendered.
     await page.goto('/');
 
@@ -96,7 +96,7 @@ test.describe('UI v2 PR5 Operator Productivity', () => {
   });
 
   test('Keyboard navigation: g+d goes to dashboard, g+t goes to timeline', async ({ page }) => {
-    await page.goto('/timeline');
+    await page.goto('/v2/timeline');
     await expect(page.getByRole('heading', { name: /Timeline/i })).toBeVisible();
 
     // Press g then d — should navigate to dashboard.

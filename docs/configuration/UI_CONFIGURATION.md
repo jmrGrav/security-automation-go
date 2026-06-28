@@ -118,9 +118,14 @@ boot.
 
 ## UI routes
 
-- `/` Dashboard
-- `/providers` Provider Management
-- `/forensic` Forensic lookup
-- `/audit` Audit Trail
-- `/intelligence` Security Intelligence (read-only)
-- `/trusted-networks` Trusted Networks Explorer (read-only)
+- `/` Dashboard (redirects to `/v2/`)
+- `/v2/` Dashboard
+- `/v2/providers` Provider Management
+- `/v2/investigate` IP Investigation (forensic lookup)
+- `/v2/audit` Audit Trail
+- `/v2/timeline` Security Timeline
+- `/v2/health` System Health
+- `/v2/incident` Focus Incident
+- `/v2/cloudflare` Cloudflare Overview
+- `/v2/notes` Operator Notes
+- `/v2/trusted-networks` Trusted Networks Explorer (read-only)

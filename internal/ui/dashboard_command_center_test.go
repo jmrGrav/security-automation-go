@@ -83,8 +83,8 @@ func TestDashboardSearchRoutesIPToForensic(t *testing.T) {
 
 func TestDashboardSearchRoutesEvidenceIDToEvidenceDetail(t *testing.T) {
 	got := dashboardSearchTarget("ev-abc123")
-	if got != "/evidence/ev-abc123" {
-		t.Fatalf("evidence search target: want evidence detail, got %q", got)
+	if got != "/v2/timeline?q=ev-abc123" {
+		t.Fatalf("evidence search target: want v2 timeline route, got %q", got)
 	}
 }
 
