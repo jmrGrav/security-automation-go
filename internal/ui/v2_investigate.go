@@ -49,7 +49,8 @@ func (s *Server) handleV2Investigate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	view := ForensicView{IP: q}
+	ipStr := ip.String()
+	view := ForensicView{IP: ipStr}
 	if svc := s.securityIntelligenceService(); svc != nil {
 		summary, enrichErr := svc.Enrich(ctx, ip, enrichment.LookupOptions{ManualForensics: true})
 		if enrichErr == nil {
@@ -63,18 +64,18 @@ func (s *Server) handleV2Investigate(w http.ResponseWriter, r *http.Request) {
 
 	var ipEvidence []reporting.DecisionEvidence
 	if s.evidence != nil {
-		ipEvidence, _ = s.evidence.Search(ctx, reporting.EvidenceSearchOptions{IP: q, Limit: 50})
+		ipEvidence, _ = s.evidence.Search(ctx, reporting.EvidenceSearchOptions{IP: ipStr, Limit: 50})
 	}
 
 	var noteContent string
 	if s.noteStore != nil {
-		existing, _, _ := s.noteStore.Get(ctx, "ip", q)
+		existing, _, _ := s.noteStore.Get(ctx, "ip", ipStr)
 		noteContent = existing.Content
 	}
 
-	s.audit.Record("forensic_lookup", map[string]string{"ip": q, "source": "ui_v2"})
+	s.audit.Record("forensic_lookup", map[string]string{"ip": ipStr, "source": "ui_v2"})
 
-	_, _ = fmt.Fprint(w, v2Page("Investigate · "+ip.String(), "/v2/investigate",
+	_, _ = fmt.Fprint(w, v2Page("Investigate · "+html.EscapeString(ipStr), "/v2/investigate",
 		renderV2InvestigateIP(view, ipEvidence, noteContent, s.csrfTokenFromRequest(r), fromPage)))
 }
 
