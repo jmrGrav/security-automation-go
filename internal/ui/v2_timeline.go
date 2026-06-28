@@ -186,7 +186,7 @@ func renderV2TimelineStream(events []audit.TimelineEvent, query string) string {
 		return `<div class="tl-empty"><div style="font:700 16px 'Hanken Grotesk',sans-serif;color:#c5cad8;margin-bottom:5px">` + html.EscapeString(msg) + `</div><div style="font:500 12px 'Hanken Grotesk',sans-serif;color:#6b7184">Recent activity and suggested pivots stay available even before data arrives.</div><div class="v2-empty-actions" style="max-width:860px;margin:16px auto 0">
 <a class="v2-empty-action" href="/v2/investigate">Search IP <span>›</span></a>
 <a class="v2-empty-action" href="/v2/timeline">Browse Timeline <span>›</span></a>
-<a class="v2-empty-action" href="/v2/investigate">Recent Evidence <span>›</span></a>
+<a class="v2-empty-action" href="/v2/incident">Focus Incident <span>›</span></a>
 <a class="v2-empty-action" href="/v2/timeline?q=waf">Recent WAF Events <span>›</span></a>
 <a class="v2-empty-action" href="/v2/timeline?q=abuseipdb">Recent AbuseIPDB Reports <span>›</span></a>
 </div><div style="font:700 10px 'JetBrains Mono',monospace;letter-spacing:.12em;text-transform:uppercase;color:#52596d;margin-top:18px">Quick actions</div></div>`

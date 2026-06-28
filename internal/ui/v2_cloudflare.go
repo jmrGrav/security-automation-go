@@ -333,7 +333,7 @@ func renderV2CFBoundary(v v2CloudflareView) string {
 
   <div style="display:flex;align-items:center;gap:9px;padding:11px 14px;border-radius:10px;background:rgba(124,108,242,.06);border:1px solid rgba(124,108,242,.16)">
     <span style="width:7px;height:7px;border-radius:50%%;background:#7c6cf2;flex:none"></span>
-    <span style="font:500 12px 'Hanken Grotesk',sans-serif;color:#aab0c2">This console never modifies Cloudflare rules. Everything is projected from config and the daemon's lifecycle store. For forensic diff of live rules, see <a href="/cloudflare/diff" style="color:#a99cff;text-decoration:none">Classic Cloudflare diff ↗</a>.</span>
+    <span style="font:500 12px 'Hanken Grotesk',sans-serif;color:#aab0c2">This console never modifies Cloudflare rules. Everything is projected from config and the daemon's lifecycle store. For a live rule diff against Cloudflare's API, see <a href="/cloudflare/diff" style="color:#a99cff;text-decoration:none">Cloudflare rule diff ↗</a>.</span>
   </div>
 </div>`,
 		html.EscapeString(modeDesired), html.EscapeString(modeObserved),

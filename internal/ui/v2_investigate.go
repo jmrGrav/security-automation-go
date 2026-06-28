@@ -417,7 +417,7 @@ func renderV2InvestigateEnrichment(view ForensicView) string {
 	var b strings.Builder
 
 	b.WriteString(`<div class="v2-card">
-  <div class="v2-card-header"><span class="v2-card-title">Forensic enrichment</span>`)
+  <div class="v2-card-header"><span class="v2-card-title">IP enrichment</span>`)
 
 	if view.HasEnrichment {
 		s := view.Summary

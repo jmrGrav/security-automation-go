@@ -331,7 +331,7 @@ func TestRenderV2TimelineEmptyStateOffersOperatorActions(t *testing.T) {
 		"Quick actions",
 		"Search IP",
 		"Browse Timeline",
-		"Recent Evidence",
+		"Focus Incident",
 		"Recent WAF Events",
 		"Recent AbuseIPDB Reports",
 		"/v2/investigate",
