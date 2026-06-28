@@ -161,9 +161,9 @@ func CorrelatedTimelinePage(view CorrelatedTimelineView) templ.Component {
 						`<div class="row"><span>First seen</span><span>%s</span></div>`+
 						`<div class="row"><span>Last seen</span><span>%s</span></div>`+
 						`<div class="row"><span>Links</span><span>`+
-						`<a href="/timeline?q=%s">Timeline</a> · `+
-						`<a href="/forensic?q=%s">Forensic</a> · `+
-						`<a href="/incident?ip=%s">Focus Incident</a>`+
+						`<a href="/v2/timeline?q=%s">Timeline</a> · `+
+						`<a href="/v2/investigate?ip=%s">Investigate</a> · `+
+						`<a href="/v2/incident?ip=%s">Focus Incident</a>`+
 						`</span></div></div>`,
 					ip, g.EventCount, sources, firstSeen, lastSeen,
 					ip, ip, ip,

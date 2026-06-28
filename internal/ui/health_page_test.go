@@ -53,17 +53,18 @@ func TestHandleHealthPage_RendersWithoutPanic(t *testing.T) {
 	srv.sessions[sessionToken] = time.Now().Add(sessionTTL)
 	srv.mu.Unlock()
 
-	req := httptest.NewRequest("GET", "/health", nil)
+	// /health now redirects to /v2/health; test the V2 handler directly.
+	req := httptest.NewRequest("GET", "/v2/health", nil)
 	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: sessionToken})
 	w := httptest.NewRecorder()
-	srv.handleHealthPage(w, req)
+	srv.handleV2Health(w, req)
 
 	if w.Code == http.StatusInternalServerError {
 		t.Errorf("unexpected 500: %s", w.Body.String())
 	}
 	body := w.Body.String()
-	if !strings.Contains(body, "Health Center") {
-		t.Error("expected 'Health Center' in page body")
+	if !strings.Contains(body, "System Health") {
+		t.Error("expected 'System Health' in v2 health page body")
 	}
 }
 

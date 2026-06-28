@@ -128,10 +128,10 @@ func dashboardNonAIProviderLevel(provider NonAIProviderEntry) string {
 func dashboardSearchTarget(raw string) string {
 	q := strings.TrimSpace(raw)
 	if q == "" {
-		return "/timeline"
+		return "/v2/timeline"
 	}
 	if ip := net.ParseIP(q); ip != nil {
-		return "/forensic?ip=" + url.QueryEscape(q)
+		return "/v2/investigate?ip=" + url.QueryEscape(q)
 	}
 	lower := strings.ToLower(q)
 	if strings.HasPrefix(lower, "ev-") || strings.HasPrefix(lower, "report-ev-") {
@@ -139,13 +139,13 @@ func dashboardSearchTarget(raw string) string {
 	}
 	for _, provider := range []string{"cloudflare", "crowdsec", "abuseipdb", "openai", "anthropic", "gemini", "spamhaus", "virustotal"} {
 		if strings.Contains(lower, provider) {
-			return "/providers?q=" + url.QueryEscape(q)
+			return "/v2/providers?q=" + url.QueryEscape(q)
 		}
 	}
 	if strings.HasPrefix(lower, "as") {
 		return "/intelligence?q=" + url.QueryEscape(q)
 	}
-	return "/timeline?q=" + url.QueryEscape(q)
+	return "/v2/timeline?q=" + url.QueryEscape(q)
 }
 
 func dashboardTimeWindow(raw string) DashboardTimeWindowView {

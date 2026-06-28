@@ -84,12 +84,7 @@ func (s *Server) buildDetectConfig() detect.Config {
 }
 
 func (s *Server) handleHealthPage(w http.ResponseWriter, r *http.Request) {
-	view := healthPageView{
-		Checks:     health.RunAll(s.buildHealthConfig()),
-		Detectors:  detect.RunAll(s.buildDetectConfig()),
-		ReportTime: time.Now().UTC().Format(time.RFC3339),
-	}
-	_ = HealthPage(view, s.csrfTokenFromRequest(r)).Render(r.Context(), w)
+	http.Redirect(w, r, "/v2/health", http.StatusMovedPermanently)
 }
 
 func credentialConfigured(ctx context.Context, store CredentialStorer, key string) bool {

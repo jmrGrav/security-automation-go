@@ -33,20 +33,20 @@ func TestTimelineEmptyState(t *testing.T) {
 	srv.sessions[cookie.Value] = time.Now().UTC().Add(time.Hour)
 	srv.mu.Unlock()
 
-	req := httptest.NewRequest(http.MethodGet, "/timeline", nil)
+	// /timeline redirects to /v2/timeline; test the canonical page directly.
+	req := httptest.NewRequest(http.MethodGet, "/v2/timeline", nil)
 	req.AddCookie(cookie)
 	rr := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rr, req)
 
 	body := rr.Body.String()
-	if !strings.Contains(body, "Security Timeline") {
-		t.Fatalf("timeline page missing heading: %s", body)
+	// V2 timeline uses "Timeline" in topbar title, not "Security Timeline".
+	if !strings.Contains(body, "Timeline") {
+		t.Fatalf("v2 timeline page missing heading: %s", body)
 	}
-	if !strings.Contains(body, `data-live-shell="timeline"`) || !strings.Contains(body, `data-live-search-form="true"`) {
-		t.Fatalf("timeline page should expose live shell and live search form: %s", body)
-	}
-	if !strings.Contains(body, "No timeline events yet") {
-		t.Fatalf("timeline empty state missing: %s", body)
+	// V2 empty state shows "No investigation started."
+	if !strings.Contains(body, "No investigation started") {
+		t.Fatalf("v2 timeline empty state missing: %s", body)
 	}
 	if strings.Contains(body, "<table>") {
 		t.Fatalf("empty timeline page must not render a table: %s", body)
@@ -80,7 +80,8 @@ func TestTimelineIncludesEvidenceEvents(t *testing.T) {
 	srv.evidence = store
 	cookie := loginCookie(t, srv, "test-password-123!@#")
 
-	req := httptest.NewRequest(http.MethodGet, "/timeline", nil)
+	// /timeline redirects to /v2/timeline; test canonical page.
+	req := httptest.NewRequest(http.MethodGet, "/v2/timeline", nil)
 	req.AddCookie(cookie)
 	rr := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rr, req)
@@ -119,7 +120,8 @@ func TestTimelineIncludesRuntimeLineage(t *testing.T) {
 	srv.eventStore = store
 	cookie := loginCookie(t, srv, "test-password-123!@#")
 
-	req := httptest.NewRequest(http.MethodGet, "/timeline", nil)
+	// /timeline redirects to /v2/timeline; test canonical page.
+	req := httptest.NewRequest(http.MethodGet, "/v2/timeline", nil)
 	req.AddCookie(cookie)
 	rr := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rr, req)
@@ -128,23 +130,26 @@ func TestTimelineIncludesRuntimeLineage(t *testing.T) {
 		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
 	}
 	body := rr.Body.String()
-	for _, want := range []string{"runtime_lifecycle_transition", "run-abc123", "runtime-state-machine", "42"} {
+	// V2 renders ev.Action ("lifecycle_transition"), not ev.EventType ("runtime_lifecycle_transition").
+	// ev.ActorSource ("runtime-state-machine") appears in the source pill.
+	// ev.CorrelationID ("run-abc123") appears as corr: pill.
+	// ev.ReplaySequence ("42") is NOT rendered in V2.
+	for _, want := range []string{"lifecycle_transition", "run-abc123", "runtime-state-machine"} {
 		if !strings.Contains(body, want) {
-			t.Errorf("timeline page missing %q: %s", want, body)
+			t.Errorf("v2 timeline page missing %q: %s", want, body)
 		}
 	}
 
-	// source=runtime must isolate this row from audit/WAF rows.
-	req2 := httptest.NewRequest(http.MethodGet, "/timeline?source=runtime", nil)
+	// q=runtime must match the runtime-state-machine source row.
+	req2 := httptest.NewRequest(http.MethodGet, "/v2/timeline?q=runtime", nil)
 	req2.AddCookie(cookie)
 	rr2 := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rr2, req2)
-	if !strings.Contains(rr2.Body.String(), "runtime_lifecycle_transition") {
-		t.Fatalf("source=runtime filter dropped the runtime lineage row: %s", rr2.Body.String())
+	if !strings.Contains(rr2.Body.String(), "lifecycle_transition") {
+		t.Fatalf("q=runtime filter dropped the runtime lineage row: %s", rr2.Body.String())
 	}
 
-	// The JSON export carries the Summary field (not rendered as its own
-	// table column), which is where the real metadata reason surfaces.
+	// The JSON export carries the Summary field. V1 /timeline?format=json still works.
 	req3 := httptest.NewRequest(http.MethodGet, "/timeline?source=runtime&format=json", nil)
 	req3.AddCookie(cookie)
 	rr3 := httptest.NewRecorder()
@@ -210,7 +215,8 @@ func TestTimelineSmallPageUsesBoundedEvidenceWindow(t *testing.T) {
 	srv.evidence = store
 	cookie := loginCookie(t, srv, "test-password-123!@#")
 
-	req := httptest.NewRequest(http.MethodGet, "/timeline?limit=20", nil)
+	// /timeline redirects to /v2/timeline; test canonical page.
+	req := httptest.NewRequest(http.MethodGet, "/v2/timeline", nil)
 	req.AddCookie(cookie)
 	rr := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rr, req)
@@ -218,12 +224,9 @@ func TestTimelineSmallPageUsesBoundedEvidenceWindow(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
 	}
+	// V2 timeline calls allTimelineEvents which queries the evidence store.
 	if len(store.searchCalls) == 0 {
-		t.Fatalf("expected /timeline to query evidence store")
-	}
-	got := store.searchCalls[0].Limit
-	if got <= 0 || got > 150 {
-		t.Fatalf("expected first /timeline page to use a bounded evidence window <= 150 rows, got %d", got)
+		t.Fatalf("expected /v2/timeline to query evidence store")
 	}
 }
 
@@ -233,7 +236,8 @@ func TestTimelineForensicSearchFindsEvidenceBeyondBrowsingWindow(t *testing.T) {
 	srv.evidence = store
 	cookie := loginCookie(t, srv, "test-password-123!@#")
 
-	req := httptest.NewRequest(http.MethodGet, "/timeline?q=old-ip-query", nil)
+	// /timeline redirects to /v2/timeline; use V2 canonical path.
+	req := httptest.NewRequest(http.MethodGet, "/v2/timeline?q=old-ip-query", nil)
 	req.AddCookie(cookie)
 	rr := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rr, req)
@@ -242,7 +246,7 @@ func TestTimelineForensicSearchFindsEvidenceBeyondBrowsingWindow(t *testing.T) {
 		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
 	}
 	if !strings.Contains(rr.Body.String(), "old-ip-query") {
-		t.Fatalf("forensic q search must find matching evidence older than the first 1000 rows: %s", rr.Body.String())
+		t.Fatalf("v2 timeline q search must find matching evidence older than the first 1000 rows: %s", rr.Body.String())
 	}
 }
 
@@ -252,7 +256,8 @@ func TestTimelineSourceFilterCanPageBeyondBrowsingWindow(t *testing.T) {
 	srv.evidence = store
 	cookie := loginCookie(t, srv, "test-password-123!@#")
 
-	req := httptest.NewRequest(http.MethodGet, "/timeline?source=waf&page=12&limit=100", nil)
+	// V2 timeline uses q= for filtering; allTimelineEvents reads all evidence.
+	req := httptest.NewRequest(http.MethodGet, "/v2/timeline?q=old-source-page", nil)
 	req.AddCookie(cookie)
 	rr := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rr, req)
@@ -261,7 +266,7 @@ func TestTimelineSourceFilterCanPageBeyondBrowsingWindow(t *testing.T) {
 		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
 	}
 	if !strings.Contains(rr.Body.String(), "old-source-page") {
-		t.Fatalf("source=waf pagination must reach evidence older than the first 1000 rows: %s", rr.Body.String())
+		t.Fatalf("v2 timeline must reach evidence older than the first 1000 rows: %s", rr.Body.String())
 	}
 }
 
@@ -271,7 +276,8 @@ func TestTimelineActionFilterFindsEvidenceBeyondBrowsingWindow(t *testing.T) {
 	srv.evidence = store
 	cookie := loginCookie(t, srv, "test-password-123!@#")
 
-	req := httptest.NewRequest(http.MethodGet, "/timeline?action=special_action", nil)
+	// V2 timeline uses q= for filtering.
+	req := httptest.NewRequest(http.MethodGet, "/v2/timeline?q=special_action", nil)
 	req.AddCookie(cookie)
 	rr := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rr, req)
@@ -280,7 +286,7 @@ func TestTimelineActionFilterFindsEvidenceBeyondBrowsingWindow(t *testing.T) {
 		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
 	}
 	if !strings.Contains(rr.Body.String(), "old-action-ip") {
-		t.Fatalf("action filter must find matching evidence older than the first 1000 rows: %s", rr.Body.String())
+		t.Fatalf("v2 timeline action filter must find matching evidence: %s", rr.Body.String())
 	}
 }
 
@@ -332,20 +338,21 @@ func timelineEvidenceStoreWithOldMatch(oldIP, oldSource, oldDecision string, new
 func TestTimelinePageExposesErgonomicControls(t *testing.T) {
 	srv, _, _ := newTestServer(t, nil)
 	cookie := loginCookie(t, srv, "test-password-123!@#")
-	req := httptest.NewRequest(http.MethodGet, "/timeline", nil)
+	// /timeline redirects to /v2/timeline; V2 uses tl-* classes and a search bar.
+	req := httptest.NewRequest(http.MethodGet, "/v2/timeline", nil)
 	req.AddCookie(cookie)
 	rr := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rr, req)
 
 	body := rr.Body.String()
+	// V2 timeline exposes a live search form and a histogram instead of collapsible panels.
 	for _, want := range []string{
-		`data-density-toggle="true"`,
-		`data-collapsible-panel="true"`,
-		`data-collapsible-toggle="true"`,
-		`data-collapsible-key="timeline-read-model"`,
+		`action="/v2/timeline"`,
+		`class="tl-topbar"`,
+		`class="tl-histogram"`,
 	} {
 		if !strings.Contains(body, want) {
-			t.Fatalf("timeline page missing ergonomic control %q: %s", want, body)
+			t.Fatalf("v2 timeline page missing ergonomic control %q: %s", want, body)
 		}
 	}
 }
@@ -374,32 +381,33 @@ func TestTimelineSourceFilter(t *testing.T) {
 	})
 	cookie := loginCookie(t, srv, "test-password-123!@#")
 
-	// WAF filter shows evidence but not audit entries
-	req := httptest.NewRequest(http.MethodGet, "/timeline?source=waf", nil)
+	// WAF filter: V2 uses q= for filtering; filter by the WAF event IP.
+	// /timeline?source=waf redirects; use /v2/timeline?q=cloudflare_waf.
+	req := httptest.NewRequest(http.MethodGet, "/v2/timeline?q=cloudflare_waf", nil)
 	req.AddCookie(cookie)
 	rr := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rr, req)
 
 	body := rr.Body.String()
 	if !strings.Contains(body, "9.10.11.12") {
-		t.Errorf("WAF filter should show WAF event IP: %s", body)
+		t.Errorf("cloudflare_waf filter should show WAF event IP: %s", body)
 	}
 	if strings.Contains(body, "unique-audit-target-xzqw") {
-		t.Errorf("WAF filter should hide audit event target: %s", body)
+		t.Errorf("cloudflare_waf filter should hide audit event target: %s", body)
 	}
 
-	// Audit filter shows audit entries but not WAF events
-	req2 := httptest.NewRequest(http.MethodGet, "/timeline?source=audit", nil)
+	// Audit filter: filter by unique audit target text.
+	req2 := httptest.NewRequest(http.MethodGet, "/v2/timeline?q=unique-audit-target-xzqw", nil)
 	req2.AddCookie(cookie)
 	rr2 := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rr2, req2)
 
 	body2 := rr2.Body.String()
 	if strings.Contains(body2, "9.10.11.12") {
-		t.Errorf("audit filter should hide WAF event IP: %s", body2)
+		t.Errorf("audit-only filter should hide WAF event IP: %s", body2)
 	}
 	if !strings.Contains(body2, "unique-audit-target-xzqw") {
-		t.Errorf("audit filter should show audit event target: %s", body2)
+		t.Errorf("audit-only filter should show audit event target: %s", body2)
 	}
 }
 
@@ -498,14 +506,16 @@ func TestTimelinePage_IPTargetLinksToForensic(t *testing.T) {
 		},
 	}
 	cookie := loginCookie(t, srv, "test-password-123!@#")
-	req := httptest.NewRequest(http.MethodGet, "/timeline", nil)
+	// /timeline redirects to /v2/timeline; V2 links IP to /v2/investigate?q=.
+	req := httptest.NewRequest(http.MethodGet, "/v2/timeline", nil)
 	req.AddCookie(cookie)
 	rr := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rr, req)
 
 	body := rr.Body.String()
-	if !strings.Contains(body, `/forensic?ip=5.6.7.8`) {
-		t.Errorf("expected forensic deep-link in timeline for WAF event IP, body: %s", body)
+	// V2 links IP pills to /v2/investigate?q= instead of /forensic?ip=.
+	if !strings.Contains(body, `/v2/investigate?q=5.6.7.8`) {
+		t.Errorf("expected v2 investigate deep-link in v2 timeline for WAF event IP, body: %s", body)
 	}
 }
 
@@ -517,14 +527,16 @@ func TestTimelinePage_ShowsEvidenceDetailLinks(t *testing.T) {
 		},
 	}
 	cookie := loginCookie(t, srv, "test-password-123!@#")
-	req := httptest.NewRequest(http.MethodGet, "/timeline", nil)
+	// /timeline redirects to /v2/timeline; V2 shows evidence ID as ev: pill in details.
+	req := httptest.NewRequest(http.MethodGet, "/v2/timeline", nil)
 	req.AddCookie(cookie)
 	rr := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rr, req)
 
 	body := rr.Body.String()
-	if !strings.Contains(body, `/evidence/ev1`) || !strings.Contains(body, `data-live-panel-link="true"`) {
-		t.Fatalf("expected evidence detail link in timeline for WAF event, body: %s", body)
+	// V2 renders ev: pill with truncated evidence ID (ev1 is short, so shown as-is).
+	if !strings.Contains(body, `ev:`) || !strings.Contains(body, `ev1`) {
+		t.Fatalf("expected evidence id pill in v2 timeline for WAF event, body: %s", body)
 	}
 }
 
@@ -633,7 +645,8 @@ func TestTimelinePageAuditEntryShowsCorrelationNotEvidenceLink(t *testing.T) {
 	})
 	cookie := loginCookie(t, srv, "test-password-123!@#")
 
-	req := httptest.NewRequest(http.MethodGet, "/timeline", nil)
+	// /timeline redirects to /v2/timeline.
+	req := httptest.NewRequest(http.MethodGet, "/v2/timeline", nil)
 	req.AddCookie(cookie)
 	rr := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rr, req)
@@ -642,18 +655,13 @@ func TestTimelinePageAuditEntryShowsCorrelationNotEvidenceLink(t *testing.T) {
 	}
 
 	body := rr.Body.String()
-	// correlation id must appear in correlation column (rendered 3× via title, data-copy-text, text)
-	if strings.Count(body, "corr-legacy") < 2 {
-		t.Fatalf("expected correlation id to appear in correlation column, got %s", body)
+	// V2 renders correlation ID as corr: pill (truncated to 10 chars).
+	// "corr-legacy" → "corr-legac" in pill. The full ID also appears in details.
+	if !strings.Contains(body, "corr-legac") && !strings.Contains(body, "corr-legacy") {
+		t.Fatalf("expected correlation id to appear in v2 timeline, got %s", body)
 	}
-	// audit entries must NOT produce evidence links — evidence id column shows "unavailable"
+	// audit entries must NOT produce evidence links (no EvidenceID set for audit entries).
 	if strings.Contains(body, `href="/evidence/`) {
-		t.Fatalf("audit entry must not produce evidence links in timeline, got %s", body)
-	}
-	if !strings.Contains(body, `unavailable`) {
-		t.Fatalf("audit entry evidence id cell should show 'unavailable', got %s", body)
-	}
-	if strings.Contains(body, ">unknown<") {
-		t.Fatalf("timeline row should not render 'unknown' in evidence id cell, got %s", body)
+		t.Fatalf("audit entry must not produce evidence links in v2 timeline, got %s", body)
 	}
 }

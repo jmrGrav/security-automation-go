@@ -76,7 +76,7 @@ func TestDashboardViewIgnoresCanceledRequestContextForEvidenceCount(t *testing.T
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	req := httptest.NewRequestWithContext(ctx, http.MethodGet, "/", nil)
+	req := httptest.NewRequestWithContext(ctx, http.MethodGet, "/v2/", nil)
 	req.AddCookie(cookie)
 	rr := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rr, req)
@@ -85,10 +85,8 @@ func TestDashboardViewIgnoresCanceledRequestContextForEvidenceCount(t *testing.T
 		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
 	}
 	body := rr.Body.String()
-	if !strings.Contains(body, "AbuseIPDB Reported") {
-		t.Fatalf("dashboard missing AbuseIPDB summary: %s", body)
-	}
-	if !strings.Contains(body, ">123<") {
+	// V2 dashboard renders reported count as "N reported" (not "AbuseIPDB Reported").
+	if !strings.Contains(body, "123 reported") {
 		t.Fatalf("dashboard should render stable evidence count despite canceled request context: %s", body)
 	}
 }

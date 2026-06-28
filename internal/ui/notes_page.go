@@ -12,19 +12,9 @@ import (
 	"github.com/jm/security-automation-go/internal/storage/sqlite"
 )
 
-// handleNotesPage serves GET /notes — lists all operator notes.
+// handleNotesPage serves GET /notes — redirects to V2 notes.
 func (s *Server) handleNotesPage(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	var notes []sqlite.Note
-	if s.noteStore != nil {
-		var err error
-		notes, err = s.noteStore.List(ctx)
-		if err != nil {
-			http.Error(w, "failed to load notes", http.StatusInternalServerError)
-			return
-		}
-	}
-	_ = NotesPage(notes).Render(ctx, w)
+	http.Redirect(w, r, "/v2/notes", http.StatusMovedPermanently)
 }
 
 // handleNoteUpsert serves POST /notes — creates or updates a note.

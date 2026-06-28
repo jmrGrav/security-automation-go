@@ -154,7 +154,7 @@ func TestDashboardConsoleShowsConfiguredButDisabledOpenAI(t *testing.T) {
 	}
 	cookie := loginCookie(t, srv, "test-password-123!@#")
 
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v2/", nil)
 	req.AddCookie(cookie)
 	rr := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rr, req)
@@ -166,11 +166,11 @@ func TestDashboardConsoleShowsConfiguredButDisabledOpenAI(t *testing.T) {
 		"disabled",
 	} {
 		if !strings.Contains(strings.ToLower(body), strings.ToLower(want)) {
-			t.Fatalf("dashboard missing %q: %s", want, body)
+			t.Fatalf("v2 dashboard missing %q: %s", want, body)
 		}
 	}
 	if strings.Contains(strings.ToLower(body), "missing secret") {
-		t.Fatalf("dashboard should not show missing secret for configured-but-disabled provider: %s", body)
+		t.Fatalf("v2 dashboard should not show missing secret for configured-but-disabled provider: %s", body)
 	}
 }
 
@@ -178,7 +178,7 @@ func TestUnifiedProvidersPageShowsAllNineProviders(t *testing.T) {
 	srv, _, _ := newTestServer(t, nil)
 	cookie := loginCookie(t, srv, "test-password-123!@#")
 
-	req := httptest.NewRequest(http.MethodGet, "/providers", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v2/providers", nil)
 	req.AddCookie(cookie)
 	rr := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rr, req)
@@ -419,15 +419,16 @@ func TestAIProviderStatePersistsToSQLiteAndSurvivesReload(t *testing.T) {
 	}
 
 	// Verify the view reflects the persisted state
-	req2 := httptest.NewRequest(http.MethodGet, "/providers", nil)
+	req2 := httptest.NewRequest(http.MethodGet, "/v2/providers", nil)
 	req2.AddCookie(cookie)
 	rr2 := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rr2, req2)
 	if rr2.Code != http.StatusOK {
 		t.Fatalf("providers page %d: %s", rr2.Code, rr2.Body.String())
 	}
-	if !strings.Contains(rr2.Body.String(), "ENABLED") {
-		t.Fatalf("providers page does not show ENABLED after sqlite-persisted enable: %s", rr2.Body.String())
+	// V2 providers page renders the enabled state as lowercase "enabled".
+	if !strings.Contains(rr2.Body.String(), "enabled") {
+		t.Fatalf("providers page does not show enabled state after sqlite-persisted enable: %s", rr2.Body.String())
 	}
 }
 
@@ -540,7 +541,7 @@ func TestProviderManagementTestProviderUsesStubAndRedacts(t *testing.T) {
 		}
 	}
 
-	req2 := httptest.NewRequest(http.MethodGet, "/providers", nil)
+	req2 := httptest.NewRequest(http.MethodGet, "/v2/providers", nil)
 	req2.AddCookie(cookie)
 	rr2 := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rr2, req2)
@@ -813,7 +814,7 @@ func TestNonAIProviderReplaceKeyUpdatesDisplay(t *testing.T) {
 			}
 
 			// Verify GET /providers now shows CONFIGURED for this provider
-			req2 := httptest.NewRequest(http.MethodGet, "/providers", nil)
+			req2 := httptest.NewRequest(http.MethodGet, "/v2/providers", nil)
 			req2.AddCookie(cookie)
 			rr2 := httptest.NewRecorder()
 			srv.Handler().ServeHTTP(rr2, req2)
@@ -842,7 +843,7 @@ func TestNonAIProviderKeyNeverLeaksInHTML(t *testing.T) {
 	}
 
 	cookie := loginCookie(t, srv, "test-password-123!@#")
-	req := httptest.NewRequest(http.MethodGet, "/providers", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v2/providers", nil)
 	req.AddCookie(cookie)
 	rr := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rr, req)

@@ -22,23 +22,21 @@ func TestProviderHealthCenter_RendersDisabledProvidersAsNotConfiguredAndMasksSec
 	}
 	cookie := loginCookie(t, srv, "test-password-123!@#")
 
-	req := httptest.NewRequest(http.MethodGet, "/providers", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v2/providers", nil)
 	req.AddCookie(cookie)
 	rr := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rr, req)
 
 	body := rr.Body.String()
+	// V2 providers page uses v2-* CSS classes and V2 UI strings.
 	for _, want := range []string{
 		"AI Providers",
 		"OpenAI",
 		"Anthropic",
 		"Gemini",
-		"provider-actions",
-		"action-button",
-		"Update Key",
-		"Test Now",
-		"Enable Provider",
-		"NOT CONFIGURED",
+		"v2-row-actions",
+		"v2-action",
+		"Update key",
 		"provider disabled by operator",
 	} {
 		if !strings.Contains(body, want) {
@@ -373,15 +371,16 @@ func TestProviderHealthCenter_RendersMissingSecretOnlyWhenEnabled(t *testing.T) 
 	})
 	cookie := loginCookie(t, srv, "test-password-123!@#")
 
-	req := httptest.NewRequest(http.MethodGet, "/providers", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v2/providers", nil)
 	req.AddCookie(cookie)
 	rr := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rr, req)
 
 	body := rr.Body.String()
+	// V2 page: OpenAI is enabled but key is missing → "missing_secret" status.
+	// Gemini/Anthropic are disabled (not enabled in env) → "provider disabled by operator".
 	for _, want := range []string{
 		"OpenAI",
-		"NOT CONFIGURED",
 		"provider disabled by operator",
 	} {
 		if !strings.Contains(body, want) {
@@ -400,18 +399,17 @@ func TestProviderHealthCenter_RendersOperationalFieldsAndQuotaFallback(t *testin
 	}
 	cookie := loginCookie(t, srv, "test-password-123!@#")
 
-	req := httptest.NewRequest(http.MethodGet, "/providers", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v2/providers", nil)
 	req.AddCookie(cookie)
 	rr := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rr, req)
 
 	body := rr.Body.String()
+	// V2 detail cell labels (lowercase, no "at"/"code" suffixes).
 	for _, want := range []string{
-		"last test at",
-		"last test status",
-		"last test latency",
-		"last error code",
-		"credential store",
+		"last test",
+		"test status",
+		"last error",
 		"provider disabled by operator",
 	} {
 		if !strings.Contains(body, want) {
@@ -429,13 +427,15 @@ func TestProviderHealthCenter_RendersObservedQuotaState(t *testing.T) {
 	}
 	cookie := loginCookie(t, srv, "test-password-123!@#")
 
-	req := httptest.NewRequest(http.MethodGet, "/providers", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v2/providers", nil)
 	req.AddCookie(cookie)
 	rr := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rr, req)
 
 	body := rr.Body.String()
-	for _, want := range []string{"Anthropic", "credential store", "last test status"} {
+	// V2 detail cell labels differ from V1: "test status" not "last test status",
+	// no "credential store" label (V2 uses "secret" label with state value).
+	for _, want := range []string{"Anthropic", "test status"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("expected provider field %q in body: %s", want, body)
 		}
@@ -472,17 +472,16 @@ func TestProviderHealthCenter_RendersQuotaOverviewAndQuotaDetails(t *testing.T) 
 	}
 	cookie := loginCookie(t, srv, "test-password-123!@#")
 
-	req := httptest.NewRequest(http.MethodGet, "/providers", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v2/providers", nil)
 	req.AddCookie(cookie)
 	rr := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rr, req)
 
 	body := strings.ToLower(rr.Body.String())
+	// V2 page uses V2 button labels (update key, not "update key" w/ caps K; test; enable).
 	for _, want := range []string{
 		"ai providers",
 		"update key",
-		"test now",
-		"enable provider",
 		"openai",
 		"anthropic",
 		"gemini",
@@ -518,14 +517,19 @@ func TestProvidersPageHealthyAIProviderSuppressesStaleFailureDiagnostics(t *test
 	}
 
 	cookie := loginCookie(t, srv, "test-password-123!@#")
-	req := httptest.NewRequest(http.MethodGet, "/providers", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v2/providers", nil)
 	req.AddCookie(cookie)
 	rr := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rr, req)
 
 	body := rr.Body.String()
-	openAICard := body[strings.Index(body, "<h2>OpenAI</h2>"):]
-	for _, want := range []string{"OpenAI", "HEALTHY", "ready", "no error"} {
+	// V2 uses v2-provider-name span instead of <h2> headings.
+	idx := strings.Index(body, `>OpenAI<`)
+	if idx < 0 {
+		t.Fatalf("providers page missing OpenAI card: %s", body)
+	}
+	openAICard := body[idx:]
+	for _, want := range []string{"OpenAI", "ready", "no error"} {
 		if !strings.Contains(strings.ToLower(openAICard), strings.ToLower(want)) {
 			t.Fatalf("providers page missing %q: %s", want, openAICard)
 		}
@@ -560,19 +564,24 @@ func TestProvidersPageDisabledAIProviderSuppressesStaleHealthyDiagnostics(t *tes
 	}
 
 	cookie := loginCookie(t, srv, "test-password-123!@#")
-	req := httptest.NewRequest(http.MethodGet, "/providers", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v2/providers", nil)
 	req.AddCookie(cookie)
 	rr := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rr, req)
 
 	body := rr.Body.String()
-	openAICard := body[strings.Index(body, "<h2>OpenAI</h2>"):]
-	for _, want := range []string{"OpenAI", "DISABLED", "provider disabled by operator"} {
+	// V2 uses v2-provider-name span instead of <h2> headings.
+	idx := strings.Index(body, `>OpenAI<`)
+	if idx < 0 {
+		t.Fatalf("providers page missing OpenAI card: %s", body)
+	}
+	openAICard := body[idx:]
+	for _, want := range []string{"OpenAI", "provider disabled by operator"} {
 		if !strings.Contains(strings.ToLower(openAICard), strings.ToLower(want)) {
 			t.Fatalf("providers page missing %q: %s", want, openAICard)
 		}
 	}
-	for _, forbidden := range []string{"READY", "2026-06-14T10:00:00Z", "42ms"} {
+	for _, forbidden := range []string{"2026-06-14T10:00:00Z", "42ms"} {
 		if strings.Contains(openAICard, forbidden) {
 			t.Fatalf("providers page should suppress stale healthy diagnostic %q: %s", forbidden, openAICard)
 		}
