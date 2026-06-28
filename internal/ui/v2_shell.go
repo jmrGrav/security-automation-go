@@ -145,7 +145,7 @@ a{color:inherit}
 .v2-sidebar.v2-sb-collapsed .v2-sb-signout-icon{display:flex}
 
 /* ── Main area ── */
-.v2-main{flex:1;min-width:0;overflow-y:auto;padding:22px 32px 32px;scrollbar-width:thin;scrollbar-color:#242838 transparent;position:relative}
+.v2-main{flex:1;min-width:0;overflow-y:auto;padding:18px 28px 28px;scrollbar-width:thin;scrollbar-color:#242838 transparent;position:relative}
 .v2-main::-webkit-scrollbar{width:6px}
 .v2-main::-webkit-scrollbar-thumb{background:#242838;border-radius:99px}
 
@@ -164,7 +164,7 @@ a{color:inherit}
 .v2-palette-examples span{color:#6b7184;font:500 10px 'Hanken Grotesk',sans-serif;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
 
 /* ── Design System tokens ── */
-.v2-card{background:#13151c;border:1px solid #20242f;border-radius:14px;overflow:hidden;margin-bottom:20px;position:relative}
+.v2-card{background:#13151c;border:1px solid #20242f;border-radius:14px;overflow:hidden;margin-bottom:14px;position:relative}
 .v2-card-header{display:flex;align-items:center;gap:10px;padding:13px 18px;border-bottom:1px solid #20242f}
 .v2-card-title{font:700 11px 'Hanken Grotesk',sans-serif;letter-spacing:.06em;color:#7b8196;text-transform:uppercase}
 .v2-card-body{padding:16px 18px}
@@ -340,4 +340,79 @@ body{display:block}
 <script src="/static/ai-explain.js"></script>
 </body>
 </html>`
+}
+
+// renderV2ActionSummary returns a full-width action-context bar that pages can
+// embed at the top of their content area.
+// level is one of: "ok", "surveillance", "action", "urgent".
+func renderV2ActionSummary(level, title, summary string) string {
+	color := "#4cc79a"
+	bg := "rgba(76,199,154,.06)"
+	border := "rgba(76,199,154,.15)"
+	label := "OK"
+	switch level {
+	case "surveillance":
+		color = "#9b8cff"
+		bg = "rgba(155,140,255,.06)"
+		border = "rgba(155,140,255,.15)"
+		label = "SURVEILLANCE"
+	case "action":
+		color = "#f5a443"
+		bg = "rgba(245,164,67,.06)"
+		border = "rgba(245,164,67,.15)"
+		label = "ACTION NEEDED"
+	case "urgent":
+		color = "#ef5f6b"
+		bg = "rgba(239,95,107,.06)"
+		border = "rgba(239,95,107,.15)"
+		label = "URGENT"
+	}
+	return fmt.Sprintf(
+		`<div style="display:flex;align-items:center;gap:10px;padding:8px 20px;margin-bottom:16px;background:%s;border-bottom:1px solid %s">`+
+			`<span style="width:7px;height:7px;border-radius:50%%;background:%s;flex:none"></span>`+
+			`<span style="font:600 11px 'JetBrains Mono',monospace;color:%s;letter-spacing:.06em">%s</span>`+
+			`<span style="font:600 11px 'JetBrains Mono',monospace;color:#eef0f6">%s</span>`+
+			`<span style="font:500 11px 'JetBrains Mono',monospace;color:#6b7184">— %s</span>`+
+			`</div>`,
+		bg, border, color, color,
+		strings.ToUpper(label),
+		html.EscapeString(title),
+		html.EscapeString(summary),
+	)
+}
+
+// renderV2PriorityBadge returns a small inline priority badge.
+// level is one of: "no-action", "surveillance", "action-needed", "urgent".
+func renderV2PriorityBadge(level string) string {
+	color := "#6b7184"
+	bg := "rgba(255,255,255,.04)"
+	border := "rgba(255,255,255,.07)"
+	label := "NO ACTION"
+	anim := ""
+	switch level {
+	case "surveillance":
+		color = "#9b8cff"
+		bg = "rgba(155,140,255,.12)"
+		border = "rgba(155,140,255,.22)"
+		label = "SURVEILLANCE"
+	case "action-needed":
+		color = "#f5a443"
+		bg = "rgba(245,164,67,.12)"
+		border = "rgba(245,164,67,.22)"
+		label = "ACTION NEEDED"
+	case "urgent":
+		color = "#ef5f6b"
+		bg = "rgba(239,95,107,.12)"
+		border = "rgba(239,95,107,.22)"
+		label = "URGENT"
+		anim = `<style>@keyframes v2urgentPulse{0%%,100%%{opacity:1}50%%{opacity:.6}}</style>`
+	}
+	style := fmt.Sprintf(
+		"font:700 9px 'JetBrains Mono',monospace;letter-spacing:.07em;text-transform:uppercase;border-radius:5px;padding:2px 7px;color:%s;background:%s;border:1px solid %s",
+		color, bg, border,
+	)
+	if level == "urgent" {
+		style += ";animation:v2urgentPulse 1.2s ease-in-out infinite"
+	}
+	return fmt.Sprintf(`%s<span style="%s">%s</span>`, anim, style, label)
 }

@@ -393,6 +393,31 @@ func renderV2Dashboard(view DashboardConsoleView) string {
 		}
 	}
 
+	// Current Incident panel — visible only when activeThreats > 0
+	var incidentHTML string
+	if activeThreats > 0 {
+		topCountry := "unknown"
+		if len(threat.Countries) > 0 {
+			code := countryToCode(threat.Countries[0].Country)
+			if code != "" {
+				topCountry = code
+			} else {
+				topCountry = html.EscapeString(threat.Countries[0].Country)
+			}
+		}
+		incidentHTML = `<div class="v2-card" style="border-left:3px solid #f5a443">` +
+			`<div class="v2-card-header">` +
+			`<span class="v2-card-title" style="color:#f5a443">Current Incident</span>` +
+			`</div>` +
+			`<div class="v2-card-body" style="font:500 12px 'JetBrains Mono',monospace;color:#9aa0b2;display:flex;flex-direction:column;gap:6px">` +
+			fmt.Sprintf(`<div><span style="color:#6b7184">top origin · </span><span style="color:#f5a443;font-weight:700">%s</span></div>`, topCountry) +
+			fmt.Sprintf(`<div><span style="color:#6b7184">active origins · </span><span style="color:#eef0f6">%d</span></div>`, activeThreats) +
+			`<div><span style="color:#6b7184">duration · </span><span style="color:#eef0f6">ongoing</span></div>` +
+			`<div style="margin-top:4px;color:#c5cad8">Recommended action: <a href="/v2/timeline" style="color:#f5a443;text-decoration:none">Review timeline</a> → suppress or ban</div>` +
+			`</div>` +
+			`</div>`
+	}
+
 	content := `<style>
 .ds-stats-row{display:flex;gap:1px;background:#1a1e29;border-radius:10px;overflow:hidden;margin-bottom:20px}
 .ds-stat{flex:1;background:#10121a;padding:16px 18px;text-decoration:none;color:inherit;transition:background .12s}
@@ -417,7 +442,7 @@ func renderV2Dashboard(view DashboardConsoleView) string {
   <span class="v2-live-badge"><span class="v2-live-dot"></span>LIVE</span>
 </div>
 
-` + bannerHTML + `
+` + bannerHTML + incidentHTML + `
 <div class="ds-section">Current posture</div>
 <div class="ds-stats-row">
   <a href="/v2/health" class="ds-stat">
