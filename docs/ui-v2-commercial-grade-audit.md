@@ -205,3 +205,72 @@ The only addition needed is a lightweight `freshness.js` (~20 lines) to update r
 - Remove pinned notes section (or implement pinning)
 - Add page navigation to Ctrl+K palette
 - Add recent IPs from localStorage to palette quick-access
+
+---
+
+## Focused Audit: /v2/audit Page
+
+**Date:** 2026-06-28  
+**Source:** Issue #177
+
+### What was evaluated
+
+`internal/ui/v2_audit.go` — `renderV2AuditTrailPage()` and `handleV2AuditTrailPage()`.
+
+### Situation clarity (three-second comprehension)
+
+**Score: 5/10**
+
+The topbar shows the event count ("42 events"), a search form, and an "APPEND ONLY" badge. An operator can see how many events are logged, but cannot immediately tell:
+- When the most recent event occurred ("last event 2m ago")
+- Whether there was unusual activity recently ("12 ban decisions in last hour")
+- What the current filtered state is (searching for "q" gives no visual confirmation of what filter is active)
+
+**Gaps:**
+1. No freshness indicator in the topbar (no `data-ts` on last event timestamp)
+2. No activity rate KPI ("N events in last hour")
+3. When a search query is active, the topbar pill shows total count, not filtered count
+
+### Visual hierarchy
+
+**Score: 6/10**
+
+The 5-column grid (`timestamp · actor · action · target · result`) is legible. Action uses bold weight (`font:700`) which helps it stand out. Target uses purple (IP links visual), result uses pill (secondary).
+
+**Gaps:**
+1. Target column (`color:#9b8cff`) draws more visual attention than the action — in an audit trail, action should be the primary scan target
+2. Actor/source (`v2-pill`) looks like a count/tag, not a named entity — operators need to quickly see *who* acted
+
+### Clickable targets (cross-page flow)
+
+**Score: 4/10**
+
+The `target` field renders as plain escaped text, not as a link. For IP targets (`forensic_lookup`, `ban_decision`), there is no link to `/v2/investigate?ip=X`. This is a material gap for an operator following up on a decision in the audit trail.
+
+**Gap:** IP targets in audit rows should link to `/v2/investigate?ip={target}`.
+
+### Empty state
+
+**Score: 7/10**
+
+Empty state shows "No audit events yet" with 4 quick-action links (Timeline, Providers, Health, Investigate). Clear and actionable.
+
+**Minor gap:** The "Recent searches" action links to Investigate but is generically labelled; could say "Investigate a threat →".
+
+### Density
+
+**Score: 7/10**
+
+5-column grid with mono timestamps and pill badges is appropriate for an append-only log. Ellipsis overflow handles long values.
+
+**Gap:** No indication of total vs. visible count when > N entries exist (no "showing 50 of 1,234" footer or lazy-load indicator).
+
+### Summary of gaps
+
+| Gap | Priority | Effort |
+|---|---|---|
+| IP targets in audit rows not linked to /v2/investigate | P1 | Low |
+| No freshness/last-event indicator in topbar | P2 | Low |
+| No filtered-vs-total count clarity | P2 | Low |
+| Action column should be primary visual element | P3 | Low |
+| No activity rate KPI | P3 | Medium |
