@@ -73,3 +73,36 @@ This document records significant design decisions that are not obvious from the
 **Why**: Centralising the guard prevents drift. The CF CIDR ranges in the default registry mean that Cloudflare itself (edge IPs, health check IPs, etc.) cannot be reported or banned — a critical safety property since all origin traffic passes through Cloudflare.
 
 **Maintenance**: When Cloudflare publishes new CIDR ranges, the `trust.DefaultRegistry()` seed data must be updated. See `docs/architecture/TRUSTED_NETWORKS.md`.
+
+---
+
+## One Name Per Concept (Product Language ADR — v1.8.0+)
+
+**Decision**: Every user-facing concept has exactly one canonical name across the UI, documentation, and tests. Synonyms, legacy names, and version-flavoured terms ("Classic", "V1", "V2", "Old", "Forensic" as a page alias) are prohibited in any string visible to an operator.
+
+**Canonical glossary** (authoritative from v1.8.0):
+
+| Concept | Canonical name |
+|---|---|
+| IP investigation page | Investigate |
+| Chronological event stream | Timeline |
+| Per-IP campaign view | Focus Incident |
+| Enrichment data for an IP | IP Enrichment |
+| Raw recorded events (business concept) | Evidence |
+| Observed security activity | Activity |
+| Platform health dashboard | Health |
+| Cloudflare projected state | Cloudflare Overview |
+| Live diff vs Cloudflare API | Cloudflare Rule Diff |
+| Operator annotations | Operator Notes |
+
+**Why**: Labels are product contracts. When two names exist for the same thing ("Forensic" / "Investigate", "Evidence" / "Activity", "Classic" / "Rule Diff"), operators build a mental model on ambiguous ground. Renaming after that is harder than getting it right at the start of a release. The v1.7.9 migration was the right moment to lock this down.
+
+**Enforcement — Product Language Review**: Before merging any UI milestone, a Product Language Review must pass:
+
+- same term for the same concept everywhere (UI, docs, Playwright tests);
+- no competing synonyms in operator-visible strings;
+- no references to retired features or pages;
+- no "legacy", "classic", "old", "new", "v1", "v2" visible to the operator;
+- same terminology in the UI, documentation, and test assertions.
+
+**Alternatives rejected**: Keeping multiple informal names ("Forensic" as shorthand in card titles while the nav says "Investigate") — rejected because informal shortcuts propagate into documentation, copy-paste suggestions, and eventually operator speech. One name is the only durable choice.

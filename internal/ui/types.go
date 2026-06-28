@@ -32,14 +32,6 @@ type CFSyncView struct {
 	RuleInventory cfRuleInventory
 }
 
-type ProviderView struct {
-	Name       string
-	Enabled    bool
-	Configured bool
-	MaskedKey  string
-	Status     string
-}
-
 type ProviderHealth struct {
 	Name            string
 	Enabled         bool
@@ -369,11 +361,6 @@ type RuntimeStatusView struct {
 	OpenResty  string
 	Cloudflare string
 	UI         string
-}
-
-type DashboardView struct {
-	Runtime   RuntimeStatusView
-	Providers []ProviderView
 }
 
 type PipelineSuppressionBreakdown struct {

@@ -51,11 +51,11 @@ func TestUIFreshInstallWizardAndConservativeRestart(t *testing.T) {
 		},
 	}
 	session := loginAndGetSessionCookie(t, client, "http://"+cfg.UI.Addr, testAdminPass)
-	dashboardBody := getBodyWithCookie(t, client, "http://"+cfg.UI.Addr+"/", session)
-	if !strings.Contains(dashboardBody, "encrypted SQLite credential store") {
-		t.Fatalf("dashboard should mention encrypted SQLite credential store: %s", dashboardBody)
+	dashboardBody := getBodyWithCookie(t, client, "http://"+cfg.UI.Addr+"/v2/", session)
+	if !strings.Contains(dashboardBody, "v2-sidebar") {
+		t.Fatalf("dashboard should render the v2 shell: %s", dashboardBody)
 	}
-	healthBody := getBodyWithCookie(t, client, "http://"+cfg.UI.Addr+"/health", session)
+	healthBody := getBodyWithCookie(t, client, "http://"+cfg.UI.Addr+"/v2/health", session)
 	if strings.Contains(healthBody, "state.db") {
 		t.Fatalf("health center must not mention state.db: %s", healthBody)
 	}

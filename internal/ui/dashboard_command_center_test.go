@@ -76,29 +76,29 @@ func stringSliceContains(items []string, want string) bool {
 
 func TestDashboardSearchRoutesIPToForensic(t *testing.T) {
 	got := dashboardSearchTarget("203.0.113.10")
-	if got != "/forensic?ip=203.0.113.10" {
-		t.Fatalf("IP search target: want forensic route, got %q", got)
+	if got != "/v2/investigate?ip=203.0.113.10" {
+		t.Fatalf("IP search target: want v2 investigate route, got %q", got)
 	}
 }
 
 func TestDashboardSearchRoutesEvidenceIDToEvidenceDetail(t *testing.T) {
 	got := dashboardSearchTarget("ev-abc123")
-	if got != "/evidence/ev-abc123" {
-		t.Fatalf("evidence search target: want evidence detail, got %q", got)
+	if got != "/v2/timeline?q=ev-abc123" {
+		t.Fatalf("evidence search target: want v2 timeline route, got %q", got)
 	}
 }
 
 func TestDashboardSearchRoutesProviderKeywordToProviders(t *testing.T) {
 	got := dashboardSearchTarget("cloudflare")
-	if got != "/providers?q=cloudflare" {
-		t.Fatalf("provider search target: want providers route, got %q", got)
+	if got != "/v2/providers?q=cloudflare" {
+		t.Fatalf("provider search target: want v2 providers route, got %q", got)
 	}
 }
 
 func TestDashboardSearchRoutesGeneralKeywordToTimeline(t *testing.T) {
 	got := dashboardSearchTarget("wordpress probe")
-	if got != "/timeline?q=wordpress+probe" {
-		t.Fatalf("general search target: want timeline route, got %q", got)
+	if got != "/v2/timeline?q=wordpress+probe" {
+		t.Fatalf("general search target: want v2 timeline route, got %q", got)
 	}
 }
 
@@ -130,22 +130,30 @@ func TestDashboardTimeWindowFiltersEvidenceMetrics(t *testing.T) {
 			{EvidenceID: "old", Source: "cloudflare_waf", AbuseIPDBReported: true, Timestamp: now.Add(-48 * time.Hour)},
 		},
 	}
-	cookie := loginCookie(t, srv, "test-password-123!@#")
-	req := httptest.NewRequest(http.MethodGet, "/?window=1h", nil)
-	req.AddCookie(cookie)
-	rr := httptest.NewRecorder()
 
-	srv.Handler().ServeHTTP(rr, req)
+	// Test via the view model directly — the windowed KPI scoping is in
+	// dashboardConsoleViewForWindow, not in the rendering layer.
+	view1h := srv.dashboardConsoleViewForWindow(context.Background(), "1h")
+	view24h := srv.dashboardConsoleViewForWindow(context.Background(), "24h")
 
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	var kpi1h, kpi24h DashboardKPIView
+	for _, kpi := range view1h.CommandCenter.KPIs {
+		if kpi.Label == "AbuseIPDB reports" {
+			kpi1h = kpi
+		}
 	}
-	body := rr.Body.String()
-	if !strings.Contains(body, `aria-current="true">1h`) {
-		t.Fatalf("dashboard should mark 1h time window active: %s", body)
+	for _, kpi := range view24h.CommandCenter.KPIs {
+		if kpi.Label == "AbuseIPDB reports" {
+			kpi24h = kpi
+		}
 	}
-	if !strings.Contains(body, `<strong>1</strong><small>windowed evidence-backed</small>`) {
-		t.Fatalf("dashboard should scope evidence-backed metrics to the selected window: %s", body)
+
+	if kpi1h.Value != "1" {
+		t.Fatalf("1h window: expected 1 windowed report, got %q", kpi1h.Value)
+	}
+	// old is -48h, outside the 24h window; only recent (-30min) is in scope.
+	if kpi24h.Value != "1" {
+		t.Fatalf("24h window: expected 1 windowed report (old is -48h, outside window), got %q", kpi24h.Value)
 	}
 }
 
@@ -245,7 +253,7 @@ func TestDashboardSearchEndpointRedirectsToForensicForIP(t *testing.T) {
 	if rr.Code != http.StatusSeeOther {
 		t.Fatalf("expected 303 redirect, got %d: %s", rr.Code, rr.Body.String())
 	}
-	if got := rr.Header().Get("Location"); got != "/forensic?ip=203.0.113.10" {
+	if got := rr.Header().Get("Location"); got != "/v2/investigate?ip=203.0.113.10" {
 		t.Fatalf("Location: got %q", got)
 	}
 }
@@ -262,7 +270,7 @@ func TestDashboardSearchEndpointRedirectsBlankToTimeline(t *testing.T) {
 	if rr.Code != http.StatusSeeOther {
 		t.Fatalf("expected 303 redirect, got %d: %s", rr.Code, rr.Body.String())
 	}
-	if got := rr.Header().Get("Location"); got != "/timeline" {
+	if got := rr.Header().Get("Location"); got != "/v2/timeline" {
 		t.Fatalf("Location: got %q", got)
 	}
 }

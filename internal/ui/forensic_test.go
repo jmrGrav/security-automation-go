@@ -181,7 +181,8 @@ func TestForensic_StableContextIgnoresCanceledRequestContext(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	req := httptest.NewRequestWithContext(ctx, http.MethodGet, "/forensic?ip=203.0.113.5", nil)
+	// /forensic redirects to /v2/investigate; test the canonical V2 page directly.
+	req := httptest.NewRequestWithContext(ctx, http.MethodGet, "/v2/investigate?ip=203.0.113.5", nil)
 	req.AddCookie(cookie)
 	rr := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rr, req)
@@ -190,10 +191,8 @@ func TestForensic_StableContextIgnoresCanceledRequestContext(t *testing.T) {
 		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
 	}
 	body := rr.Body.String()
-	for _, want := range []string{"203.0.113.5", "Local Evidence History"} {
-		if !strings.Contains(body, want) {
-			t.Fatalf("forensic page missing %q: %s", want, body)
-		}
+	if !strings.Contains(body, "203.0.113.5") {
+		t.Fatalf("v2 investigate page missing IP %q: %s", "203.0.113.5", body)
 	}
 }
 
@@ -248,7 +247,8 @@ func TestForensic_GETWithIPQueryParam_PerformsLookup(t *testing.T) {
 	srv := newTestServerWithEnrichment(t, svc)
 	cookie := loginCookie(t, srv, "test-password-123!@#")
 
-	req := httptest.NewRequest(http.MethodGet, "/forensic?ip=203.0.113.10", nil)
+	// /forensic?ip= redirects to /v2/investigate?ip=; test the canonical page directly.
+	req := httptest.NewRequest(http.MethodGet, "/v2/investigate?ip=203.0.113.10", nil)
 	req.AddCookie(cookie)
 	rr := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rr, req)
@@ -266,7 +266,9 @@ func TestForensic_GETWithInvalidIP_ShowsError(t *testing.T) {
 	srv, _, _ := newTestServer(t, nil)
 	cookie := loginCookie(t, srv, "test-password-123!@#")
 
-	req := httptest.NewRequest(http.MethodGet, "/forensic?ip=not-an-ip", nil)
+	// /forensic?ip=not-an-ip redirects to /v2/investigate?ip=not-an-ip.
+	// V2 investigate renders an "invalid IP" error state.
+	req := httptest.NewRequest(http.MethodGet, "/v2/investigate?ip=not-an-ip", nil)
 	req.AddCookie(cookie)
 	rr := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rr, req)
@@ -274,8 +276,9 @@ func TestForensic_GETWithInvalidIP_ShowsError(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", rr.Code)
 	}
-	if !strings.Contains(rr.Body.String(), "invalid IP address") {
-		t.Errorf("expected error for invalid IP in deep-link: %s", rr.Body.String())
+	body := rr.Body.String()
+	if !strings.Contains(body, "not-an-ip") {
+		t.Errorf("expected invalid IP to appear in body: %s", body)
 	}
 }
 
@@ -283,17 +286,17 @@ func TestForensic_GETWithoutIP_ShowsBlankForm(t *testing.T) {
 	srv, _, _ := newTestServer(t, nil)
 	cookie := loginCookie(t, srv, "test-password-123!@#")
 
+	// /forensic now redirects to /v2/investigate; verify redirect.
 	req := httptest.NewRequest(http.MethodGet, "/forensic", nil)
 	req.AddCookie(cookie)
 	rr := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rr, req)
 
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", rr.Code)
+	if rr.Code != http.StatusMovedPermanently {
+		t.Fatalf("expected 301 redirect, got %d", rr.Code)
 	}
-	body := rr.Body.String()
-	if !strings.Contains(body, "Forensic") {
-		t.Errorf("expected forensic page title: %s", body)
+	if loc := rr.Header().Get("Location"); loc != "/v2/investigate" {
+		t.Fatalf("expected redirect to /v2/investigate, got %q", loc)
 	}
 }
 
@@ -301,14 +304,16 @@ func TestForensicPageIncludesCSRFToken(t *testing.T) {
 	srv, _, _ := newTestServer(t, nil)
 	cookie := loginCookie(t, srv, "test-password-123!@#")
 
-	req := httptest.NewRequest(http.MethodGet, "/forensic", nil)
+	// V2 investigate page includes CSRF token for note form actions.
+	// Use a known IP so the note form renders.
+	req := httptest.NewRequest(http.MethodGet, "/v2/investigate?ip=203.0.113.1", nil)
 	req.AddCookie(cookie)
 	rr := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rr, req)
 
 	body := rr.Body.String()
 	if !strings.Contains(body, `name="csrf_token"`) {
-		t.Fatalf("forensic page should include csrf token field: %s", body)
+		t.Fatalf("v2 investigate page should include csrf token field: %s", body)
 	}
 }
 

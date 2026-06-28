@@ -8,18 +8,18 @@ test.describe('Cloudflare Diff', () => {
   });
 
   test('GET /cloudflare/diff returns 200', async ({ page }) => {
-    const response = await page.goto('/cloudflare/diff');
+    const response = await page.goto('/v2/cloudflare');
     expect(response?.status()).toBe(200);
   });
 
   test('Cloudflare Diff does not leak tokens', async ({ page }) => {
-    await page.goto('/cloudflare/diff');
+    await page.goto('/v2/cloudflare');
     const body = await page.content();
     assertNoSecretLeakage(body, '/cloudflare/diff');
   });
 
   test('Operator Summary panel is present', async ({ page }) => {
-    await page.goto('/cloudflare/diff');
+    await page.goto('/v2/cloudflare');
     const body = await page.content();
     // The Operator Summary panel was added in v1.6.0.
     // It must show YES/NO/DRY-RUN — not a blank or error state.
@@ -28,7 +28,7 @@ test.describe('Cloudflare Diff', () => {
 
   test('Cloudflare Diff coherence: if health says configured, diff must not say token missing', async ({ page }) => {
     // Get health JSON first.
-    await page.goto('/health/json');
+    await page.goto('/v2/health/json');
     const healthText = await page.evaluate(() => document.body.innerText);
     let healthConfigured = false;
     try {
@@ -41,7 +41,7 @@ test.describe('Cloudflare Diff', () => {
     }
 
     if (healthConfigured) {
-      await page.goto('/cloudflare/diff');
+      await page.goto('/v2/cloudflare');
       const body = await page.content();
       // If health says CF is configured, diff page must not contradict that.
       expect(body, 'Cloudflare Diff must not say "token missing" when health reports configured')

@@ -14,6 +14,7 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"net/url"
 	"os"
 	"sort"
 	"strconv"
@@ -431,9 +432,7 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
-	ctx, cancel := stableUIReadContext(r.Context())
-	defer cancel()
-	_ = DashboardConsolePage(s.dashboardConsoleViewForWindow(ctx, r.URL.Query().Get("window"))).Render(ctx, w)
+	http.Redirect(w, r, "/v2/", http.StatusMovedPermanently)
 }
 
 func (s *Server) handleDashboardSearch(w http.ResponseWriter, r *http.Request) {
@@ -442,8 +441,7 @@ func (s *Server) handleDashboardSearch(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleProviders(w http.ResponseWriter, r *http.Request) {
-	view, _ := s.unifiedProvidersView()
-	_ = UnifiedProvidersPage(view, s.csrfTokenFromRequest(r)).Render(r.Context(), w)
+	http.Redirect(w, r, "/v2/providers", http.StatusMovedPermanently)
 }
 
 func (s *Server) handleAboutPage(w http.ResponseWriter, r *http.Request) {
@@ -451,40 +449,22 @@ func (s *Server) handleAboutPage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAuditTrailPage(w http.ResponseWriter, r *http.Request) {
-	ctx, cancel := stableUIReadContext(r.Context())
-	defer cancel()
-	eventID := newUIEventID()
-	defer s.audit.Record("audit_view", map[string]string{
-		"actor":          "local",
-		"source":         "ui",
-		"target":         "audit",
-		"result":         "read-only",
-		"correlation_id": eventID,
-		"event_id":       eventID,
-	})
-	_ = AuditTrailPage(s.auditTrailView(r.URL.Query().Get("q"), r.URL.RequestURI()), s.csrfTokenFromRequest(r)).Render(ctx, w)
+	http.Redirect(w, r, "/v2/audit", http.StatusMovedPermanently)
 }
 
 func (s *Server) handleTimelinePage(w http.ResponseWriter, r *http.Request) {
-	ctx, cancel := stableUIReadContext(r.Context())
-	defer cancel()
-	eventID := newUIEventID()
-	defer s.audit.Record("timeline_view", map[string]string{
-		"actor":          "local",
-		"source":         "ui",
-		"target":         "timeline",
-		"result":         "read-only",
-		"correlation_id": eventID,
-		"event_id":       eventID,
-	})
-	view := s.timelineView(r)
-	switch strings.ToLower(strings.TrimSpace(r.URL.Query().Get("format"))) {
-	case "json":
-		renderTimelineJSON(w, view)
-	case "csv":
-		renderTimelineCSV(w, view)
+	// Preserve ?format=json and ?format=csv export paths; redirect UI requests to V2.
+	format := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("format")))
+	switch format {
+	case "json", "csv":
+		view := s.timelineView(r)
+		if format == "json" {
+			renderTimelineJSON(w, view)
+		} else {
+			renderTimelineCSV(w, view)
+		}
 	default:
-		_ = TimelinePage(view, s.csrfTokenFromRequest(r)).Render(ctx, w)
+		http.Redirect(w, r, "/v2/timeline", http.StatusMovedPermanently)
 	}
 }
 
@@ -726,41 +706,16 @@ func (s *Server) handleProvidersLiveScript(w http.ResponseWriter, r *http.Reques
 }
 
 func (s *Server) handleForensicPage(w http.ResponseWriter, r *http.Request) {
-	ctx, cancel := stableUIReadContext(r.Context())
-	defer cancel()
+	// Redirect to V2 investigate; preserve ?ip= query param.
 	if ipStr := strings.TrimSpace(r.URL.Query().Get("ip")); ipStr != "" {
-		// Deep-link: /forensic?ip=X performs the lookup inline.
-		ip, err := netip.ParseAddr(ipStr)
-		if err != nil || !ip.IsValid() {
-			renderForensicPage(ctx, w, ForensicView{IP: ipStr, Error: "invalid IP address"}, s.csrfTokenFromRequest(r))
-			return
-		}
-		view := ForensicView{IP: ipStr}
-		if svc := s.securityIntelligenceService(); svc != nil {
-			summary, err := svc.Enrich(ctx, ip, enrichment.LookupOptions{ManualForensics: true})
-			if err == nil {
-				view.Summary = summary
-				view.Assess = svc.Assess(summary)
-				view.HasEnrichment = true
-			} else {
-				view.EnrichmentError = fmt.Sprintf("enrichment failed: %v", err)
-			}
-		}
-		if s.evidence != nil {
-			local, err := s.evidence.Search(ctx, reporting.EvidenceSearchOptions{IP: ipStr, Limit: 20})
-			if err == nil {
-				view.LocalEvidence = local
-			}
-		}
-		if s.noteStore != nil {
-			existing, _, _ := s.noteStore.Get(ctx, "ip", ipStr)
-			view.NoteFormHTML = NoteFormHTML("ip", ipStr, existing.Content)
-		}
-		view.HasData = view.HasEnrichment || len(view.LocalEvidence) > 0
-		renderForensicPage(ctx, w, view, s.csrfTokenFromRequest(r))
+		http.Redirect(w, r, "/v2/investigate?ip="+url.QueryEscape(ipStr), http.StatusMovedPermanently)
 		return
 	}
-	renderForensicPage(ctx, w, ForensicView{}, s.csrfTokenFromRequest(r))
+	if q := strings.TrimSpace(r.URL.Query().Get("q")); q != "" {
+		http.Redirect(w, r, "/v2/investigate?ip="+url.QueryEscape(q), http.StatusMovedPermanently)
+		return
+	}
+	http.Redirect(w, r, "/v2/investigate", http.StatusMovedPermanently)
 }
 
 func (s *Server) handleForensicLookup(w http.ResponseWriter, r *http.Request) {
@@ -1152,10 +1107,10 @@ func (s *Server) dashboardConsoleViewForWindow(ctx context.Context, rawWindow st
 		Activity: activity,
 		Threat:   threats,
 		KPIs: []DashboardKPIView{
-			{Label: "Health", Value: fmt.Sprintf("%d%%", healthScore.Score), Detail: "derived platform score", Href: "/health", Level: healthScore.Level},
-			{Label: "AbuseIPDB reports", Value: strconv.Itoa(reportedWindowTotal), Detail: "windowed evidence-backed", Href: "/evidence?filter=reported", Level: "live"},
-			{Label: "Providers", Value: strconv.Itoa(len(providers) + len(nonAIProviders)), Detail: "configured provider boundaries", Href: "/providers", Level: "healthy"},
-			{Label: "Recent activity", Value: strconv.Itoa(len(activity.Items)), Detail: "bounded live feed", Href: "/timeline", Level: "live"},
+			{Label: "Health", Value: fmt.Sprintf("%d%%", healthScore.Score), Detail: "derived platform score", Href: "/v2/health", Level: healthScore.Level},
+			{Label: "AbuseIPDB reports", Value: strconv.Itoa(reportedWindowTotal), Detail: "windowed evidence-backed", Href: "/v2/timeline?q=reported", Level: "live"},
+			{Label: "Providers", Value: strconv.Itoa(len(providers) + len(nonAIProviders)), Detail: "configured provider boundaries", Href: "/v2/providers", Level: "healthy"},
+			{Label: "Recent activity", Value: strconv.Itoa(len(activity.Items)), Detail: "bounded live feed", Href: "/v2/timeline", Level: "live"},
 		},
 		Freshness: freshness,
 	}

@@ -101,13 +101,14 @@ func TestSmoke_AuthenticatedDashboardReachable(t *testing.T) {
 	srv, _, _ := newTestServer(t, nil)
 	cookie := loginCookie(t, srv, "test-password-123!@#")
 
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	// GET / now redirects to /v2/ (301); check the V2 dashboard directly.
+	req := httptest.NewRequest(http.MethodGet, "/v2/", nil)
 	req.AddCookie(cookie)
 	rr := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rr, req)
 
 	if rr.Code != http.StatusOK {
-		t.Fatalf("authenticated GET /: expected 200, got %d", rr.Code)
+		t.Fatalf("authenticated GET /v2/: expected 200, got %d", rr.Code)
 	}
 }
 

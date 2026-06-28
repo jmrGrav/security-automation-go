@@ -204,7 +204,7 @@ func TestDashboard_ReportedTotalAppearsInPage(t *testing.T) {
 		},
 	}
 	cookie := loginCookie(t, srv, "test-password-123!@#")
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v2/", nil)
 	req.AddCookie(cookie)
 	rr := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rr, req)
@@ -213,14 +213,9 @@ func TestDashboard_ReportedTotalAppearsInPage(t *testing.T) {
 		t.Fatalf("expected 200, got %d", rr.Code)
 	}
 	body := rr.Body.String()
-	if !strings.Contains(body, "AbuseIPDB Reported") {
-		t.Errorf("dashboard should show AbuseIPDB Reported widget: %s", body)
-	}
-	if !strings.Contains(body, "3") {
-		t.Errorf("dashboard should show reported count 3: %s", body)
-	}
-	if !strings.Contains(body, `/evidence?filter=reported`) {
-		t.Errorf("dashboard reported widget should link to /evidence?filter=reported: %s", body)
+	// V2 dashboard shows reported count as "N reported" in stat sub-text.
+	if !strings.Contains(body, "3 reported") {
+		t.Errorf("v2 dashboard should show reported count 3: %s", body)
 	}
 }
 

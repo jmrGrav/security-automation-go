@@ -83,15 +83,12 @@ func (s *Server) buildIncidentView(ctx context.Context, ip string) IncidentView 
 }
 
 func (s *Server) handleIncidentPage(w http.ResponseWriter, r *http.Request) {
-	ctx, cancel := stableUIReadContext(r.Context())
-	defer cancel()
-	ip := strings.TrimSpace(r.URL.Query().Get("ip"))
-	if ip == "" {
-		http.Error(w, "ip parameter required", http.StatusBadRequest)
+	// Redirect to V2 incident page; preserve ?ip= query param.
+	if ip := strings.TrimSpace(r.URL.Query().Get("ip")); ip != "" {
+		http.Redirect(w, r, "/v2/incident?ip="+url.QueryEscape(ip), http.StatusMovedPermanently)
 		return
 	}
-	view := s.buildIncidentView(ctx, ip)
-	_ = IncidentPage(view).Render(ctx, w)
+	http.Redirect(w, r, "/v2/incident", http.StatusMovedPermanently)
 }
 
 // IncidentPage renders the read-only Focus Incident aggregation page.

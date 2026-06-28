@@ -8,7 +8,7 @@ test.describe('Health Center', () => {
   });
 
   test('GET /health returns 200 and renders a health page', async ({ page }) => {
-    const response = await page.goto('/health');
+    const response = await page.goto('/v2/health');
     expect(response?.status()).toBe(200);
     const body = await page.content();
     assertNoSecretLeakage(body, '/health');
@@ -16,7 +16,7 @@ test.describe('Health Center', () => {
   });
 
   test('GET /health/json returns valid JSON', async ({ page }) => {
-    const response = await page.goto('/health/json');
+    const response = await page.goto('/v2/health/json');
     expect(response?.status()).toBe(200);
     const body = await response!.text();
     // Must be parseable JSON.
@@ -28,13 +28,13 @@ test.describe('Health Center', () => {
   });
 
   test('health page does not leak any API token or key', async ({ page }) => {
-    await page.goto('/health');
+    await page.goto('/v2/health');
     const body = await page.content();
     assertNoSecretLeakage(body, '/health');
   });
 
   test('health shows Cloudflare status — not contradicted by Dashboard', async ({ page }) => {
-    const healthResp = await page.goto('/health/json').then(r => r?.text());
+    const healthResp = await page.goto('/v2/health/json').then(r => r?.text());
     const dashboardResp = await page.goto('/').then(() => page.content());
 
     const health = JSON.parse(healthResp ?? '{}');

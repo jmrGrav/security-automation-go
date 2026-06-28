@@ -117,7 +117,7 @@ test.describe('Runtime integrity', () => {
   test.beforeEach(async ({ page }) => {
     await login(page);
     if (!healthData) {
-      await page.goto('/health/json');
+      await page.goto('/v2/health/json');
       const text = (await page.evaluate(() => document.body.innerText)).trim();
       try {
         healthData = JSON.parse(text);
@@ -297,7 +297,7 @@ test.describe('Runtime integrity', () => {
     const healthSaysMissing = cfCheck?.status === 'RED' &&
       (cfCheck.reason.toLowerCase().includes('not configured'));
 
-    await page.goto('/cloudflare/diff');
+    await page.goto('/v2/cloudflare');
     const body = await page.content();
 
     if (!dbHasToken && healthSaysMissing) {
@@ -326,7 +326,7 @@ test.describe('Runtime integrity', () => {
       return;
     }
 
-    await page.goto('/providers');
+    await page.goto('/v2/providers');
     const body = await page.content();
 
     // For each provider that is absent from the DB, the providers page must not

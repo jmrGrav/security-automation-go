@@ -56,7 +56,7 @@ test.describe('Authenticated pages render without error', () => {
     // storageState; an empty state is required to guarantee no session cookie is sent.
     const freshCtx = await browser.newContext({ storageState: { cookies: [], origins: [] } });
     const page = await freshCtx.newPage();
-    await page.goto('/health');
+    await page.goto('/v2/health');
     expect(page.url()).toContain('/login');
     await freshCtx.close();
   });
