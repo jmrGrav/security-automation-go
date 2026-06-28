@@ -106,7 +106,8 @@ a{color:inherit}
 .v2-sb-toggle{display:grid;place-items:center;width:24px;height:24px;border-radius:7px;border:none;background:none;color:#6b7184;font:600 14px 'Hanken Grotesk',sans-serif;cursor:pointer;flex:none;transition:background .12s,color .12s}
 .v2-sb-toggle:hover{background:#1a1e29;color:#c5cad8}
 .v2-sidebar.v2-sb-collapsed .v2-sb-meta{opacity:0;width:0}
-.v2-sidebar.v2-sb-collapsed .v2-sb-toggle{margin:0 auto}
+.v2-sidebar.v2-sb-collapsed .v2-sb-brand{justify-content:center;gap:8px;padding-inline:0}
+.v2-sidebar.v2-sb-collapsed .v2-sb-toggle{margin:0}
 
 /* Search */
 .v2-sb-search{margin:12px 12px 8px;flex-shrink:0;transition:opacity .15s}
@@ -137,8 +138,11 @@ a{color:inherit}
 .v2-sb-signout-core{position:absolute;inset:0;border-radius:50%;background:#ef5f6b;box-shadow:0 0 8px rgba(239,95,107,.8)}
 .v2-sb-signout-text{flex:1;font:600 12.5px 'Hanken Grotesk',sans-serif;color:#d3d7e2;text-align:left;white-space:nowrap;overflow:hidden;transition:opacity .15s}
 .v2-sb-signout-esc{font:600 11px 'JetBrains Mono',monospace;color:#6b7184;white-space:nowrap;transition:opacity .15s}
+.v2-sb-signout-icon{display:none;align-items:center;justify-content:center;color:#ef5f6b;flex:none}
 .v2-sidebar.v2-sb-collapsed .v2-sb-signout{justify-content:center}
 .v2-sidebar.v2-sb-collapsed .v2-sb-signout-text,.v2-sidebar.v2-sb-collapsed .v2-sb-signout-esc{opacity:0;width:0;pointer-events:none}
+.v2-sidebar.v2-sb-collapsed .v2-sb-signout-dot{display:none}
+.v2-sidebar.v2-sb-collapsed .v2-sb-signout-icon{display:flex}
 
 /* ── Main area ── */
 .v2-main{flex:1;min-width:0;overflow-y:auto;padding:22px 32px 32px;scrollbar-width:thin;scrollbar-color:#242838 transparent;position:relative}
@@ -255,7 +259,7 @@ body{display:block}
       <div class="v2-sb-version">` + html.EscapeString(version) + `</div>
       <div class="v2-sb-build">sag.arleo.eu · build ` + html.EscapeString(commit) + `</div>
     </div>
-    <button class="v2-sb-toggle" id="v2-sb-toggle" onclick="window.v2SidebarToggle()" title="Toggle sidebar">‹</button>
+    <button class="v2-sb-toggle" id="v2-sb-toggle" title="Toggle sidebar">‹</button>
   </div>
 
   <!-- Search -->
@@ -279,6 +283,7 @@ body{display:block}
           <span class="v2-sb-signout-halo"></span>
           <span class="v2-sb-signout-core"></span>
         </span>
+        <span class="v2-sb-signout-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/></svg></span>
         <span class="v2-sb-signout-text">Sign out</span>
         <span class="v2-sb-signout-esc">⎋</span>
       </button>

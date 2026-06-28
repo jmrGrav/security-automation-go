@@ -271,8 +271,8 @@ func securityHeaders(next http.Handler) http.Handler {
 		h.Set("X-Content-Type-Options", "nosniff")
 		h.Set("X-Frame-Options", "DENY")
 		h.Set("Referrer-Policy", "no-referrer")
-		// v2 routes load Google Fonts — extend CSP only for those paths.
-		if strings.HasPrefix(r.URL.Path, "/v2/") {
+		// v2 routes and /trusted-networks load Google Fonts — extend CSP for those paths.
+		if strings.HasPrefix(r.URL.Path, "/v2/") || strings.HasPrefix(r.URL.Path, "/trusted-networks") {
 			h.Set("Content-Security-Policy",
 				"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:")
 		} else {
@@ -362,6 +362,10 @@ func (s *Server) routes() {
 	s.mux.Handle("GET /v2/notes", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandlerV2(s.handleV2NotesPage)))))
 	s.mux.Handle("GET /v2/audit", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandlerV2(s.handleV2AuditTrailPage)))))
 	s.mux.Handle("GET /v2/cloudflare", s.setupGuardMiddleware(s.forcePasswordChangeMiddleware(http.HandlerFunc(s.requireAuthHandlerV2(s.handleV2CloudflarePage)))))
+	// /v2/trusted-networks is not a distinct v2 page; redirect to the v1 route.
+	s.mux.HandleFunc("GET /v2/trusted-networks", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/trusted-networks", http.StatusFound)
+	})
 }
 
 func (s *Server) handleLoginPage(w http.ResponseWriter, r *http.Request) {

@@ -9,7 +9,7 @@ import (
 )
 
 func TestRenderV2NotesPageEmpty(t *testing.T) {
-	got := renderV2NotesPage(nil)
+	got := renderV2NotesPage(nil, "test-token")
 
 	for _, want := range []string{
 		"No notes.",
@@ -46,7 +46,7 @@ func TestRenderV2NotesPageWithNotes(t *testing.T) {
 		}
 	}
 
-	got := renderV2NotesPage(notes)
+	got := renderV2NotesPage(notes, "test-token")
 
 	// "View all N notes" link must appear when notes > 6
 	if !strings.Contains(got, "View all 10 notes") {

@@ -21,11 +21,12 @@ func (s *Server) handleV2NotesPage(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	csrfToken := s.csrfTokenFromRequest(r)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_, _ = fmt.Fprint(w, v2Page("Operator Notes", "/v2/notes", renderV2NotesPage(notes)))
+	_, _ = fmt.Fprint(w, v2Page("Operator Notes", "/v2/notes", renderV2NotesPage(notes, csrfToken)))
 }
 
-func renderV2NotesPage(notes []sqlite.Note) string {
+func renderV2NotesPage(notes []sqlite.Note, csrfToken string) string {
 	var sb strings.Builder
 	sb.WriteString(`<style>
 .v2-notes-grid{display:grid;grid-template-columns:1.2fr .8fr;gap:16px}
@@ -65,7 +66,7 @@ func renderV2NotesPage(notes []sqlite.Note) string {
 	sb.WriteString(`</div></div>`)
 	sb.WriteString(`<div style="display:flex;flex-direction:column;gap:16px">`)
 	// Quick create form — visible type selector replacing the hardcoded hidden input
-	sb.WriteString(`<div class="v2-card"><div class="v2-card-header"><span class="v2-card-title">Quick create</span></div><div class="v2-card-body"><form method="post" action="/notes" style="display:grid;gap:9px"><select class="v2-field" name="type" style="width:auto;cursor:pointer"><option value="ip">IP address</option><option value="asn">ASN</option><option value="domain">Domain</option><option value="other">Other</option></select><input class="v2-field" name="value" placeholder="IP, ASN, provider, evidence id"><textarea class="v2-field" name="content" rows="4" placeholder="Operator note..."></textarea><button type="submit" style="padding:8px 12px;background:#7c6cf2;border:none;border-radius:8px;color:#fff;font:700 12px 'Hanken Grotesk',sans-serif;cursor:pointer">Save note</button><p style="font:500 11px 'JetBrains Mono',monospace;color:#5a6072;margin-top:6px">Ctrl+K to search existing notes</p></form></div></div>`)
+	sb.WriteString(`<div class="v2-card"><div class="v2-card-header"><span class="v2-card-title">Quick create</span></div><div class="v2-card-body"><form method="post" action="/notes" style="display:grid;gap:9px"><input type="hidden" name="csrf_token" value="` + html.EscapeString(csrfToken) + `"><select class="v2-field" name="type" style="width:auto;cursor:pointer"><option value="ip">IP address</option><option value="asn">ASN</option><option value="domain">Domain</option><option value="other">Other</option></select><input class="v2-field" name="value" placeholder="IP, ASN, provider, evidence id"><textarea class="v2-field" name="content" rows="4" placeholder="Operator note..."></textarea><button type="submit" style="padding:8px 12px;background:#7c6cf2;border:none;border-radius:8px;color:#fff;font:700 12px 'Hanken Grotesk',sans-serif;cursor:pointer">Save note</button><p style="font:500 11px 'JetBrains Mono',monospace;color:#5a6072;margin-top:6px">Ctrl+K to search existing notes</p></form></div></div>`)
 	// Entities recently annotated sidebar
 	sb.WriteString(`<div class="v2-card"><div class="v2-card-header"><span class="v2-card-title">Entities recently annotated</span></div><div class="v2-card-body">`)
 	if len(notes) == 0 {
